@@ -1,57 +1,147 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
 import { colors } from '../../theme/colors';
-import { Schedule } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import { GymClass } from '../../types';
 
-// MOCK — reemplazar por GET /schedules?date=...
-const initialSchedules: Schedule[] = [
-  { id: 1, gymClass: { id: 1, name: 'Boxeo' }, startTime: '2026-07-27T18:00:00', capacity: 10, bookedCount: 8, status: 'open' },
-  { id: 2, gymClass: { id: 2, name: 'Cross' }, startTime: '2026-07-27T19:00:00', capacity: 12, bookedCount: 12, status: 'open' },
-  { id: 3, gymClass: { id: 3, name: 'Funcional' }, startTime: '2026-07-27T20:00:00', capacity: 8, bookedCount: 3, status: 'open' },
-];
+// bookedCount/isBooked no viven en `classes` — se calculan del lado del cliente
+// contando y filtrando la tabla `bookings` para el rango del día.
+type ClassWithBookings = GymClass & { bookedCount: number; isBooked: boolean };
 
-// id de las clases donde el usuario ya reservó (mock local, en real vendría de la API)
-const initialBookedIds = new Set<number>();
+function todayRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+async function loadClasses(userId: string): Promise<ClassWithBookings[]> {
+  const { start, end } = todayRange();
+
+  const { data: classes, error: classesError } = await supabase
+    .from('classes')
+    .select('id, title, capacity, start_time')
+    .gte('start_time', start)
+    .lt('start_time', end)
+    .order('start_time', { ascending: true });
+  if (classesError) throw new Error(classesError.message);
+  if (!classes || classes.length === 0) return [];
+
+  const classIds = classes.map((c) => c.id);
+  const { data: bookings, error: bookingsError } = await supabase
+    .from('bookings')
+    .select('class_id, user_id')
+    .in('class_id', classIds);
+  if (bookingsError) throw new Error(bookingsError.message);
+
+  const countByClass = new Map<string, number>();
+  const bookedByUser = new Set<string>();
+  for (const b of bookings ?? []) {
+    countByClass.set(b.class_id, (countByClass.get(b.class_id) ?? 0) + 1);
+    if (b.user_id === userId) bookedByUser.add(b.class_id);
+  }
+
+  return classes.map((c) => ({
+    id: c.id,
+    title: c.title,
+    capacity: c.capacity,
+    startTime: c.start_time,
+    bookedCount: countByClass.get(c.id) ?? 0,
+    isBooked: bookedByUser.has(c.id),
+  }));
+}
+
+async function fetchRemainingCredits(userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('user_credits')
+    .select('remaining_credits')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.remaining_credits ?? 0;
+}
 
 export default function BookingScreen() {
-  const [schedules, setSchedules] = useState(initialSchedules);
-  const [bookedIds, setBookedIds] = useState(initialBookedIds);
+  const { user } = useAuth();
+  const [classes, setClasses] = useState<ClassWithBookings[]>([]);
+  const [remainingCredits, setRemainingCredits] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
-  function toggleBooking(schedule: Schedule) {
-    const alreadyBooked = bookedIds.has(schedule.id);
+  const load = useCallback(async () => {
+    if (!user) return;
+    setError(null);
+    try {
+      const [classList, credits] = await Promise.all([
+        loadClasses(user.id),
+        fetchRemainingCredits(user.id),
+      ]);
+      setClasses(classList);
+      setRemainingCredits(credits);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudieron cargar las clases.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
 
-    if (!alreadyBooked && schedule.bookedCount >= schedule.capacity) {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function toggleBooking(item: ClassWithBookings) {
+    if (!item.isBooked && item.bookedCount >= item.capacity) {
       Alert.alert('Sin cupo', 'Esta clase ya no tiene lugares disponibles.');
       return;
     }
+    if (!item.isBooked && remainingCredits <= 0) {
+      Alert.alert('Sin créditos', 'No te quedan créditos disponibles para reservar.');
+      return;
+    }
 
-    setSchedules((prev) =>
-      prev.map((s) =>
-        s.id === schedule.id
-          ? { ...s, bookedCount: s.bookedCount + (alreadyBooked ? -1 : 1) }
-          : s
-      )
-    );
-
-    setBookedIds((prev) => {
-      const next = new Set(prev);
-      alreadyBooked ? next.delete(schedule.id) : next.add(schedule.id);
-      return next;
-    });
-
-    // TODO real: POST /bookings (reservar, descuenta 1 crédito)
-    //            DELETE /bookings/:id (cancelar, dentro del margen permitido)
+    setPendingId(item.id);
+    try {
+      const { error: rpcError } = item.isBooked
+        ? await supabase.rpc('cancel_booking', { p_class_id: item.id })
+        : await supabase.rpc('book_class', { p_class_id: item.id });
+      if (rpcError) throw new Error(rpcError.message);
+      await load();
+    } catch (err) {
+      Alert.alert(
+        'No se pudo completar la reserva',
+        err instanceof Error ? err.message : 'Intentá de nuevo.'
+      );
+    } finally {
+      setPendingId(null);
+    }
   }
 
-  function renderItem({ item }: { item: Schedule }) {
-    const isBooked = bookedIds.has(item.id);
-    const isFull = item.bookedCount >= item.capacity && !isBooked;
-    const time = new Date(item.startTime).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  function renderItem({ item }: { item: ClassWithBookings }) {
+    const isFull = item.bookedCount >= item.capacity && !item.isBooked;
+    const time = new Date(item.startTime).toLocaleTimeString('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const isPending = pendingId === item.id;
 
     return (
       <View style={styles.row}>
         <View>
-          <Text style={styles.className}>{item.gymClass.name}</Text>
+          <Text style={styles.className}>{item.title}</Text>
           <Text style={styles.time}>{time} hs</Text>
         </View>
         <View style={styles.right}>
@@ -61,12 +151,18 @@ export default function BookingScreen() {
           <TouchableOpacity
             style={[
               styles.button,
-              isBooked ? styles.buttonCancel : isFull ? styles.buttonDisabled : styles.buttonGo,
+              item.isBooked ? styles.buttonCancel : isFull ? styles.buttonDisabled : styles.buttonGo,
             ]}
-            disabled={isFull}
+            disabled={isFull || isPending}
             onPress={() => toggleBooking(item)}
           >
-            <Text style={styles.buttonText}>{isBooked ? 'Cancelar' : isFull ? 'Sin cupo' : 'Voy'}</Text>
+            {isPending ? (
+              <ActivityIndicator color={colors.white} size="small" />
+            ) : (
+              <Text style={styles.buttonText}>
+                {item.isBooked ? 'Cancelar' : isFull ? 'Sin cupo' : 'Voy'}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -75,12 +171,25 @@ export default function BookingScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Hoy</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.header}>Hoy</Text>
+        <Text style={styles.credits}>{remainingCredits} créditos</Text>
+      </View>
+
+      {isLoading && classes.length === 0 && (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      )}
+      {error && <Text style={styles.error}>{error}</Text>}
+      {!isLoading && !error && classes.length === 0 && (
+        <Text style={styles.empty}>No hay clases programadas para hoy.</Text>
+      )}
+
       <FlatList
-        data={schedules}
-        keyExtractor={(item) => String(item.id)}
+        data={classes}
+        keyExtractor={(item) => item.id}
         renderItem={renderItem}
         contentContainerStyle={{ padding: 16 }}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
       />
     </View>
   );
@@ -88,7 +197,17 @@ export default function BookingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700', padding: 16, paddingBottom: 0 },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    paddingBottom: 0,
+  },
+  header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  credits: { color: colors.primary, fontWeight: '700' },
+  error: { color: colors.danger, paddingHorizontal: 16, marginTop: 12 },
+  empty: { color: colors.textSecondary, paddingHorizontal: 16, marginTop: 12 },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -105,7 +224,7 @@ const styles = StyleSheet.create({
   right: { alignItems: 'flex-end', gap: 8 },
   slots: { color: colors.textSecondary, fontSize: 12 },
   slotsFull: { color: colors.danger },
-  button: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  button: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, minWidth: 76, alignItems: 'center' },
   buttonGo: { backgroundColor: colors.primary },
   buttonCancel: { backgroundColor: colors.surfaceAlt },
   buttonDisabled: { backgroundColor: colors.surfaceAlt, opacity: 0.5 },

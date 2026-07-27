@@ -3,44 +3,27 @@ import { View, Text, StyleSheet, FlatList } from 'react-native';
 import { colors } from '../../theme/colors';
 import { Booking } from '../../types';
 
-// MOCK — reemplazar por GET /users/:id/bookings?status=attended
-const mockHistory: Booking[] = [
+// La tabla `bookings` real no tiene columna de asistencia — es un mock de UI
+// hasta que se defina cómo se va a registrar (¿tabla nueva? ¿columna agregada?).
+type BookingWithAttendance = Booking & { attended: boolean };
+
+// MOCK — reemplazar por: select de `bookings` (join `classes`) para el user logueado
+const mockHistory: BookingWithAttendance[] = [
   {
-    id: 1,
-    userId: 1,
-    status: 'attended',
+    id: '1',
+    userId: '1',
     createdAt: '2026-07-20T18:00:00',
-    schedule: {
-      id: 10,
-      gymClass: { id: 1, name: 'Boxeo' },
-      startTime: '2026-07-20T18:00:00',
-      capacity: 10,
-      bookedCount: 10,
-      status: 'open',
-    },
+    attended: true,
+    gymClass: { id: '10', title: 'Boxeo', startTime: '2026-07-20T18:00:00', capacity: 10 },
   },
   {
-    id: 2,
-    userId: 1,
-    status: 'no_show',
+    id: '2',
+    userId: '1',
     createdAt: '2026-07-18T19:00:00',
-    schedule: {
-      id: 11,
-      gymClass: { id: 3, name: 'Funcional' },
-      startTime: '2026-07-18T19:00:00',
-      capacity: 8,
-      bookedCount: 8,
-      status: 'open',
-    },
+    attended: false,
+    gymClass: { id: '11', title: 'Funcional', startTime: '2026-07-18T19:00:00', capacity: 8 },
   },
 ];
-
-const statusLabel: Record<Booking['status'], string> = {
-  attended: 'Asistió',
-  no_show: 'No asistió',
-  cancelled: 'Cancelada',
-  confirmed: 'Confirmada',
-};
 
 export default function HistoryScreen() {
   return (
@@ -53,18 +36,13 @@ export default function HistoryScreen() {
         renderItem={({ item }) => (
           <View style={styles.row}>
             <View>
-              <Text style={styles.className}>{item.schedule.gymClass.name}</Text>
+              <Text style={styles.className}>{item.gymClass.title}</Text>
               <Text style={styles.date}>
-                {new Date(item.schedule.startTime).toLocaleDateString('es-AR')}
+                {new Date(item.gymClass.startTime).toLocaleDateString('es-AR')}
               </Text>
             </View>
-            <Text
-              style={[
-                styles.status,
-                item.status === 'attended' ? styles.statusOk : styles.statusBad,
-              ]}
-            >
-              {statusLabel[item.status]}
+            <Text style={[styles.status, item.attended ? styles.statusOk : styles.statusBad]}>
+              {item.attended ? 'Asistió' : 'No asistió'}
             </Text>
           </View>
         )}

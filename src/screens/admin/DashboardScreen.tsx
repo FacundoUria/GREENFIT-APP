@@ -1,14 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { colors } from '../../theme/colors';
-import { Schedule } from '../../types';
+import { GymClass } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
-// MOCK — reemplazar por GET /schedules?date=today
-const todaySchedules: Schedule[] = [
-  { id: 1, gymClass: { id: 1, name: 'Boxeo' }, startTime: '2026-07-27T18:00:00', capacity: 10, bookedCount: 8, status: 'open' },
-  { id: 2, gymClass: { id: 2, name: 'Cross' }, startTime: '2026-07-27T19:00:00', capacity: 12, bookedCount: 12, status: 'open' },
-  { id: 3, gymClass: { id: 3, name: 'Funcional' }, startTime: '2026-07-27T20:00:00', capacity: 8, bookedCount: 3, status: 'open' },
+// bookedCount no vive en la tabla `classes` — se calcula contando bookings por class_id.
+type ClassWithBookings = GymClass & { bookedCount: number };
+
+// MOCK — reemplazar por: select de `classes` + count de `bookings` por class_id
+const todaySchedules: ClassWithBookings[] = [
+  { id: '1', title: 'Boxeo', startTime: '2026-07-27T18:00:00', capacity: 10, bookedCount: 8 },
+  { id: '2', title: 'Cross', startTime: '2026-07-27T19:00:00', capacity: 12, bookedCount: 12 },
+  { id: '3', title: 'Funcional', startTime: '2026-07-27T20:00:00', capacity: 8, bookedCount: 3 },
 ];
 
 export default function DashboardScreen({ navigation }: any) {
@@ -33,7 +36,7 @@ export default function DashboardScreen({ navigation }: any) {
               onPress={() => navigation.navigate('ClassRoster', { scheduleId: item.id })}
             >
               <View>
-                <Text style={styles.className}>{item.gymClass.name}</Text>
+                <Text style={styles.className}>{item.title}</Text>
                 <Text style={styles.time}>{time} hs</Text>
               </View>
               <Text style={styles.slots}>{item.bookedCount}/{item.capacity} anotados</Text>
