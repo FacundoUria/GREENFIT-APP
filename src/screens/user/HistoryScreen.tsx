@@ -1,55 +1,83 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { colors } from '../../theme/colors';
 import { Booking } from '../../types';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
+import { formatDateOnly } from '../../lib/classesApi';
 
-// MOCK — reemplazar por: select de `bookings` (join `classes`) para el user logueado
-const mockHistory: Booking[] = [
-  {
-    id: '1',
-    userId: '1',
-    createdAt: '2026-07-20T18:00:00',
-    bookingDate: '2026-07-20',
-    attended: true,
-    gymClass: {
-      id: '10',
-      title: 'Boxeo',
-      disciplineId: '1',
-      instructor: null,
-      location: null,
-      daysOfWeek: [1, 3, 5],
-      startTime: '18:00:00',
-      endTime: '19:00:00',
-      capacity: 10,
-    },
-  },
-  {
-    id: '2',
-    userId: '1',
-    createdAt: '2026-07-18T19:00:00',
-    bookingDate: '2026-07-18',
-    attended: false,
-    gymClass: {
-      id: '11',
-      title: 'Kickboxing',
-      disciplineId: '2',
-      instructor: null,
-      location: null,
-      daysOfWeek: [2, 4],
-      startTime: '19:00:00',
-      endTime: '20:00:00',
-      capacity: 8,
-    },
-  },
-];
+async function fetchHistory(userId: string): Promise<Booking[]> {
+  const todayStr = formatDateOnly(new Date());
+  const { data, error } = await supabase
+    .from('bookings')
+    .select(
+      'id, user_id, booking_date, attended, created_at, classes!inner(id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time)'
+    )
+    .eq('user_id', userId)
+    .lte('booking_date', todayStr)
+    .order('booking_date', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((row: any) => {
+    const gymClass = Array.isArray(row.classes) ? row.classes[0] : row.classes;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      bookingDate: row.booking_date,
+      attended: row.attended,
+      createdAt: row.created_at,
+      gymClass: {
+        id: gymClass.id,
+        title: gymClass.title,
+        disciplineId: gymClass.discipline_id,
+        instructor: gymClass.instructor,
+        location: gymClass.location,
+        daysOfWeek: gymClass.days_of_week ?? [],
+        startTime: gymClass.start_time,
+        endTime: gymClass.end_time,
+        capacity: gymClass.capacity,
+      },
+    };
+  });
+}
 
 export default function HistoryScreen() {
+  const { user } = useAuth();
+  const [history, setHistory] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setError(null);
+    try {
+      setHistory(await fetchHistory(user.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar tu historial.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    setIsLoading(true);
+    load();
+  }, [load]);
+
   return (
     <View style={styles.container}>
+      {isLoading && history.length === 0 && (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+      )}
+      {error && <Text style={styles.error}>{error}</Text>}
+      {!isLoading && !error && history.length === 0 && (
+        <Text style={styles.empty}>Todavía no tenés clases en tu historial.</Text>
+      )}
       <FlatList
-        data={mockHistory}
+        data={history}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={{ padding: 16 }}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
         renderItem={({ item }) => (
           <View style={styles.row}>
             <View>
@@ -71,6 +99,8 @@ export default function HistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700', padding: 16, paddingBottom: 0 },
+  error: { color: colors.danger, padding: 16 },
+  empty: { color: colors.textSecondary, padding: 16 },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',

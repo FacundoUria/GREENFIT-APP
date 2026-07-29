@@ -42,9 +42,9 @@ async function loadProfile(userId: string): Promise<ProfileForm> {
   };
 }
 
-// Foco exclusivo en los datos de la cuenta del socio. El DNI es de solo
-// lectura (identificador de login, lo cambia solo el admin desde Gestión
-// de socios); el resto lo edita el propio socio.
+// Foco exclusivo en los datos de la cuenta del socio. El nombre y el DNI
+// son de solo lectura (identidad del socio, la carga/corrige el admin desde
+// Gestión de socios); el resto lo edita el propio socio.
 export default function ProfileScreen({ navigation }: any) {
   const { user, logout } = useAuth();
   const [form, setForm] = useState<ProfileForm | null>(null);
@@ -79,16 +79,11 @@ export default function ProfileScreen({ navigation }: any) {
 
   async function handleSave() {
     if (!user || !form) return;
-    if (!form.fullName.trim()) {
-      Alert.alert('Falta el nombre', 'Completá tu nombre completo.');
-      return;
-    }
     setIsSaving(true);
     try {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          full_name: form.fullName.trim(),
           phone: form.phone.trim() || null,
           emergency_contact_name: form.emergencyContactName.trim() || null,
           emergency_contact_phone: form.emergencyContactPhone.trim() || null,
@@ -113,13 +108,7 @@ export default function ProfileScreen({ navigation }: any) {
       {error && <Text style={styles.error}>{error}</Text>}
 
       <Text style={styles.sectionTitle}>Mis datos</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Nombre completo"
-        placeholderTextColor={colors.textSecondary}
-        value={form.fullName}
-        onChangeText={(v) => setForm({ ...form, fullName: v })}
-      />
+      <TextInput style={[styles.input, styles.inputDisabled]} value={form.fullName} editable={false} />
       <TextInput style={[styles.input, styles.inputDisabled]} value={form.dni} editable={false} />
       <TextInput
         style={styles.input}
