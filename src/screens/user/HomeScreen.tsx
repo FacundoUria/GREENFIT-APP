@@ -248,7 +248,9 @@ export default function HomeScreen({ navigation }: any) {
                     ? b.expiresAt
                       ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
                       : 'Sin fecha de vencimiento cargada'
-                    : `${b.remainingCredits ?? 0} de ${b.pack.credits} clases restantes`}
+                    : b.pack
+                      ? `${b.remainingCredits ?? 0} de ${b.pack.credits} clases restantes`
+                      : `${b.remainingCredits ?? 0} clases restantes`}
                 </Text>
               </View>
               <StatusBadge status={status} />

@@ -64,15 +64,20 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
       expiresAt: row.expires_at,
       createdAt: row.created_at,
       discipline: { id: discipline.id, name: discipline.name, kind: discipline.kind },
-      pack: {
-        id: pack.id,
-        name: pack.name,
-        credits: pack.credits,
-        durationDays: pack.duration_days,
-        price: pack.price,
-        isActive: pack.is_active,
-        discipline: { id: discipline.id, name: discipline.name, kind: discipline.kind },
-      },
+      // Créditos cargados a mano por el admin no vienen de un pack puntual
+      // (`pack_id` queda null) -- sin esto, cualquier lectura de `.pack.algo`
+      // más abajo revienta con "Cannot read properties of null".
+      pack: pack
+        ? {
+            id: pack.id,
+            name: pack.name,
+            credits: pack.credits,
+            durationDays: pack.duration_days,
+            price: pack.price,
+            isActive: pack.is_active,
+            discipline: { id: discipline.id, name: discipline.name, kind: discipline.kind },
+          }
+        : null,
     };
   });
 }

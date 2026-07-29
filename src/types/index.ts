@@ -33,7 +33,9 @@ export interface Pack {
 export interface UserCredit {
   id: string;
   userId: string;
-  pack: Pack;
+  // Créditos cargados a mano por el admin (fuera de la compra de un pack
+  // puntual) no tienen pack asociado -- `pack_id` es nullable en la tabla.
+  pack: Pack | null;
   discipline: Discipline;
   remainingCredits: number | null; // solo aplica si discipline.kind === 'credits'
   expiresAt: string | null;        // solo aplica si discipline.kind === 'membership'
