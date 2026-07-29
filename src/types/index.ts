@@ -85,23 +85,35 @@ export interface Exercise {
   videoUrl: string | null;
 }
 
-// Un ejercicio dentro de una rutina puntual, con sus series/reps/descanso.
+// Un ejercicio dentro de un día puntual de la rutina, con sus series/reps/
+// descanso/carga. `notes` es la instrucción de técnica de ESTE bloque
+// (distinta de exercise.description, que es la ficha general reusable).
 export interface RoutineExercise {
   id: string;
   exercise: Exercise;
   sets: number;
   reps: string; // texto libre, ej. "10-12" o "AMRAP"
   restSeconds: number;
+  weightSuggestion: string | null;
+  notes: string | null;
   orderIndex: number;
+}
+
+export interface RoutineDay {
+  id: string;
+  title: string;
+  orderIndex: number;
+  exercises: RoutineExercise[];
 }
 
 export interface Routine {
   id: string;
-  userId: string;
+  userId: string | null;
   title: string;
+  coachName: string | null;
   notes: string | null;
   createdAt: string;
-  exercises: RoutineExercise[];
+  days: RoutineDay[];
 }
 
 export type NotificationAudience = 'all' | 'class' | 'user' | 'debtors';
