@@ -15,6 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { usePushPermission } from '../../hooks/usePushPermission';
+import PushBlockedModal from '../../components/PushBlockedModal';
 
 interface ProfileForm {
   fullName: string;
@@ -51,7 +52,9 @@ export default function ProfileScreen({ navigation }: any) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPushBlockedModal, setShowPushBlockedModal] = useState(false);
   const pushPermission = usePushPermission(user?.id);
+  const pushBloqueado = pushPermission.permission === 'denied';
 
   async function handleTogglePush(next: boolean) {
     try {
@@ -160,10 +163,19 @@ export default function ProfileScreen({ navigation }: any) {
           <View style={styles.row}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.rowText}>Notificaciones push</Text>
-              <Text style={styles.rowSubtext}>Avisos de clases, vencimientos y novedades del gimnasio.</Text>
+              <Text style={pushBloqueado ? styles.rowSubtextWarning : styles.rowSubtext}>
+                {pushBloqueado
+                  ? 'Bloqueadas en este dispositivo.'
+                  : 'Avisos de clases, vencimientos y novedades del gimnasio.'}
+              </Text>
             </View>
             {pushPermission.isLoading ? (
               <ActivityIndicator color={colors.primary} size="small" />
+            ) : pushBloqueado ? (
+              <TouchableOpacity style={styles.howToButton} onPress={() => setShowPushBlockedModal(true)}>
+                <Ionicons name="lock-closed" size={13} color={colors.warning} />
+                <Text style={styles.howToButtonText}>¿Cómo activarlas?</Text>
+              </TouchableOpacity>
             ) : (
               <Switch
                 value={pushPermission.enabled}
@@ -175,6 +187,8 @@ export default function ProfileScreen({ navigation }: any) {
           </View>
         </>
       )}
+
+      <PushBlockedModal visible={showPushBlockedModal} onClose={() => setShowPushBlockedModal(false)} />
 
       <Text style={styles.sectionTitle}>Más opciones</Text>
       <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('History')}>
@@ -220,6 +234,17 @@ const styles = StyleSheet.create({
   },
   rowText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
   rowSubtext: { color: colors.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 16 },
+  rowSubtextWarning: { color: colors.warning, fontSize: 12, marginTop: 3, lineHeight: 16, fontWeight: '600' },
+  howToButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(224, 185, 83, 0.15)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  howToButtonText: { color: colors.warning, fontSize: 12, fontWeight: '700' },
   logout: {
     flexDirection: 'row',
     alignSelf: 'center',

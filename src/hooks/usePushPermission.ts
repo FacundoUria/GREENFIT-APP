@@ -15,14 +15,24 @@ async function persistSubscription(userId: string, subscription: PushSubscriptio
   await savePushSubscription(userId, { endpoint: subscription.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth });
 }
 
+function currentWebPermission(): NotificationPermission | null {
+  return typeof Notification !== 'undefined' ? Notification.permission : null;
+}
+
 // Estado unificado del switch "Notificaciones push" del Perfil: en web
 // maneja la suscripción real de Web Push (VAPID); en nativo refleja el
 // permiso de expo-notifications (que ya dispara el popup local vía
 // useNotificationSubscription). Un solo hook para que la UI del Perfil no
 // tenga que conocer la diferencia entre plataformas.
+//
+// `permission` solo se usa en web: una vez que el socio rechaza el permiso
+// del navegador, éste queda en 'denied' y ningún llamado a
+// requestPermission() vuelve a mostrar el prompt -- hay que avisarle que lo
+// habilite a mano desde los ajustes del sitio (ver PushBlockedModal).
 export function usePushPermission(userId: string | undefined) {
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
+  const [permission, setPermission] = useState<NotificationPermission | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -31,6 +41,7 @@ export function usePushPermission(userId: string | undefined) {
       if (Platform.OS === 'web') {
         const ok = isWebPushSupported();
         setSupported(ok);
+        setPermission(currentWebPermission());
         setEnabled(ok ? !!(await getExistingSubscription()) : false);
       } else {
         const { status } = await Notifications.getPermissionsAsync();
@@ -61,6 +72,7 @@ export function usePushPermission(userId: string | undefined) {
             if (endpoint) await deletePushSubscription(endpoint);
             setEnabled(false);
           }
+          setPermission(currentWebPermission());
         } else if (next) {
           const { status } = await Notifications.requestPermissionsAsync();
           setEnabled(status === 'granted');
@@ -74,7 +86,7 @@ export function usePushPermission(userId: string | undefined) {
     [userId]
   );
 
-  return { supported, enabled, isLoading, toggle };
+  return { supported, enabled, permission, isLoading, toggle };
 }
 
 // Se dispara una sola vez al loguearse (punto 3 del pedido: "solicitar
