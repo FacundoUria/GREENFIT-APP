@@ -25,6 +25,15 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Chrome exige un Service Worker que controle la página (con handler de
+// `fetch`) como parte de sus criterios de instalabilidad -- sin esto,
+// `beforeinstallprompt` puede no dispararse nunca aunque el manifest esté
+// perfecto. Es un passthrough puro a la red: no cambia nada del
+// comportamiento real, solo satisface ese requisito.
+self.addEventListener('fetch', (event) => {
+  event.respondWith(fetch(event.request));
+});
+
 // Núcleo del punto 3 del pedido: esto es lo que dispara el banner/sonido
 // nativo del sistema operativo aunque la app esté cerrada o el teléfono en
 // reposo — el browser despierta este Service Worker solo para correr este
