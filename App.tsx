@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from './src/context/AuthContext';
+import { ConfiguracionProvider } from './src/context/ConfiguracionContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { registerPwa } from './src/pwa/registerPwa';
 import IosInstallBanner from './src/components/IosInstallBanner';
@@ -15,18 +16,20 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <StatusBar style="light" />
-      {/* En escritorio/pantallas anchas (solo web), la app queda centrada con
-          ancho de celular en vez de estirarse de punta a punta -- mantiene
-          la experiencia nativa de PWA. En nativo esto no hace nada (flex:1
-          normal), el ancho del dispositivo ya es angosto. */}
-      <View style={styles.shell}>
-        <View style={styles.container}>
-          <RootNavigator />
-          <IosInstallBanner />
-          <AndroidInstallBanner />
+      <ConfiguracionProvider>
+        <StatusBar style="light" />
+        {/* En escritorio/pantallas anchas (solo web), la app queda centrada con
+            ancho de celular en vez de estirarse de punta a punta -- mantiene
+            la experiencia nativa de PWA. En nativo esto no hace nada (flex:1
+            normal), el ancho del dispositivo ya es angosto. */}
+        <View style={styles.shell}>
+          <View style={styles.container}>
+            <RootNavigator />
+            <IosInstallBanner />
+            <AndroidInstallBanner />
+          </View>
         </View>
-      </View>
+      </ConfiguracionProvider>
     </AuthProvider>
   );
 }

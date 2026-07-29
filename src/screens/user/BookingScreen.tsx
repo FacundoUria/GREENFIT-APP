@@ -13,17 +13,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
-import { loadClassesForDate, ClassWithBookings as BaseClassWithBookings } from '../../lib/classesApi';
+import { useConfiguracion } from '../../context/ConfiguracionContext';
+import { loadClassesForDate, formatDateOnly, ClassWithBookings as BaseClassWithBookings } from '../../lib/classesApi';
+import { fetchClosedDays, ClosedDay } from '../../lib/closedDaysApi';
 import { formatClassTime, getCountdown } from '../../lib/classTime';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import DaySelector from '../../components/DaySelector';
 
 type ClassWithBookings = BaseClassWithBookings & { isBooked: boolean };
-
-// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
-// servidor — esto es solo para avisar antes de confirmar, no la regla real.
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 async function loadClasses(userId: string, date: Date): Promise<ClassWithBookings[]> {
   const classes = await loadClassesForDate(date);
@@ -63,14 +61,20 @@ async function fetchCreditsByDiscipline(userId: string): Promise<Map<string, num
 export default function BookingScreen() {
   useTicker();
   const { user } = useAuth();
+  const { configuracion } = useConfiguracion();
+  const cancelLimitMs = configuracion.limiteCancelacionHs * 60 * 60 * 1000;
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [classes, setClasses] = useState<ClassWithBookings[]>([]);
   const [creditsByDiscipline, setCreditsByDiscipline] = useState<Map<string, number>>(new Map());
+  const [closedDays, setClosedDays] = useState<ClosedDay[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<ClassWithBookings | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+
+  const selectedDateStr = formatDateOnly(selectedDate);
+  const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -94,9 +98,22 @@ export default function BookingScreen() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    fetchClosedDays()
+      .then(setClosedDays)
+      .catch((err) => console.error('No se pudieron cargar los días de cierre:', err));
+  }, []);
+
   async function handlePress(item: ClassWithBookings) {
     if (item.isBooked) {
       setCancelTarget(item);
+      return;
+    }
+    if (closedToday) {
+      Alert.alert(
+        'Gimnasio cerrado',
+        `El gimnasio permanece cerrado este día${closedToday.motivo ? ` (${closedToday.motivo})` : ''}.`
+      );
       return;
     }
     if (item.bookedCount >= item.capacity) {
@@ -249,29 +266,41 @@ export default function BookingScreen() {
         <DaySelector selectedDate={selectedDate} onSelect={setSelectedDate} />
       </View>
 
-      {isLoading && classes.length === 0 && (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-      )}
-      {error && <Text style={styles.error}>{error}</Text>}
-      {!isLoading && !error && classes.length === 0 && (
-        <Text style={styles.empty}>No hay clases programadas para este día.</Text>
-      )}
+      {closedToday ? (
+        <View style={styles.closedBanner}>
+          <Ionicons name="lock-closed" size={20} color={colors.warning} />
+          <Text style={styles.closedBannerText}>
+            El gimnasio permanecerá cerrado este día{closedToday.motivo ? ` (${closedToday.motivo})` : ''}.
+          </Text>
+        </View>
+      ) : (
+        <>
+          {isLoading && classes.length === 0 && (
+            <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
+          )}
+          {error && <Text style={styles.error}>{error}</Text>}
+          {!isLoading && !error && classes.length === 0 && (
+            <Text style={styles.empty}>No hay clases programadas para este día.</Text>
+          )}
 
-      <FlatList
-        data={classes}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        contentContainerStyle={{ padding: 16 }}
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
-      />
+          <FlatList
+            data={classes}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={{ padding: 16 }}
+            refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
+          />
+        </>
+      )}
 
       <CancelBookingModal
         visible={!!cancelTarget}
         className={cancelTarget?.title ?? ''}
         isSubmitting={isCancelling}
         withinCancelLimit={
-          !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < TWO_HOURS_MS
+          !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < cancelLimitMs
         }
+        limiteHoras={configuracion.limiteCancelacionHs}
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />
@@ -286,6 +315,18 @@ const styles = StyleSheet.create({
   daySelectorWrap: { paddingHorizontal: 16, paddingTop: 12 },
   error: { color: colors.danger, paddingHorizontal: 16, marginTop: 12 },
   empty: { color: colors.textSecondary, paddingHorizontal: 16, marginTop: 12 },
+  closedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    margin: 16,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.warning,
+  },
+  closedBannerText: { flex: 1, color: colors.textPrimary, fontSize: 13.5, lineHeight: 19 },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 14,

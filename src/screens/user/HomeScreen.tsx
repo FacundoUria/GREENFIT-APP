@@ -25,12 +25,9 @@ import { formatClassTime, formatDayLabel, getCountdown } from '../../lib/classTi
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
+import { useConfiguracion } from '../../context/ConfiguracionContext';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
-
-// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
-// servidor — esto es solo para avisar antes de confirmar, no la regla real.
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: string }> = {
   activo: { label: 'Activo', color: colors.primary, bg: 'rgba(0, 255, 56, 0.15)' },
@@ -93,6 +90,7 @@ async function fetchUpcomingBookings(userId: string): Promise<NextBooking[]> {
 export default function HomeScreen({ navigation }: any) {
   useTicker();
   const { user } = useAuth();
+  const { configuracion } = useConfiguracion();
   const [balances, setBalances] = useState<UserCredit[]>([]);
   const [upcomingBookings, setUpcomingBookings] = useState<NextBooking[]>([]);
   const [packs, setPacks] = useState<Pack[]>([]);
@@ -179,8 +177,9 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   const nextBookingCountdown = nextBooking ? getCountdown(nextBooking.startTime) : null;
+  const cancelLimitMs = configuracion.limiteCancelacionHs * 60 * 60 * 1000;
   const isWithinCancelLimit =
-    !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < TWO_HOURS_MS;
+    !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < cancelLimitMs;
 
   // Cada balance se resuelve a su propio estado (una disciplina puede estar
   // vencida mientras otra sigue activa) -- "hayVencido" decide si mostramos
@@ -337,6 +336,7 @@ export default function HomeScreen({ navigation }: any) {
         className={nextBooking?.title ?? ''}
         isSubmitting={isCancelling}
         withinCancelLimit={isWithinCancelLimit}
+        limiteHoras={configuracion.limiteCancelacionHs}
         onClose={() => setShowCancelModal(false)}
         onConfirm={confirmCancel}
       />
@@ -380,6 +380,25 @@ export default function HomeScreen({ navigation }: any) {
                   )}
                 </TouchableOpacity>
               ))}
+
+              {!!configuracion.aliasCvu && (
+                <View style={styles.transferBox}>
+                  <Text style={styles.transferTitle}>¿Preferís transferencia?</Text>
+                  <View style={styles.transferRow}>
+                    <Text style={styles.transferLabel}>Alias / CVU</Text>
+                    <Text style={styles.transferValue}>{configuracion.aliasCvu}</Text>
+                  </View>
+                  {!!configuracion.titularCuenta && (
+                    <View style={styles.transferRow}>
+                      <Text style={styles.transferLabel}>Titular</Text>
+                      <Text style={styles.transferValue}>{configuracion.titularCuenta}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.transferHint}>
+                    Hacé la transferencia y mandanos el comprobante para acreditarte el pack.
+                  </Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -552,4 +571,17 @@ const styles = StyleSheet.create({
   packRowName: { color: colors.textPrimary, fontWeight: '600', fontSize: 14 },
   packRowSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   packRowPrice: { color: colors.primary, fontWeight: '700', fontSize: 15 },
+  transferBox: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  transferTitle: { color: colors.textPrimary, fontWeight: '700', fontSize: 13, marginBottom: 8 },
+  transferRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  transferLabel: { color: colors.textSecondary, fontSize: 12.5 },
+  transferValue: { color: colors.textPrimary, fontSize: 12.5, fontWeight: '600' },
+  transferHint: { color: colors.textSecondary, fontSize: 11, marginTop: 10, lineHeight: 15 },
 });

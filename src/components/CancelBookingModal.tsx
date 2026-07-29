@@ -6,10 +6,12 @@ interface CancelBookingModalProps {
   visible: boolean;
   className: string;
   isSubmitting?: boolean;
-  // true si cancelar AHORA sería dentro de las 2hs previas a la clase (no se
-  // reintegra el crédito) — calculado en el cliente solo para avisar antes de
-  // confirmar; la regla real la aplica cancel_booking() en el servidor.
+  // true si cancelar AHORA sería dentro de la ventana de configuracion.limite_cancelacion_hs
+  // previa a la clase (no se reintegra el crédito) — calculado en el cliente
+  // solo para avisar antes de confirmar; la regla real la aplica cancel_booking() en el servidor.
   withinCancelLimit?: boolean;
+  // Mismo valor que usó withinCancelLimit para su cálculo, solo para mostrarlo en el aviso.
+  limiteHoras?: number;
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }
@@ -21,6 +23,7 @@ export default function CancelBookingModal({
   className,
   isSubmitting,
   withinCancelLimit,
+  limiteHoras = 2,
   onClose,
   onConfirm,
 }: CancelBookingModalProps) {
@@ -44,7 +47,8 @@ export default function CancelBookingModal({
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
           {withinCancelLimit && (
             <Text style={styles.warning}>
-              Estás cancelando con menos de 2 horas de anticipación: no se te reintegra el crédito.
+              Estás cancelando con menos de {limiteHoras} {limiteHoras === 1 ? 'hora' : 'horas'} de anticipación: no
+              se te reintegra el crédito.
             </Text>
           )}
           <TextInput
