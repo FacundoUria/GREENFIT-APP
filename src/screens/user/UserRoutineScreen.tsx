@@ -204,17 +204,11 @@ export default function UserRoutineScreen() {
 
       {routine && diaActual && (
         <>
-          {/* Header: nombre del plan, entrenador, progreso de hoy */}
+          {/* Header: nombre del plan, progreso de hoy */}
           <View style={styles.heroCard}>
             <Text style={styles.heroTitle} numberOfLines={2}>
               {routine.title}
             </Text>
-            {!!routine.coachName && (
-              <View style={styles.coachRow}>
-                <Ionicons name="person-circle-outline" size={15} color={colors.textSecondary} />
-                <Text style={styles.coachText}>Entrenador: {routine.coachName}</Text>
-              </View>
-            )}
 
             <View style={styles.progressRow}>
               <View style={styles.progressTrack}>
@@ -336,8 +330,6 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   heroTitle: { color: colors.textPrimary, fontSize: 19, fontWeight: '700' },
-  coachRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
-  coachText: { color: colors.textSecondary, fontSize: 12.5 },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
   progressTrack: {
     flex: 1,

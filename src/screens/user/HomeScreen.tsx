@@ -187,7 +187,9 @@ export default function HomeScreen({ navigation }: any) {
   // vez de repetirlo por cada fila.
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
-    const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
+    const status = isMembership
+      ? getExpiryStatus(b.expiresAt, configuracion.diasTolerancia)
+      : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });
   const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
