@@ -1,6 +1,6 @@
 {
-  "name": "Greenfit",
-  "short_name": "Greenfit",
+  "name": "GreenFit",
+  "short_name": "GreenFit",
   "description": "Reservá tus clases, seguí tu rutina y gestioná tu cuenta en Greenfit.",
   "start_url": "/",
   "scope": "/",

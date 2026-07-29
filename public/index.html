@@ -5,10 +5,14 @@
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <title>%WEB_TITLE%</title>
+    <!-- Favicon: sin esto el navegador muestra el ícono genérico en la pestaña -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
     <!-- PWA: sin este link el navegador no reconoce manifest.json aunque exista en /public -->
     <link rel="manifest" href="/manifest.json" />
-    <!-- PWA iOS: sin esto, "Agregar a inicio" en Safari usa una captura de pantalla en vez del ícono -->
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <!-- PWA iOS: sin esto, "Agregar a inicio" en Safari usa una captura de pantalla en vez del ícono.
+         180x180 es el tamaño que recomienda Apple -- iOS no lee manifest.json para esto. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
       /* These styles make the body full-height */

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Greenfit",
+    "name": "GreenFit",
     "slug": "greenfit-app",
     "version": "1.0.0",
     "scheme": "greenfit",
@@ -30,8 +30,8 @@
       "supportsTablet": false
     },
     "web": {
-      "name": "Greenfit",
-      "shortName": "Greenfit",
+      "name": "GreenFit",
+      "shortName": "GreenFit",
       "themeColor": "#0F0F0F",
       "backgroundColor": "#0F0F0F",
       "display": "standalone",

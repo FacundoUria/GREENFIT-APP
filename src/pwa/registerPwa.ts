@@ -11,6 +11,15 @@ function ensureTag(selector: string, build: () => HTMLElement) {
 // index.html de PWA tendría hardcodeado; los inyectamos en runtime así no
 // dependemos de pisar la plantilla HTML interna de Expo.
 function injectHeadTags() {
+  ensureTag('link[rel="icon"]', () => {
+    const link = document.createElement('link');
+    link.rel = 'icon';
+    link.type = 'image/png';
+    link.setAttribute('sizes', '192x192');
+    link.href = '/icons/icon-192.png';
+    return link;
+  });
+
   ensureTag('link[rel="manifest"]', () => {
     const link = document.createElement('link');
     link.rel = 'manifest';
@@ -45,14 +54,15 @@ function injectHeadTags() {
   ensureTag('meta[name="apple-mobile-web-app-title"]', () => {
     const meta = document.createElement('meta');
     meta.name = 'apple-mobile-web-app-title';
-    meta.content = 'Greenfit';
+    meta.content = 'GreenFit';
     return meta;
   });
 
   ensureTag('link[rel="apple-touch-icon"]', () => {
     const link = document.createElement('link');
     link.rel = 'apple-touch-icon';
-    link.href = '/icons/icon-192.png';
+    link.setAttribute('sizes', '180x180');
+    link.href = '/icons/apple-touch-icon.png';
     return link;
   });
 }
