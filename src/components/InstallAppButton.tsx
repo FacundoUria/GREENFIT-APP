@@ -2,7 +2,14 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
-import { BeforeInstallPromptEvent, isIosSafariBrowser, isAlreadyStandalone } from '../lib/pwaInstall';
+import {
+  BeforeInstallPromptEvent,
+  isIosSafariBrowser,
+  isAlreadyStandalone,
+  getCapturedInstallPrompt,
+  wasInstalledGlobally,
+  onInstallPromptReady,
+} from '../lib/pwaInstall';
 
 // Botón manual y discreto para instalar la PWA (usado en Login y en Perfil).
 // Se muestra SIEMPRE (no depende de haber capturado `beforeinstallprompt`
@@ -26,10 +33,29 @@ export default function InstallAppButton({ bottomOffset = 18 }: { bottomOffset?:
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    if (isAlreadyStandalone()) {
+    if (isAlreadyStandalone() || wasInstalledGlobally()) {
       setHidden(true);
       return;
     }
+
+    // El script inline de index.html empieza a escuchar `beforeinstallprompt`
+    // antes de que este componente exista (mientras el bundle de React
+    // todavía está descargando/ejecutando) -- si ya lo capturó, lo tomamos
+    // de ahí en vez de esperar un segundo disparo del evento que nunca va
+    // a llegar (el navegador lo emite una sola vez por carga de página).
+    const already = getCapturedInstallPrompt();
+    if (already) setDeferredEvent(already);
+
+    const unsubscribeReady = onInstallPromptReady(() => {
+      const captured = getCapturedInstallPrompt();
+      if (captured) {
+        setDeferredEvent(captured);
+      } else if (wasInstalledGlobally()) {
+        setHidden(true);
+        setDeferredEvent(null);
+        setShowManual(false);
+      }
+    });
 
     function handleBeforeInstallPrompt(event: Event) {
       event.preventDefault();
@@ -47,6 +73,7 @@ export default function InstallAppButton({ bottomOffset = 18 }: { bottomOffset?:
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      unsubscribeReady();
     };
   }, []);
 

@@ -46,6 +46,28 @@
     <noscript>
       You need to enable JavaScript to run this app.
     </noscript>
+    <!-- Captura `beforeinstallprompt` acá, en un script inline que corre
+         antes de que el bundle de React (~2MB) termine de descargar y
+         ejecutarse. Si el navegador dispara el evento durante esa ventana,
+         antes de que la app haya montado ningún listener propio, quedaría
+         perdido para siempre (el evento no se repite). Lo guardamos en
+         `window.__greenfitInstallPrompt` y avisamos con un CustomEvent para
+         que los componentes de React lo recojan apenas monten, sin importar
+         cuándo llegó. -->
+    <script>
+      window.__greenfitInstallPrompt = null;
+      window.__greenfitInstalled = false;
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__greenfitInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent('greenfit:install-prompt-ready'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__greenfitInstalled = true;
+        window.__greenfitInstallPrompt = null;
+        window.dispatchEvent(new CustomEvent('greenfit:install-prompt-ready'));
+      });
+    </script>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
   </body>

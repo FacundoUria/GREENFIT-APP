@@ -3,7 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
-import { BeforeInstallPromptEvent, isAlreadyStandalone } from '../lib/pwaInstall';
+import {
+  BeforeInstallPromptEvent,
+  isAlreadyStandalone,
+  getCapturedInstallPrompt,
+  onInstallPromptReady,
+} from '../lib/pwaInstall';
 
 const DISMISS_KEY = 'greenfit:android-install-banner-dismissed-at';
 const SNOOZE_DAYS = 14;
@@ -22,17 +27,32 @@ export default function AndroidInstallBanner() {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     if (isAlreadyStandalone()) return;
 
-    function handleBeforeInstallPrompt(event: Event) {
-      event.preventDefault();
-
+    function offerIfNotSnoozed(event: BeforeInstallPromptEvent) {
       AsyncStorage.getItem(DISMISS_KEY).then((value) => {
         if (value) {
           const daysSinceDismiss = (Date.now() - Number(value)) / 86_400_000;
           if (daysSinceDismiss < SNOOZE_DAYS) return;
         }
-        setDeferredEvent(event as BeforeInstallPromptEvent);
+        setDeferredEvent(event);
         setVisible(true);
       });
+    }
+
+    // El script inline de index.html empieza a escuchar `beforeinstallprompt`
+    // antes de que este componente exista (mientras el bundle de React
+    // todavía está descargando/ejecutando) -- si ya lo capturó, lo tomamos
+    // de ahí en vez de esperar un segundo disparo que nunca va a llegar.
+    const already = getCapturedInstallPrompt();
+    if (already) offerIfNotSnoozed(already);
+
+    const unsubscribeReady = onInstallPromptReady(() => {
+      const captured = getCapturedInstallPrompt();
+      if (captured) offerIfNotSnoozed(captured);
+    });
+
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      offerIfNotSnoozed(event as BeforeInstallPromptEvent);
     }
 
     function handleAppInstalled() {
@@ -45,6 +65,7 @@ export default function AndroidInstallBanner() {
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
+      unsubscribeReady();
     };
   }, []);
 
