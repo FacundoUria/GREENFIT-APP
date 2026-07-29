@@ -6,6 +6,10 @@ interface CancelBookingModalProps {
   visible: boolean;
   className: string;
   isSubmitting?: boolean;
+  // true si cancelar AHORA sería dentro de las 2hs previas a la clase (no se
+  // reintegra el crédito) — calculado en el cliente solo para avisar antes de
+  // confirmar; la regla real la aplica cancel_booking() en el servidor.
+  withinCancelLimit?: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }
@@ -16,6 +20,7 @@ export default function CancelBookingModal({
   visible,
   className,
   isSubmitting,
+  withinCancelLimit,
   onClose,
   onConfirm,
 }: CancelBookingModalProps) {
@@ -37,6 +42,11 @@ export default function CancelBookingModal({
         <View style={styles.card}>
           <Text style={styles.title}>Cancelar {className}</Text>
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
+          {withinCancelLimit && (
+            <Text style={styles.warning}>
+              Estás cancelando con menos de 2 horas de anticipación: no se te reintegra el crédito.
+            </Text>
+          )}
           <TextInput
             style={styles.input}
             placeholder="Ej: estoy enfermo"
@@ -79,6 +89,14 @@ const styles = StyleSheet.create({
   },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   subtitle: { color: colors.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 },
+  warning: {
+    color: colors.warning,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: -8,
+    marginBottom: 14,
+    fontWeight: '600',
+  },
   input: {
     backgroundColor: colors.background,
     borderRadius: 10,

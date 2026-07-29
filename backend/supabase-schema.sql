@@ -283,21 +283,32 @@ begin
 end;
 $$;
 
+-- Cancelar con más de 2 horas de anticipación devuelve el crédito; con menos
+-- (o clase ya empezada) borra la reserva pero no reintegra. Retorna boolean:
+-- true = se reintegró el crédito. Ver supabase_migration_cancel_booking_2h.sql.
 create or replace function public.cancel_booking(p_class_id uuid, p_booking_date date, p_reason text default null)
-returns void
+returns boolean
 language plpgsql
 security definer
 as $$
 declare
   v_user_id uuid := auth.uid();
   v_discipline_id uuid;
+  v_start_time time;
   v_credit_id uuid;
+  v_class_start timestamptz;
+  v_dentro_del_limite boolean;
 begin
   if v_user_id is null then
     raise exception 'No autenticado';
   end if;
 
-  select discipline_id into v_discipline_id from classes where id = p_class_id;
+  select discipline_id, start_time into v_discipline_id, v_start_time
+  from classes where id = p_class_id;
+
+  v_class_start := (p_booking_date::text || ' ' || v_start_time::text)::timestamp
+    at time zone 'America/Argentina/Mendoza';
+  v_dentro_del_limite := now() <= (v_class_start - interval '2 hours');
 
   delete from bookings
   where user_id = v_user_id and class_id = p_class_id and booking_date = p_booking_date;
@@ -308,16 +319,20 @@ begin
   insert into booking_cancellations (user_id, class_id, booking_date, reason)
   values (v_user_id, p_class_id, p_booking_date, nullif(trim(p_reason), ''));
 
-  select id into v_credit_id
-  from user_credits
-  where user_id = v_user_id and discipline_id = v_discipline_id
-  order by created_at desc
-  limit 1
-  for update;
+  if v_dentro_del_limite then
+    select id into v_credit_id
+    from user_credits
+    where user_id = v_user_id and discipline_id = v_discipline_id
+    order by created_at desc
+    limit 1
+    for update;
 
-  if v_credit_id is not null then
-    update user_credits set remaining_credits = remaining_credits + 1 where id = v_credit_id;
+    if v_credit_id is not null then
+      update user_credits set remaining_credits = remaining_credits + 1 where id = v_credit_id;
+    end if;
   end if;
+
+  return v_dentro_del_limite;
 end;
 $$;
 

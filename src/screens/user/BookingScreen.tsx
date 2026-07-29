@@ -21,6 +21,10 @@ import DaySelector from '../../components/DaySelector';
 
 type ClassWithBookings = BaseClassWithBookings & { isBooked: boolean };
 
+// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
+// servidor — esto es solo para avisar antes de confirmar, no la regla real.
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+
 async function loadClasses(userId: string, date: Date): Promise<ClassWithBookings[]> {
   const classes = await loadClassesForDate(date);
   if (classes.length === 0) return [];
@@ -123,7 +127,7 @@ export default function BookingScreen() {
     if (!cancelTarget) return;
     setIsCancelling(true);
     try {
-      const { error: rpcError } = await supabase.rpc('cancel_booking', {
+      const { data: creditoReintegrado, error: rpcError } = await supabase.rpc('cancel_booking', {
         p_class_id: cancelTarget.id,
         p_booking_date: cancelTarget.occurrenceDate,
         p_reason: reason || null,
@@ -131,6 +135,12 @@ export default function BookingScreen() {
       if (rpcError) throw new Error(rpcError.message);
       setCancelTarget(null);
       await load();
+      Alert.alert(
+        'Reserva cancelada',
+        creditoReintegrado
+          ? 'Te devolvimos el crédito.'
+          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
+      );
     } catch (err) {
       Alert.alert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
@@ -255,6 +265,9 @@ export default function BookingScreen() {
         visible={!!cancelTarget}
         className={cancelTarget?.title ?? ''}
         isSubmitting={isCancelling}
+        withinCancelLimit={
+          !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < TWO_HOURS_MS
+        }
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />

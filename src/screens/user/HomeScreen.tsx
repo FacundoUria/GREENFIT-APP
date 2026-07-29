@@ -24,6 +24,10 @@ import { formatClassTime, formatDayLabel, getCountdown } from '../../lib/classTi
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 
+// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
+// servidor — esto es solo para avisar antes de confirmar, no la regla real.
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+
 interface NextBooking {
   classId: string;
   title: string;
@@ -132,7 +136,7 @@ export default function HomeScreen({ navigation }: any) {
     if (!nextBooking) return;
     setIsCancelling(true);
     try {
-      const { error: rpcError } = await supabase.rpc('cancel_booking', {
+      const { data: creditoReintegrado, error: rpcError } = await supabase.rpc('cancel_booking', {
         p_class_id: nextBooking.classId,
         p_booking_date: nextBooking.bookingDate,
         p_reason: reason || null,
@@ -140,6 +144,12 @@ export default function HomeScreen({ navigation }: any) {
       if (rpcError) throw new Error(rpcError.message);
       setShowCancelModal(false);
       await load();
+      Alert.alert(
+        'Reserva cancelada',
+        creditoReintegrado
+          ? 'Te devolvimos el crédito.'
+          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
+      );
     } catch (err) {
       Alert.alert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
@@ -148,6 +158,8 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   const nextBookingCountdown = nextBooking ? getCountdown(nextBooking.startTime) : null;
+  const isWithinCancelLimit =
+    !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < TWO_HOURS_MS;
 
   return (
     <ScrollView
@@ -265,6 +277,7 @@ export default function HomeScreen({ navigation }: any) {
         visible={showCancelModal}
         className={nextBooking?.title ?? ''}
         isSubmitting={isCancelling}
+        withinCancelLimit={isWithinCancelLimit}
         onClose={() => setShowCancelModal(false)}
         onConfirm={confirmCancel}
       />
