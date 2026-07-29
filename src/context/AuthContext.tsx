@@ -15,10 +15,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Trae el profile (rol incluido) de la tabla `profiles` para un usuario ya autenticado.
 // Sin esto tenemos sesión de Supabase pero no sabemos si es socio o admin.
-async function fetchProfile(userId: string): Promise<User> {
+async function fetchProfile(userId: string): Promise<User & { active: boolean }> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, dni, phone, role')
+    .select('id, full_name, dni, phone, role, active')
     .eq('id', userId)
     .single();
 
@@ -32,6 +32,7 @@ async function fetchProfile(userId: string): Promise<User> {
     dni: data.dni,
     phone: data.phone,
     role: data.role,
+    active: data.active ?? true,
   };
 }
 
@@ -47,7 +48,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         try {
           const profile = await fetchProfile(session.user.id);
-          if (profile.role !== 'socio') {
+          // Re-chequea en cada apertura de la app -- si te dieron de baja
+          // mientras tenías la sesión guardada, no hay que esperar a que
+          // expire el token para cortarte el acceso.
+          if (profile.role !== 'socio' || !profile.active) {
             await supabase.auth.signOut();
             setUser(null);
           } else {
@@ -82,6 +86,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (profile.role !== 'socio') {
         await supabase.auth.signOut();
         throw new Error('Esta app es exclusiva para socios. Ingresá al panel web para administrar el gimnasio.');
+      }
+      if (!profile.active) {
+        await supabase.auth.signOut();
+        throw new Error('Tu cuenta está inactiva. Contactá al gimnasio para más información.');
       }
       setUser(profile);
     } finally {

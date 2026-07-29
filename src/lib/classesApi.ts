@@ -12,7 +12,7 @@ export type ClassWithBookings = GymClass & {
 };
 
 const CLASS_COLUMNS =
-  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time';
+  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time, disciplines(is_active)';
 
 function mapClass(c: {
   id: string;
@@ -68,7 +68,15 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   if (classesError) throw new Error(classesError.message);
   if (!classes || classes.length === 0) return [];
 
-  const classIds = classes.map((c) => c.id);
+  // Una clase de una disciplina desactivada deja de ofrecerse para NUEVAS
+  // reservas -- no se borra ni se toca su historial, solo desaparece acá.
+  const classesActivas = classes.filter((c) => {
+    const disciplina = Array.isArray(c.disciplines) ? c.disciplines[0] : c.disciplines;
+    return disciplina?.is_active !== false;
+  });
+  if (classesActivas.length === 0) return [];
+
+  const classIds = classesActivas.map((c) => c.id);
   const { data: bookings, error: bookingsError } = await supabase
     .from('bookings')
     .select('class_id')
@@ -81,7 +89,7 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
     countByClass.set(b.class_id, (countByClass.get(b.class_id) ?? 0) + 1);
   }
 
-  const withBookings = classes.map((c) => {
+  const withBookings = classesActivas.map((c) => {
     const gymClass = mapClass(c);
     return {
       ...gymClass,

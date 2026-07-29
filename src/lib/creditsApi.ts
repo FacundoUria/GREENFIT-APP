@@ -11,7 +11,7 @@ import { Pack, UserCredit } from '../types';
 export async function fetchPacks(options?: { activeOnly?: boolean }): Promise<Pack[]> {
   let query = supabase
     .from('packs')
-    .select('id, name, credits, duration_days, price, is_active, discipline:disciplines(id, name, kind)')
+    .select('id, name, credits, duration_days, price, is_active, discipline:disciplines(id, name, kind, is_active)')
     .order('name');
   if (options?.activeOnly) {
     query = query.eq('is_active', true);
@@ -23,6 +23,9 @@ export async function fetchPacks(options?: { activeOnly?: boolean }): Promise<Pa
   for (const p of data ?? []) {
     const discipline = Array.isArray(p.discipline) ? p.discipline[0] : p.discipline;
     if (!discipline) continue;
+    // Una disciplina desactivada no debe ofrecerse para compra de créditos
+    // aunque el pack en sí siga marcado is_active=true.
+    if (options?.activeOnly && discipline.is_active === false) continue;
     packs.push({
       id: p.id,
       name: p.name,
