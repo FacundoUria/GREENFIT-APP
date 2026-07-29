@@ -28,6 +28,10 @@ import CancelBookingModal from '../../components/CancelBookingModal';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
+// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
+// servidor — esto es solo para avisar antes de confirmar, no la regla real.
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+
 const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: string }> = {
   activo: { label: 'Activo', color: colors.primary, bg: 'rgba(0, 255, 56, 0.15)' },
   por_vencer: { label: 'Por Vencer', color: colors.warning, bg: 'rgba(224, 185, 83, 0.15)' },
@@ -42,10 +46,6 @@ function StatusBadge({ status }: { status: MembershipStatus }) {
     </View>
   );
 }
-
-// Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
-// servidor — esto es solo para avisar antes de confirmar, no la regla real.
-const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
 interface NextBooking {
   classId: string;
@@ -182,6 +182,17 @@ export default function HomeScreen({ navigation }: any) {
   const isWithinCancelLimit =
     !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < TWO_HOURS_MS;
 
+  // Cada balance se resuelve a su propio estado (una disciplina puede estar
+  // vencida mientras otra sigue activa) -- "hayVencido" decide si mostramos
+  // UNA sola vez el bloque de Renovar/Contactar al pie de la Hero Card, en
+  // vez de repetirlo por cada fila.
+  const balancesConEstado = balances.map((b) => {
+    const isMembership = b.discipline.kind === 'membership';
+    const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
+    return { balance: b, isMembership, status };
+  });
+  const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
+
   return (
     <ScrollView
       style={styles.container}
@@ -200,116 +211,97 @@ export default function HomeScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {isLoading && balances.length === 0 && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
       {error && <Text style={styles.error}>{error}</Text>}
 
-      {!isLoading && !error && balances.length === 0 && (
-        <View style={styles.card}>
-          <Text style={styles.text}>Todavía no tenés ningún pack activo.</Text>
-        </View>
-      )}
-
-      {balances.map((b) => {
-        const isMembership = b.discipline.kind === 'membership';
-        const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
-        const progress =
-          !isMembership && b.pack.credits ? (b.remainingCredits ?? 0) / b.pack.credits : 0;
-
-        return (
-          <View
-            key={b.id}
-            style={[
-              styles.card,
-              status === 'vencido' && styles.cardVencido,
-              status === 'por_vencer' && styles.cardPorVencer,
-              { marginBottom: 12 },
-            ]}
+      {/* Hero Card: credencial + estado del pase, todo en un solo lugar en
+          vez de una tarjeta por disciplina repitiendo el mismo borde/padding. */}
+      <View style={styles.heroCard}>
+        <View style={styles.heroTopRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.heroBrand}>
+              GREEN<Text style={{ color: colors.primary }}>FIT</Text>
+            </Text>
+            <Text style={styles.heroName}>{user?.name}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.heroQrButton}
+            onPress={() => navigation.navigate('Credential')}
+            aria-label="Ver mi credencial"
           >
-            <View style={styles.cardHeaderRow}>
-              <Text style={styles.packName}>{b.discipline.name}</Text>
+            <Ionicons name="qr-code" size={20} color={colors.background} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.heroDivider} />
+
+        {isLoading && balances.length === 0 ? (
+          <ActivityIndicator color={colors.primary} style={{ marginVertical: 8 }} />
+        ) : balances.length === 0 ? (
+          <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
+        ) : (
+          balancesConEstado.map(({ balance: b, isMembership, status }) => (
+            <View key={b.id} style={styles.heroPlanRow}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.heroPlanName}>{b.discipline.name}</Text>
+                <Text style={styles.heroPlanDetail}>
+                  {isMembership
+                    ? b.expiresAt
+                      ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
+                      : 'Sin fecha de vencimiento cargada'
+                    : `${b.remainingCredits ?? 0} de ${b.pack.credits} clases restantes`}
+                </Text>
+              </View>
               <StatusBadge status={status} />
             </View>
+          ))
+        )}
 
-            {isMembership ? (
-              <Text style={styles.expiryText}>
-                {b.expiresAt
-                  ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
-                  : 'Sin fecha de vencimiento cargada'}
+        {hayVencido && (
+          <View style={styles.heroVencidoActions}>
+            <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
+              <Text style={styles.renewButtonText}>Renovar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+              <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
+              <Text style={styles.contactButtonText}>Contactar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {!isLoading &&
+        (nextBooking ? (
+          <View style={styles.banner}>
+            <View style={styles.bannerIcon}>
+              <Ionicons name="calendar" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bannerLabel}>Tu próxima clase</Text>
+              <Text style={styles.bannerValue}>
+                {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
               </Text>
-            ) : (
-              <>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      { width: `${progress * 100}%` },
-                      status === 'vencido' && styles.progressFillVencido,
-                    ]}
-                  />
-                </View>
-                <View style={styles.creditsRow}>
-                  <Text style={styles.creditsNumber}>{b.remainingCredits ?? 0}</Text>
-                  <Text style={styles.creditsLabel}>de {b.pack.credits} clases restantes</Text>
-                </View>
-              </>
-            )}
-
-            {status === 'vencido' && (
-              <View style={styles.vencidoActions}>
-                <Text style={styles.vencidoText}>
-                  {isMembership
-                    ? 'Tu cuota está vencida. Renovala para seguir entrenando.'
-                    : 'Te quedaste sin clases de este pack.'}
+              {nextBookingCountdown && !nextBookingCountdown.isPast && (
+                <Text style={[styles.bannerCountdown, nextBookingCountdown.isSoon && styles.bannerCountdownSoon]}>
+                  {nextBookingCountdown.label}
                 </Text>
-                <View style={styles.vencidoButtonsRow}>
-                  <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
-                    <Text style={styles.renewButtonText}>Renovar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.contactButton}
-                    onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}
-                  >
-                    <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
-                    <Text style={styles.contactButtonText}>Contactar</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </View>
-        );
-      })}
-
-      {!isLoading && (
-        <View style={styles.banner}>
-          <View style={styles.bannerIcon}>
-            <Ionicons name="calendar" size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.bannerLabel}>Tu próxima clase</Text>
-            {nextBooking ? (
-              <>
-                <Text style={styles.bannerValue}>
-                  {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
-                </Text>
-                {nextBookingCountdown && !nextBookingCountdown.isPast && (
-                  <Text
-                    style={[styles.bannerCountdown, nextBookingCountdown.isSoon && styles.bannerCountdownSoon]}
-                  >
-                    {nextBookingCountdown.label}
-                  </Text>
-                )}
-              </>
-            ) : (
-              <Text style={styles.bannerValue}>No tenés reservas próximas.</Text>
-            )}
-          </View>
-          {nextBooking && (
+              )}
+            </View>
             <TouchableOpacity style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
               <Text style={styles.bannerCancelText}>Cancelar</Text>
             </TouchableOpacity>
-          )}
-        </View>
-      )}
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.emptyBookingBanner} onPress={() => navigation.navigate('Reservas')}>
+            <View style={styles.bannerIcon}>
+              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bannerValue}>Todavía no tenés reservas</Text>
+              <Text style={styles.bannerLabel}>Elegí tu próxima clase</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+        ))}
 
       {!isLoading && restoDeProximas.length > 0 && (
         <View style={styles.upcomingList}>
@@ -335,25 +327,6 @@ export default function HomeScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       )}
-
-      <Text style={styles.sectionTitle}>Accesos rápidos</Text>
-      <View style={styles.quickRow}>
-        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate('Reservas')}>
-          <Ionicons name="calendar-outline" size={22} color={colors.primary} />
-          <Text style={styles.quickButtonText}>Reservar clase</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate('Credential')}>
-          <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
-          <Text style={styles.quickButtonText}>Mi Credencial</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.quickButton}
-          onPress={() => navigation.navigate('Notifications')}
-        >
-          <Ionicons name="notifications-outline" size={22} color={colors.primary} />
-          <Text style={styles.quickButtonText}>Notificaciones</Text>
-        </TouchableOpacity>
-      </View>
 
       <CancelBookingModal
         visible={showCancelModal}
@@ -425,40 +398,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  card: {
+  error: { color: colors.danger, marginBottom: 12 },
+  text: { color: colors.textSecondary, lineHeight: 20 },
+
+  // Hero Card
+  heroCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 20,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  cardVencido: { borderColor: 'rgba(224, 83, 83, 0.4)' },
-  cardPorVencer: { borderColor: 'rgba(224, 185, 83, 0.4)' },
-  error: { color: colors.danger, marginTop: 20 },
-  cardHeaderRow: {
+  heroTopRow: { flexDirection: 'row', alignItems: 'center' },
+  heroBrand: { fontSize: 15, fontWeight: '800', color: colors.textPrimary, letterSpacing: 0.5 },
+  heroName: { fontSize: 18, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },
+  heroQrButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroDivider: { height: 1, backgroundColor: colors.surfaceAlt, marginVertical: 16 },
+  heroEmptyText: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  heroPlanRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  packName: { color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
-  statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
-  expiryText: { color: colors.textSecondary, fontSize: 14 },
-  progressTrack: { height: 8, backgroundColor: colors.surfaceAlt, borderRadius: 4, overflow: 'hidden' },
-  progressFill: { height: 8, backgroundColor: colors.primary, borderRadius: 4 },
-  progressFillVencido: { backgroundColor: colors.danger },
-  creditsRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 14, gap: 8 },
-  creditsNumber: { color: colors.primary, fontSize: 32, fontWeight: '800' },
-  creditsLabel: { color: colors.textSecondary, fontSize: 14 },
-  vencidoActions: {
-    marginTop: 14,
-    paddingTop: 14,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceAlt,
   },
-  vencidoText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 10 },
-  vencidoButtonsRow: { flexDirection: 'row', gap: 8 },
+  heroPlanName: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  heroPlanDetail: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
+  heroVencidoActions: { flexDirection: 'row', gap: 8, marginTop: 16 },
+
+  statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
+
   renewButton: {
     flex: 1,
     backgroundColor: colors.primary,
@@ -478,7 +455,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   contactButtonText: { color: colors.textPrimary, fontWeight: '700', fontSize: 13 },
-  text: { color: colors.textSecondary, lineHeight: 20 },
+
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -488,6 +465,18 @@ const styles = StyleSheet.create({
     padding: 16,
     marginTop: 16,
     borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  emptyBookingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderStyle: 'dashed',
     borderColor: colors.surfaceAlt,
   },
   bannerIcon: {
@@ -516,19 +505,6 @@ const styles = StyleSheet.create({
   upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   upcomingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textSecondary },
   upcomingText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
-  sectionTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 28, marginBottom: 8 },
-  quickRow: { flexDirection: 'row', gap: 12 },
-  quickButton: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
-  quickButtonText: { color: colors.textPrimary, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   buyCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -26,6 +26,26 @@ interface ProfileForm {
   medicalNotes: string;
 }
 
+function SectionCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={styles.sectionCard}>
+      <View style={styles.sectionHeader}>
+        <Ionicons name={icon} size={16} color={colors.primary} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
+
 async function loadProfile(userId: string): Promise<ProfileForm> {
   const { data, error } = await supabase
     .from('profiles')
@@ -110,44 +130,47 @@ export default function ProfileScreen({ navigation }: any) {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <Text style={styles.sectionTitle}>Mis datos</Text>
-      <TextInput style={[styles.input, styles.inputDisabled]} value={form.fullName} editable={false} />
-      <TextInput style={[styles.input, styles.inputDisabled]} value={form.dni} editable={false} />
-      <TextInput
-        style={styles.input}
-        placeholder="Teléfono / WhatsApp"
-        placeholderTextColor={colors.textSecondary}
-        keyboardType="phone-pad"
-        value={form.phone}
-        onChangeText={(v) => setForm({ ...form, phone: v })}
-      />
+      <SectionCard icon="person-outline" title="Mis datos">
+        <TextInput style={[styles.input, styles.inputDisabled]} value={form.fullName} editable={false} />
+        <TextInput style={[styles.input, styles.inputDisabled]} value={form.dni} editable={false} />
+        <TextInput
+          style={[styles.input, styles.inputLast]}
+          placeholder="Teléfono / WhatsApp"
+          placeholderTextColor={colors.textSecondary}
+          keyboardType="phone-pad"
+          value={form.phone}
+          onChangeText={(v) => setForm({ ...form, phone: v })}
+        />
+      </SectionCard>
 
-      <Text style={styles.sectionTitle}>Contacto de emergencia</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Nombre del contacto"
-        placeholderTextColor={colors.textSecondary}
-        value={form.emergencyContactName}
-        onChangeText={(v) => setForm({ ...form, emergencyContactName: v })}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Teléfono del contacto"
-        placeholderTextColor={colors.textSecondary}
-        keyboardType="phone-pad"
-        value={form.emergencyContactPhone}
-        onChangeText={(v) => setForm({ ...form, emergencyContactPhone: v })}
-      />
+      <SectionCard icon="alert-circle-outline" title="Contacto de emergencia">
+        <TextInput
+          style={styles.input}
+          placeholder="Nombre del contacto"
+          placeholderTextColor={colors.textSecondary}
+          value={form.emergencyContactName}
+          onChangeText={(v) => setForm({ ...form, emergencyContactName: v })}
+        />
+        <TextInput
+          style={[styles.input, styles.inputLast]}
+          placeholder="Teléfono del contacto"
+          placeholderTextColor={colors.textSecondary}
+          keyboardType="phone-pad"
+          value={form.emergencyContactPhone}
+          onChangeText={(v) => setForm({ ...form, emergencyContactPhone: v })}
+        />
+      </SectionCard>
 
-      <Text style={styles.sectionTitle}>Ficha médica</Text>
-      <TextInput
-        style={[styles.input, styles.textArea]}
-        placeholder="Lesiones, condiciones físicas u otras observaciones..."
-        placeholderTextColor={colors.textSecondary}
-        multiline
-        value={form.medicalNotes}
-        onChangeText={(v) => setForm({ ...form, medicalNotes: v })}
-      />
+      <SectionCard icon="medkit-outline" title="Ficha médica">
+        <TextInput
+          style={[styles.input, styles.inputLast, styles.textArea]}
+          placeholder="Lesiones, condiciones físicas u otras observaciones..."
+          placeholderTextColor={colors.textSecondary}
+          multiline
+          value={form.medicalNotes}
+          onChangeText={(v) => setForm({ ...form, medicalNotes: v })}
+        />
+      </SectionCard>
 
       <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
         {isSaving ? (
@@ -158,8 +181,7 @@ export default function ProfileScreen({ navigation }: any) {
       </TouchableOpacity>
 
       {pushPermission.supported && (
-        <>
-          <Text style={styles.sectionTitle}>Notificaciones</Text>
+        <SectionCard icon="notifications-outline" title="Notificaciones">
           <View style={styles.row}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.rowText}>Notificaciones push</Text>
@@ -185,16 +207,17 @@ export default function ProfileScreen({ navigation }: any) {
               />
             )}
           </View>
-        </>
+        </SectionCard>
       )}
 
       <PushBlockedModal visible={showPushBlockedModal} onClose={() => setShowPushBlockedModal(false)} />
 
-      <Text style={styles.sectionTitle}>Más opciones</Text>
-      <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('History')}>
-        <Text style={styles.rowText}>Ver historial de clases</Text>
-        <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-      </TouchableOpacity>
+      <SectionCard icon="ellipsis-horizontal-circle-outline" title="Más opciones">
+        <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('History')}>
+          <Text style={styles.rowText}>Ver historial de clases</Text>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </SectionCard>
 
       <TouchableOpacity style={styles.logout} onPress={logout}>
         <Ionicons name="log-out-outline" size={16} color={colors.danger} />
@@ -207,30 +230,39 @@ export default function ProfileScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   error: { color: colors.danger, marginBottom: 12 },
-  sectionTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 20, marginBottom: 10 },
-  input: {
+  sectionCard: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    color: colors.textPrimary,
-    marginBottom: 12,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  inputDisabled: { color: colors.textSecondary, backgroundColor: colors.background },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
+  sectionTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  input: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 14,
+    color: colors.textPrimary,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  inputLast: { marginBottom: 0 },
+  inputDisabled: { color: colors.textSecondary },
   textArea: { height: 90, textAlignVertical: 'top' },
-  saveButton: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
+  saveButton: { backgroundColor: colors.primary, borderRadius: 12, padding: 16, alignItems: 'center', marginBottom: 14 },
   saveButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 15 },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    marginBottom: 12,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   rowText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
   rowSubtext: { color: colors.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 16 },
@@ -250,7 +282,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     gap: 6,
-    marginTop: 8,
+    marginTop: 4,
     marginBottom: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,

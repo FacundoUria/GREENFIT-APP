@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +15,8 @@ import { colors } from '../../theme/colors';
 import { getUserRoutine } from '../../lib/routinesApi';
 import { Routine } from '../../types';
 import VideoModal from '../../components/VideoModal';
+
+const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
 // La rutina asignada al socio logueado (la más reciente), con sus
 // ejercicios en orden y acceso al video de técnica de cada uno.
@@ -51,8 +54,20 @@ export default function UserRoutineScreen() {
 
       {!isLoading && !error && !routine && (
         <View style={styles.emptyCard}>
-          <Ionicons name="barbell-outline" size={40} color={colors.textSecondary} />
-          <Text style={styles.emptyText}>Aún no tenés una rutina asignada. Consultá con tu entrenador.</Text>
+          <View style={styles.emptyIconCircle}>
+            <Ionicons name="barbell-outline" size={32} color={colors.primary} />
+          </View>
+          <Text style={styles.emptyTitle}>Todavía no tenés una rutina</Text>
+          <Text style={styles.emptyText}>
+            Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
+          </Text>
+          <TouchableOpacity
+            style={styles.whatsappButton}
+            onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}
+          >
+            <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
+            <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -97,20 +112,45 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, marginTop: 20 },
   emptyCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 28,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
     marginTop: 20,
   },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' },
   emptyText: {
     color: colors.textSecondary,
-    fontSize: 14,
+    fontSize: 13.5,
     textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 20,
+    marginTop: 8,
+    lineHeight: 19,
+    maxWidth: 260,
   },
+  whatsappButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#25D366',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginTop: 20,
+  },
+  whatsappButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
   headerCard: {
     backgroundColor: colors.surface,
     borderRadius: 16,

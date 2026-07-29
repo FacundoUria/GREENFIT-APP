@@ -158,79 +158,83 @@ export default function BookingScreen() {
     const countdown = getCountdown(item.startAt);
     const isPending = pendingId === item.id;
     const credits = creditsByDiscipline.get(item.disciplineId) ?? 0;
+    const sinCreditos = !item.isBooked && !isFull && credits <= 0;
+
+    const buttonLabel = item.isBooked ? 'Cancelar' : isFull ? 'Sin cupo' : sinCreditos ? 'Sin créditos' : 'Reservar';
+    const buttonDisabled = isFull || sinCreditos || isPending;
 
     return (
       <View style={[styles.card, item.isBooked && styles.cardBooked]}>
-        {item.isBooked && (
-          <View style={styles.enrolledBadge}>
-            <Ionicons name="checkmark-circle" size={14} color={colors.onPrimary} />
-            <Text style={styles.enrolledBadgeText}>Inscripto</Text>
-          </View>
-        )}
-
-        <Text style={styles.className}>{item.title}</Text>
-        {item.instructor && <Text style={styles.metaText}>Prof. {item.instructor}</Text>}
-        <Text style={styles.metaText}>
-          {startLabel}
-          {endLabel ? ` - ${endLabel}` : ''} hs
-        </Text>
-        {item.location && (
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={13} color={colors.textSecondary} />
-            <Text style={styles.metaText}>{item.location}</Text>
-          </View>
-        )}
-        {!countdown.isPast && (
-          <Text style={[styles.countdown, countdown.isSoon && styles.countdownSoon]}>{countdown.label}</Text>
-        )}
-
-        <View style={styles.progressTrack}>
-          <View
-            style={[
-              styles.progressFill,
-              { width: `${progress * 100}%` },
-              isFull && styles.progressFillFull,
-            ]}
-          />
-        </View>
-        <View style={styles.capacityRow}>
-          <Text style={styles.capacityText}>
-            {item.bookedCount} / {item.capacity} anotados
-          </Text>
-          {isFull && (
-            <View style={styles.statusBadgeFull}>
-              <Text style={styles.statusBadgeFullText}>Agotado</Text>
+        <View style={styles.mainRow}>
+          <View style={styles.infoCol}>
+            <View style={styles.titleRow}>
+              <Text style={styles.className} numberOfLines={1}>
+                {item.title}
+              </Text>
+              {item.isBooked && (
+                <View style={styles.enrolledDot}>
+                  <Ionicons name="checkmark" size={10} color={colors.onPrimary} />
+                </View>
+              )}
             </View>
-          )}
-          {isAlmostFull && (
-            <View style={styles.statusBadgeAlmost}>
-              <Text style={styles.statusBadgeAlmostText}>Últimos cupos</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={[styles.creditsBadge, credits <= 0 && styles.creditsBadgeEmpty]}>
-          <Text style={[styles.creditsBadgeText, credits <= 0 && styles.creditsBadgeTextEmpty]}>
-            Tus créditos en {item.title}: {credits}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.button,
-            item.isBooked ? styles.buttonCancel : isFull ? styles.buttonDisabled : styles.buttonGo,
-          ]}
-          disabled={isFull || isPending}
-          onPress={() => handlePress(item)}
-        >
-          {isPending ? (
-            <ActivityIndicator color={item.isBooked || isFull ? colors.white : colors.onPrimary} size="small" />
-          ) : (
-            <Text style={[styles.buttonText, !item.isBooked && !isFull && styles.buttonTextOnPrimary]}>
-              {item.isBooked ? 'Cancelar mi reserva' : isFull ? 'Sin cupo' : 'Reservar cupo'}
+            <Text style={styles.metaText}>
+              {startLabel}
+              {endLabel ? ` - ${endLabel}` : ''} hs
+              {item.instructor ? ` · Prof. ${item.instructor}` : ''}
             </Text>
-          )}
-        </TouchableOpacity>
+          </View>
+
+          <View style={styles.capacityCol}>
+            <Text style={[styles.capacityNumber, isFull && styles.capacityNumberFull]}>
+              {item.bookedCount}/{item.capacity}
+            </Text>
+            <View style={styles.progressTrack}>
+              <View
+                style={[styles.progressFill, { width: `${progress * 100}%` }, isFull && styles.progressFillFull]}
+              />
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[
+              styles.compactButton,
+              item.isBooked ? styles.compactButtonCancel : styles.compactButtonGo,
+              buttonDisabled && !item.isBooked && styles.compactButtonDisabled,
+            ]}
+            disabled={buttonDisabled}
+            onPress={() => handlePress(item)}
+          >
+            {isPending ? (
+              <ActivityIndicator color={item.isBooked ? colors.textPrimary : colors.onPrimary} size="small" />
+            ) : (
+              <Text
+                style={[
+                  styles.compactButtonText,
+                  item.isBooked ? styles.compactButtonTextCancel : styles.compactButtonTextGo,
+                ]}
+                numberOfLines={1}
+              >
+                {buttonLabel}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {(item.location || !countdown.isPast || isAlmostFull || isFull || sinCreditos) && (
+          <View style={styles.footerRow}>
+            {item.location && (
+              <View style={styles.footerItem}>
+                <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
+                <Text style={styles.footerText}>{item.location}</Text>
+              </View>
+            )}
+            {!countdown.isPast && (
+              <Text style={[styles.footerText, countdown.isSoon && styles.countdownSoon]}>{countdown.label}</Text>
+            )}
+            {isAlmostFull && <Text style={[styles.footerText, styles.footerWarning]}>Últimos cupos</Text>}
+            {sinCreditos && <Text style={[styles.footerText, styles.footerDanger]}>Sin créditos en {item.title}</Text>}
+          </View>
+        )}
       </View>
     );
   }
@@ -285,69 +289,64 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
+    padding: 14,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
   cardBooked: { borderColor: colors.primary },
-  enrolledBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
+  mainRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  infoCol: { flex: 1.4, minWidth: 0 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  className: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', flexShrink: 1 },
+  enrolledDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  enrolledBadgeText: { color: colors.onPrimary, fontSize: 11, fontWeight: '700' },
-  className: { color: colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  metaText: { color: colors.textSecondary, fontSize: 13, marginTop: 2 },
-  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  countdown: { color: colors.textSecondary, fontSize: 11, marginTop: 4 },
-  countdownSoon: { color: colors.primary, fontWeight: '700' },
+  metaText: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
+  capacityCol: { width: 58, alignItems: 'center' },
+  capacityNumber: { color: colors.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 5 },
+  capacityNumberFull: { color: colors.danger },
   progressTrack: {
-    height: 6,
+    width: '100%',
+    height: 5,
     backgroundColor: colors.surfaceAlt,
     borderRadius: 3,
     overflow: 'hidden',
-    marginTop: 12,
   },
-  progressFill: { height: 6, backgroundColor: colors.primary, borderRadius: 3 },
+  progressFill: { height: 5, backgroundColor: colors.primary, borderRadius: 3 },
   progressFillFull: { backgroundColor: colors.danger },
-  capacityRow: {
+  compactButton: {
+    minWidth: 84,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compactButtonGo: { backgroundColor: colors.primary },
+  compactButtonCancel: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.surfaceAlt },
+  compactButtonDisabled: { backgroundColor: colors.surfaceAlt },
+  compactButtonText: { fontWeight: '700', fontSize: 12.5 },
+  compactButtonTextGo: { color: colors.onPrimary },
+  compactButtonTextCancel: { color: colors.textSecondary },
+  footerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    marginTop: 6,
-  },
-  capacityText: { color: colors.textSecondary, fontSize: 12 },
-  statusBadgeFull: { backgroundColor: 'rgba(224, 83, 83, 0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  statusBadgeFullText: { color: colors.danger, fontSize: 11, fontWeight: '700' },
-  statusBadgeAlmost: { backgroundColor: 'rgba(224, 185, 83, 0.15)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  statusBadgeAlmostText: { color: colors.warning, fontSize: 11, fontWeight: '700' },
-  creditsBadge: {
-    alignSelf: 'flex-start',
+    gap: 10,
     marginTop: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0, 255, 56, 0.15)',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceAlt,
   },
-  creditsBadgeEmpty: { backgroundColor: 'rgba(224, 83, 83, 0.15)' },
-  creditsBadgeText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
-  creditsBadgeTextEmpty: { color: colors.danger },
-  button: {
-    marginTop: 14,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  buttonGo: { backgroundColor: colors.primary },
-  buttonCancel: { backgroundColor: colors.surfaceAlt },
-  buttonDisabled: { backgroundColor: colors.surfaceAlt, opacity: 0.5 },
-  buttonText: { color: colors.white, fontWeight: '700', fontSize: 14 },
-  buttonTextOnPrimary: { color: colors.onPrimary },
+  footerItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  footerText: { color: colors.textSecondary, fontSize: 11 },
+  countdownSoon: { color: colors.primary, fontWeight: '700' },
+  footerWarning: { color: colors.warning, fontWeight: '700' },
+  footerDanger: { color: colors.danger, fontWeight: '700' },
 });
