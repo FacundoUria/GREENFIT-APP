@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Alert,
   Modal,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -21,8 +22,26 @@ import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel, getCountdown } from '../../lib/classTime';
+import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
+
+const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
+
+const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: string }> = {
+  activo: { label: 'Activo', color: colors.primary, bg: 'rgba(0, 255, 56, 0.15)' },
+  por_vencer: { label: 'Por Vencer', color: colors.warning, bg: 'rgba(224, 185, 83, 0.15)' },
+  vencido: { label: 'Vencido', color: colors.danger, bg: 'rgba(224, 83, 83, 0.15)' },
+};
+
+function StatusBadge({ status }: { status: MembershipStatus }) {
+  const meta = STATUS_META[status];
+  return (
+    <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
+      <Text style={[styles.statusBadgeText, { color: meta.color }]}>{meta.label}</Text>
+    </View>
+  );
+}
 
 // Debe coincidir con la ventana de 2hs que aplica cancel_booking() en el
 // servidor — esto es solo para avisar antes de confirmar, no la regla real.
@@ -35,7 +54,8 @@ interface NextBooking {
   bookingDate: string; // "YYYY-MM-DD" — la ocurrencia puntual, para cancel_booking
 }
 
-// La próxima reserva confirmada del socio, la que viene más pronto.
+// Todas las reservas confirmadas del socio que todavía no pasaron, ordenadas
+// de la más próxima a la más lejana.
 //
 // `classes.start_time` es un `time` (hora del día de una clase recurrente),
 // no un timestamp — no se puede comparar directo contra `now()` (eso
@@ -43,12 +63,12 @@ interface NextBooking {
 // datetime completo). La ocurrencia puntual sale de combinar
 // `bookings.booking_date` con `classes.start_time`, y el filtrado de
 // "todavía no pasó" se hace en JS sobre ese datetime combinado.
-async function fetchNextBooking(userId: string): Promise<NextBooking | null> {
+async function fetchUpcomingBookings(userId: string): Promise<NextBooking[]> {
   const todayStr = formatDateOnly(new Date());
   // Ordenamos solo por `booking_date` (columna real de `bookings`) — pedirle
   // a PostgREST que ordene por una columna de la tabla embebida (`classes`)
-  // es innecesario acá y evitamos cualquier ambigüedad: la ocurrencia más
-  // próxima se calcula en JS combinando fecha + hora de cada fila candidata.
+  // es innecesario acá y evitamos cualquier ambigüedad: el orden final sale
+  // de combinar fecha + hora de cada fila candidata en JS.
   const { data, error } = await supabase
     .from('bookings')
     .select('class_id, booking_date, classes!inner(title, start_time)')
@@ -57,26 +77,24 @@ async function fetchNextBooking(userId: string): Promise<NextBooking | null> {
     .order('booking_date', { ascending: true });
 
   if (error) throw new Error(error.message);
-  if (!data || data.length === 0) return null;
+  if (!data || data.length === 0) return [];
 
   const now = new Date();
-  let closest: NextBooking | null = null;
+  const proximas: NextBooking[] = [];
   for (const row of data) {
     const gymClass = Array.isArray(row.classes) ? row.classes[0] : row.classes;
     const startAt = combineDateAndTime(row.booking_date, gymClass.start_time);
     if (!startAt || new Date(startAt) <= now) continue;
-    if (!closest || new Date(startAt) < new Date(closest.startTime)) {
-      closest = { classId: row.class_id, title: gymClass.title, startTime: startAt, bookingDate: row.booking_date };
-    }
+    proximas.push({ classId: row.class_id, title: gymClass.title, startTime: startAt, bookingDate: row.booking_date });
   }
-  return closest;
+  return proximas.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 }
 
 export default function HomeScreen({ navigation }: any) {
   useTicker();
   const { user } = useAuth();
   const [balances, setBalances] = useState<UserCredit[]>([]);
-  const [nextBooking, setNextBooking] = useState<NextBooking | null>(null);
+  const [upcomingBookings, setUpcomingBookings] = useState<NextBooking[]>([]);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,13 +107,13 @@ export default function HomeScreen({ navigation }: any) {
     if (!user) return;
     setError(null);
     try {
-      const [balancesResult, bookingResult, packsResult] = await Promise.all([
+      const [balancesResult, bookingsResult, packsResult] = await Promise.all([
         fetchUserBalances(user.id),
-        fetchNextBooking(user.id),
+        fetchUpcomingBookings(user.id),
         fetchPacks({ activeOnly: true }),
       ]);
       setBalances(balancesResult);
-      setNextBooking(bookingResult);
+      setUpcomingBookings(bookingsResult);
       setPacks(packsResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu información.');
@@ -131,6 +149,9 @@ export default function HomeScreen({ navigation }: any) {
       setBuyingPackId(null);
     }
   }
+
+  const nextBooking = upcomingBookings[0] ?? null;
+  const restoDeProximas = upcomingBookings.slice(1, 3);
 
   async function confirmCancel(reason: string) {
     if (!nextBooking) return;
@@ -190,25 +211,69 @@ export default function HomeScreen({ navigation }: any) {
 
       {balances.map((b) => {
         const isMembership = b.discipline.kind === 'membership';
+        const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
         const progress =
           !isMembership && b.pack.credits ? (b.remainingCredits ?? 0) / b.pack.credits : 0;
+
         return (
-          <View key={b.id} style={[styles.card, { marginBottom: 12 }]}>
-            <Text style={styles.packName}>{b.discipline.name}</Text>
+          <View
+            key={b.id}
+            style={[
+              styles.card,
+              status === 'vencido' && styles.cardVencido,
+              status === 'por_vencer' && styles.cardPorVencer,
+              { marginBottom: 12 },
+            ]}
+          >
+            <View style={styles.cardHeaderRow}>
+              <Text style={styles.packName}>{b.discipline.name}</Text>
+              <StatusBadge status={status} />
+            </View>
+
             {isMembership ? (
-              <Text style={styles.creditsLabel}>
-                Vigente hasta {b.expiresAt ? new Date(b.expiresAt).toLocaleDateString('es-AR') : '—'}
+              <Text style={styles.expiryText}>
+                {b.expiresAt
+                  ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
+                  : 'Sin fecha de vencimiento cargada'}
               </Text>
             ) : (
               <>
                 <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                  <View
+                    style={[
+                      styles.progressFill,
+                      { width: `${progress * 100}%` },
+                      status === 'vencido' && styles.progressFillVencido,
+                    ]}
+                  />
                 </View>
                 <View style={styles.creditsRow}>
                   <Text style={styles.creditsNumber}>{b.remainingCredits ?? 0}</Text>
                   <Text style={styles.creditsLabel}>de {b.pack.credits} clases restantes</Text>
                 </View>
               </>
+            )}
+
+            {status === 'vencido' && (
+              <View style={styles.vencidoActions}>
+                <Text style={styles.vencidoText}>
+                  {isMembership
+                    ? 'Tu cuota está vencida. Renovala para seguir entrenando.'
+                    : 'Te quedaste sin clases de este pack.'}
+                </Text>
+                <View style={styles.vencidoButtonsRow}>
+                  <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
+                    <Text style={styles.renewButtonText}>Renovar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.contactButton}
+                    onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}
+                  >
+                    <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
+                    <Text style={styles.contactButtonText}>Contactar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             )}
           </View>
         );
@@ -246,6 +311,19 @@ export default function HomeScreen({ navigation }: any) {
         </View>
       )}
 
+      {!isLoading && restoDeProximas.length > 0 && (
+        <View style={styles.upcomingList}>
+          {restoDeProximas.map((b) => (
+            <View key={`${b.classId}-${b.bookingDate}`} style={styles.upcomingRow}>
+              <View style={styles.upcomingDot} />
+              <Text style={styles.upcomingText}>
+                {b.title} · {formatDayLabel(b.startTime)} {formatClassTime(b.startTime)} hs
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+
       {!isLoading && (
         <View style={styles.buyCard}>
           <View style={{ flex: 1 }}>
@@ -263,6 +341,10 @@ export default function HomeScreen({ navigation }: any) {
         <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate('Reservas')}>
           <Ionicons name="calendar-outline" size={22} color={colors.primary} />
           <Text style={styles.quickButtonText}>Reservar clase</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickButton} onPress={() => navigation.navigate('Credential')}>
+          <Ionicons name="qr-code-outline" size={22} color={colors.primary} />
+          <Text style={styles.quickButtonText}>Mi Credencial</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.quickButton}
@@ -350,13 +432,52 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
+  cardVencido: { borderColor: 'rgba(224, 83, 83, 0.4)' },
+  cardPorVencer: { borderColor: 'rgba(224, 185, 83, 0.4)' },
   error: { color: colors.danger, marginTop: 20 },
-  packName: { color: colors.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 12 },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  packName: { color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
+  statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
+  expiryText: { color: colors.textSecondary, fontSize: 14 },
   progressTrack: { height: 8, backgroundColor: colors.surfaceAlt, borderRadius: 4, overflow: 'hidden' },
   progressFill: { height: 8, backgroundColor: colors.primary, borderRadius: 4 },
+  progressFillVencido: { backgroundColor: colors.danger },
   creditsRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 14, gap: 8 },
   creditsNumber: { color: colors.primary, fontSize: 32, fontWeight: '800' },
   creditsLabel: { color: colors.textSecondary, fontSize: 14 },
+  vencidoActions: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceAlt,
+  },
+  vencidoText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  vencidoButtonsRow: { flexDirection: 'row', gap: 8 },
+  renewButton: {
+    flex: 1,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  renewButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+  contactButton: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: 'rgba(37, 211, 102, 0.15)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactButtonText: { color: colors.textPrimary, fontWeight: '700', fontSize: 13 },
   text: { color: colors.textSecondary, lineHeight: 20 },
   banner: {
     flexDirection: 'row',
@@ -383,6 +504,18 @@ const styles = StyleSheet.create({
   bannerCountdownSoon: { color: colors.primary, fontWeight: '700' },
   bannerCancel: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.danger },
   bannerCancelText: { color: colors.white, fontWeight: '700', fontSize: 12 },
+  upcomingList: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+    gap: 10,
+  },
+  upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  upcomingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textSecondary },
+  upcomingText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
   sectionTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 28, marginBottom: 8 },
   quickRow: { flexDirection: 'row', gap: 12 },
   quickButton: {

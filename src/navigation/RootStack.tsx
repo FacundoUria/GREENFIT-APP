@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
 import MainTabs from './MainTabs';
 import NotificationsScreen from '../screens/user/NotificationsScreen';
+import CredentialScreen from '../screens/user/CredentialScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,6 +24,16 @@ export default function RootStack() {
         options={{
           headerShown: true,
           title: 'Notificaciones',
+          headerStyle: { backgroundColor: colors.surface },
+          headerTintColor: colors.textPrimary,
+        }}
+      />
+      <Stack.Screen
+        name="Credential"
+        component={CredentialScreen}
+        options={{
+          headerShown: true,
+          title: 'Mi Credencial',
           headerStyle: { backgroundColor: colors.surface },
           headerTintColor: colors.textPrimary,
         }}
