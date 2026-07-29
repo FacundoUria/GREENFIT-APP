@@ -7,7 +7,7 @@ export interface Configuracion {
   precioKickboxing: number;
   precioAparatos: number;
   diasTolerancia: number;
-  limiteCancelacionHs: number;
+  limiteCancelacionMinutos: number;
   aliasCvu: string;
   titularCuenta: string;
 }
@@ -18,7 +18,7 @@ const CONFIGURACION_POR_DEFECTO: Configuracion = {
   precioKickboxing: 0,
   precioAparatos: 0,
   diasTolerancia: 5,
-  limiteCancelacionHs: 2,
+  limiteCancelacionMinutos: 120,
   aliasCvu: '',
   titularCuenta: '',
 };
@@ -46,7 +46,7 @@ export function ConfiguracionProvider({ children }: { children: React.ReactNode 
     supabase
       .from('configuracion')
       .select(
-        'precio_crossfit, precio_boxeo, precio_kickboxing, precio_aparatos, dias_tolerancia, limite_cancelacion_hs, alias_cvu, titular_cuenta'
+        'precio_crossfit, precio_boxeo, precio_kickboxing, precio_aparatos, dias_tolerancia, limite_cancelacion_minutos, alias_cvu, titular_cuenta'
       )
       .eq('id', 1)
       .maybeSingle()
@@ -60,7 +60,7 @@ export function ConfiguracionProvider({ children }: { children: React.ReactNode 
             precioKickboxing: data.precio_kickboxing ?? 0,
             precioAparatos: data.precio_aparatos ?? 0,
             diasTolerancia: data.dias_tolerancia ?? 5,
-            limiteCancelacionHs: data.limite_cancelacion_hs ?? 2,
+            limiteCancelacionMinutos: data.limite_cancelacion_minutos ?? 120,
             aliasCvu: data.alias_cvu ?? '',
             titularCuenta: data.titular_cuenta ?? '',
           });

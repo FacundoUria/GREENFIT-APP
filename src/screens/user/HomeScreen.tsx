@@ -177,7 +177,7 @@ export default function HomeScreen({ navigation }: any) {
   }
 
   const nextBookingCountdown = nextBooking ? getCountdown(nextBooking.startTime) : null;
-  const cancelLimitMs = configuracion.limiteCancelacionHs * 60 * 60 * 1000;
+  const cancelLimitMs = configuracion.limiteCancelacionMinutos * 60 * 1000;
   const isWithinCancelLimit =
     !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < cancelLimitMs;
 
@@ -338,7 +338,7 @@ export default function HomeScreen({ navigation }: any) {
         className={nextBooking?.title ?? ''}
         isSubmitting={isCancelling}
         withinCancelLimit={isWithinCancelLimit}
-        limiteHoras={configuracion.limiteCancelacionHs}
+        limiteMinutos={configuracion.limiteCancelacionMinutos}
         onClose={() => setShowCancelModal(false)}
         onConfirm={confirmCancel}
       />

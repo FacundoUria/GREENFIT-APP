@@ -6,14 +6,29 @@ interface CancelBookingModalProps {
   visible: boolean;
   className: string;
   isSubmitting?: boolean;
-  // true si cancelar AHORA sería dentro de la ventana de configuracion.limite_cancelacion_hs
+  // true si cancelar AHORA sería dentro de la ventana de configuracion.limite_cancelacion_minutos
   // previa a la clase (no se reintegra el crédito) — calculado en el cliente
   // solo para avisar antes de confirmar; la regla real la aplica cancel_booking() en el servidor.
   withinCancelLimit?: boolean;
   // Mismo valor que usó withinCancelLimit para su cálculo, solo para mostrarlo en el aviso.
-  limiteHoras?: number;
+  limiteMinutos?: number;
   onClose: () => void;
   onConfirm: (reason: string) => void;
+}
+
+// "3 horas"/"90 minutos"/"1 hora 30 minutos" -- mostramos horas cuando el
+// valor cae justo en una cantidad entera de horas (el caso más común, ej.
+// 180 min) para que el aviso siga leyéndose natural en vez de "180 minutos".
+function formatLimite(minutos: number): string {
+  if (minutos <= 0) return '0 minutos';
+  if (minutos % 60 === 0) {
+    const horas = minutos / 60;
+    return `${horas} ${horas === 1 ? 'hora' : 'horas'}`;
+  }
+  if (minutos < 60) return `${minutos} minutos`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return `${horas} ${horas === 1 ? 'hora' : 'horas'} ${resto} min`;
 }
 
 // Modal reutilizado por Home (banner "próxima clase") y Reservas: pide un
@@ -23,7 +38,7 @@ export default function CancelBookingModal({
   className,
   isSubmitting,
   withinCancelLimit,
-  limiteHoras = 2,
+  limiteMinutos = 120,
   onClose,
   onConfirm,
 }: CancelBookingModalProps) {
@@ -47,8 +62,8 @@ export default function CancelBookingModal({
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
           {withinCancelLimit && (
             <Text style={styles.warning}>
-              Estás cancelando con menos de {limiteHoras} {limiteHoras === 1 ? 'hora' : 'horas'} de anticipación: no
-              se te reintegra el crédito.
+              Estás cancelando con menos de {formatLimite(limiteMinutos)} de anticipación: no se te reintegra el
+              crédito.
             </Text>
           )}
           <TextInput

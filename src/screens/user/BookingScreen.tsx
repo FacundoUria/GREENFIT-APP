@@ -62,7 +62,7 @@ export default function BookingScreen() {
   useTicker();
   const { user } = useAuth();
   const { configuracion } = useConfiguracion();
-  const cancelLimitMs = configuracion.limiteCancelacionHs * 60 * 60 * 1000;
+  const cancelLimitMs = configuracion.limiteCancelacionMinutos * 60 * 1000;
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [classes, setClasses] = useState<ClassWithBookings[]>([]);
   const [creditsByDiscipline, setCreditsByDiscipline] = useState<Map<string, number>>(new Map());
@@ -300,7 +300,7 @@ export default function BookingScreen() {
         withinCancelLimit={
           !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < cancelLimitMs
         }
-        limiteHoras={configuracion.limiteCancelacionHs}
+        limiteMinutos={configuracion.limiteCancelacionMinutos}
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />
