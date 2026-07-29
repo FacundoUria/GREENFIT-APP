@@ -5,10 +5,9 @@ import { User } from '../types';
 
 interface AuthContextType {
   user: User | null;
-  isLoading: boolean;       // loading de login/register puntual
+  isLoading: boolean;       // loading de login puntual
   isBootstrapping: boolean; // loading inicial: ¿ya había sesión guardada?
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -16,10 +15,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Trae el profile (rol incluido) de la tabla `profiles` para un usuario ya autenticado.
 // Sin esto tenemos sesión de Supabase pero no sabemos si es socio o admin.
-async function fetchProfile(userId: string, email: string): Promise<User> {
+async function fetchProfile(userId: string): Promise<User> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, role')
+    .select('id, full_name, dni, phone, role')
     .eq('id', userId)
     .single();
 
@@ -30,7 +29,8 @@ async function fetchProfile(userId: string, email: string): Promise<User> {
   return {
     id: data.id,
     name: data.full_name,
-    email,
+    dni: data.dni,
+    phone: data.phone,
     role: data.role,
   };
 }
@@ -46,8 +46,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         try {
-          const profile = await fetchProfile(session.user.id, session.user.email!);
-          setUser(profile);
+          const profile = await fetchProfile(session.user.id);
+          if (profile.role !== 'socio') {
+            await supabase.auth.signOut();
+            setUser(null);
+          } else {
+            setUser(profile);
+          }
         } catch {
           setUser(null);
         }
@@ -69,32 +74,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
-      const profile = await fetchProfile(data.user.id, data.user.email!);
-      setUser(profile);
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  async function register(email: string, password: string, fullName: string) {
-    setIsLoading(true);
-    try {
-      // El trigger on_auth_user_created (definido en supabase-schema.sql) crea
-      // el profile solo. Acá solo mandamos full_name como metadata para que el
-      // trigger lo use en vez del default "Nuevo socio".
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: fullName } },
-      });
-      if (error) throw new Error(error.message);
-
-      // Si el proyecto tiene confirmación de email activada, data.session viene null
-      // acá y el usuario recién puede loguearse después de confirmar el mail.
-      if (data.session && data.user) {
-        const profile = await fetchProfile(data.user.id, data.user.email!);
-        setUser(profile);
+      const profile = await fetchProfile(data.user.id);
+      // Esta app es exclusiva para socios — el panel de administración vive
+      // en el dashboard web aparte, así que una cuenta admin no debe poder
+      // "entrar" acá (evita confusión y evita exponer el resto de la UI a
+      // rutas de socio que no le aplican).
+      if (profile.role !== 'socio') {
+        await supabase.auth.signOut();
+        throw new Error('Esta app es exclusiva para socios. Ingresá al panel web para administrar el gimnasio.');
       }
+      setUser(profile);
     } finally {
       setIsLoading(false);
     }
@@ -106,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isBootstrapping, login, register, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isBootstrapping, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

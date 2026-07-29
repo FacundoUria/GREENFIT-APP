@@ -2,19 +2,25 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
+import { dniToEmail } from '../../lib/dni';
 
-export default function LoginScreen({ navigation }: any) {
+// No hay auto-registro: las cuentas las crea el admin ("Gestión de socios").
+// El socio ingresa con su DNI; por default, la contraseña también es su DNI
+// hasta que el admin la resetee o el socio la cambie.
+export default function LoginScreen() {
   const { login, isLoading } = useAuth();
-  const [email, setEmail] = useState('');
+  const [dni, setDni] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   async function handleLogin() {
     setError('');
     try {
+      // El admin (creado a mano, con email real) puede tipear su email tal
+      // cual; el socio tipea su DNI y acá se arma el email sintético.
+      const identifier = dni.trim();
+      const email = identifier.includes('@') ? identifier : dniToEmail(identifier);
       await login(email, password);
-      // No hace falta navegar manualmente: RootNavigator reacciona
-      // al cambio de `user` y cambia de stack solo.
     } catch (e: any) {
       setError(e.message ?? 'Error al iniciar sesión');
     }
@@ -22,17 +28,17 @@ export default function LoginScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Green Fit</Text>
-      <Text style={styles.subtitle}>Iniciá sesión para reservar tu clase</Text>
+      <Text style={styles.title}>Greenfit</Text>
+      <Text style={styles.subtitle}>Ingresá con tu DNI para reservar tu clase</Text>
 
       <TextInput
         style={styles.input}
-        placeholder="Email"
+        placeholder="DNI"
         placeholderTextColor={colors.textSecondary}
         autoCapitalize="none"
         keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
+        value={dni}
+        onChangeText={setDni}
       />
       <TextInput
         style={styles.input}
@@ -47,15 +53,15 @@ export default function LoginScreen({ navigation }: any) {
 
       <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoading}>
         {isLoading ? (
-          <ActivityIndicator color={colors.white} />
+          <ActivityIndicator color={colors.onPrimary} />
         ) : (
           <Text style={styles.buttonText}>Ingresar</Text>
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-        <Text style={styles.link}>¿No tenés cuenta? Registrate</Text>
-      </TouchableOpacity>
+      <Text style={styles.hint}>
+        Tu contraseña inicial es tu DNI. Si no podés entrar, pedile a recepción que te la resetee.
+      </Text>
     </View>
   );
 }
@@ -80,8 +86,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
   },
-  buttonText: { color: colors.white, fontWeight: '700', fontSize: 16 },
-  link: { color: colors.primary, textAlign: 'center', marginTop: 20 },
+  buttonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 16 },
   error: { color: colors.danger, marginBottom: 12, textAlign: 'center' },
   hint: { color: colors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 40 },
 });

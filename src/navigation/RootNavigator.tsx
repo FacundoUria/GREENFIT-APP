@@ -3,8 +3,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import AuthStack from './AuthStack';
-import UserTabs from './UserTabs';
-import AdminTabs from './AdminTabs';
+import RootStack from './RootStack';
 import { colors } from '../theme/colors';
 
 // Esta es la pieza central del control de acceso por rol:
@@ -24,13 +23,7 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer>
-      {!user ? (
-        <AuthStack />
-      ) : user.role === 'admin' ? (
-        <AdminTabs />
-      ) : (
-        <UserTabs />
-      )}
+      {!user ? <AuthStack /> : <RootStack />}
     </NavigationContainer>
   );
 }

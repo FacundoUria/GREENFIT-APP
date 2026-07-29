@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "Greenfit",
+    "slug": "greenfit-app",
+    "version": "1.0.0",
+    "scheme": "greenfit",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-notifications"
+    ],
+    "android": {
+      "package": "com.greenfit.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000000"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.greenfit.app",
+      "supportsTablet": false
+    },
+    "web": {
+      "name": "Greenfit",
+      "shortName": "Greenfit",
+      "themeColor": "#0F0F0F",
+      "backgroundColor": "#0F0F0F",
+      "display": "standalone",
+      "orientation": "portrait",
+      "lang": "es-AR"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4e935614-5dc0-4cb5-b476-35980382ce2a"
+      }
+    }
+  }
+}
