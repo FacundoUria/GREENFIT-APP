@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator 
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { dniToEmail } from '../../lib/dni';
+import LoginInstallButton from '../../components/LoginInstallButton';
 
 // No hay auto-registro: las cuentas las crea el admin ("Gestión de socios").
 // El socio ingresa con su DNI; por default, la contraseña también es su DNI
@@ -29,7 +30,6 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Greenfit</Text>
-      <Text style={styles.subtitle}>Ingresá con tu DNI para reservar tu clase</Text>
 
       <TextInput
         style={styles.input}
@@ -59,17 +59,16 @@ export default function LoginScreen() {
         )}
       </TouchableOpacity>
 
-      <Text style={styles.hint}>
-        Tu contraseña inicial es tu DNI. Si no podés entrar, pedile a recepción que te la resetee.
-      </Text>
+      <Text style={styles.hint}>Ingresá con tu DNI.</Text>
+
+      <LoginInstallButton />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', padding: 24 },
-  title: { fontSize: 32, fontWeight: '800', color: colors.primary, textAlign: 'center' },
-  subtitle: { color: colors.textSecondary, textAlign: 'center', marginTop: 8, marginBottom: 32 },
+  title: { fontSize: 32, fontWeight: '800', color: colors.primary, textAlign: 'center', marginBottom: 32 },
   input: {
     backgroundColor: colors.surface,
     borderRadius: 12,
