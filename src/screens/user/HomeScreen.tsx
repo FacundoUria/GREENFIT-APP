@@ -242,7 +242,9 @@ export default function HomeScreen({ navigation }: any) {
           balancesConEstado.map(({ balance: b, isMembership, status }) => (
             <View key={b.id} style={styles.heroPlanRow}>
               <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.heroPlanName}>{b.discipline.name}</Text>
+                <Text style={styles.heroPlanName}>
+                  {isMembership ? 'Aparatos / Musculación' : b.discipline.name}
+                </Text>
                 <Text style={styles.heroPlanDetail}>
                   {isMembership
                     ? b.expiresAt
