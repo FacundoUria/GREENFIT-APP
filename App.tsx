@@ -4,6 +4,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
 import { registerPwa } from './src/pwa/registerPwa';
 import IosInstallBanner from './src/components/IosInstallBanner';
+import AndroidInstallBanner from './src/components/AndroidInstallBanner';
 
 export default function App() {
   useEffect(() => {
@@ -15,6 +16,7 @@ export default function App() {
       <StatusBar style="light" />
       <RootNavigator />
       <IosInstallBanner />
+      <AndroidInstallBanner />
     </AuthProvider>
   );
 }
