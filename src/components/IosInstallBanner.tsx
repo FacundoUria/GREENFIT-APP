@@ -3,23 +3,10 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
+import { isIosSafariBrowser, isAlreadyStandalone } from '../lib/pwaInstall';
 
 const DISMISS_KEY = 'greenfit:ios-install-banner-dismissed-at';
 const SNOOZE_DAYS = 14;
-
-function isIosSafariBrowser(): boolean {
-  const ua = window.navigator.userAgent;
-  const isIos = /iphone|ipad|ipod/i.test(ua) && !(window as any).MSStream;
-  const isSafari = /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(ua);
-  return isIos && isSafari;
-}
-
-function isAlreadyStandalone(): boolean {
-  return (
-    (window.navigator as any).standalone === true ||
-    window.matchMedia?.('(display-mode: standalone)').matches === true
-  );
-}
 
 // Safari en iOS no soporta el evento `beforeinstallprompt` (el que usan
 // Chrome/Android para el botón nativo "Instalar") — ahí la única forma de

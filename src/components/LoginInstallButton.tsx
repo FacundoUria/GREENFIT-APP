@@ -1,33 +1,18 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
+import { BeforeInstallPromptEvent, isIosSafariBrowser, isAlreadyStandalone } from '../lib/pwaInstall';
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-
-// Cuánto esperamos el evento `beforeinstallprompt` antes de asumir que este
-// navegador no lo va a disparar nunca (Safari/iOS, Firefox) y ocultar el
-// ícono -- sin esto quedaría un botón gris permanentemente inerte.
-const CHECK_TIMEOUT_MS = 2500;
-
-function isAlreadyStandalone(): boolean {
-  return (
-    (window.navigator as any).standalone === true ||
-    window.matchMedia?.('(display-mode: standalone)').matches === true
-  );
-}
-
-// Botón manual y discreto para instalar la PWA desde la pantalla de Login,
-// pensado para el socio que cerró/ignoró el modal automático (AndroidInstallBanner)
-// y quiere instalar más tarde. Mismo evento `beforeinstallprompt`, distinto
-// disparador (toque explícito en vez de un modal que aparece solo).
+// Botón manual y discreto para instalar la PWA desde la pantalla de Login.
+// Se muestra SIEMPRE (no depende de haber capturado `beforeinstallprompt`
+// todavía, ni de que el navegador lo dispare en absoluto) porque ese evento
+// puede tardar o directamente no existir (iOS Safari, Firefox). El único
+// motivo real para ocultarlo es que la PWA ya esté corriendo instalada.
 export default function LoginInstallButton() {
   const [deferredEvent, setDeferredEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [hidden, setHidden] = useState(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -38,42 +23,34 @@ export default function LoginInstallButton() {
 
     function handleBeforeInstallPrompt(event: Event) {
       event.preventDefault();
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       setDeferredEvent(event as BeforeInstallPromptEvent);
-      setHidden(false);
     }
 
     function handleAppInstalled() {
       setHidden(true);
       setDeferredEvent(null);
+      setShowManual(false);
     }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
-
-    // Si a esta altura ningún navegador soportado ya disparó el evento,
-    // asumimos que no lo va a hacer (ej. Safari/iOS) y ocultamos el ícono.
-    timeoutRef.current = setTimeout(() => {
-      setDeferredEvent((current) => {
-        if (!current) setHidden(true);
-        return current;
-      });
-    }, CHECK_TIMEOUT_MS);
-
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, []);
 
-  const handleInstall = useCallback(async () => {
-    if (!deferredEvent) return;
-    await deferredEvent.prompt();
-    // El evento solo se puede usar una vez, sin importar la elección.
-    await deferredEvent.userChoice;
-    setDeferredEvent(null);
-    setHidden(true);
+  const handlePress = useCallback(async () => {
+    if (deferredEvent) {
+      await deferredEvent.prompt();
+      // El evento solo se puede usar una vez, sin importar la elección.
+      await deferredEvent.userChoice;
+      setDeferredEvent(null);
+      return;
+    }
+    // Todavía no llegó el prompt nativo (o este navegador nunca lo dispara,
+    // ej. iOS Safari) -- guiamos al socio para que lo haga a mano.
+    setShowManual(true);
   }, [deferredEvent]);
 
   if (Platform.OS !== 'web' || hidden) return null;
@@ -81,15 +58,49 @@ export default function LoginInstallButton() {
   const disponible = !!deferredEvent;
 
   return (
-    <TouchableOpacity
-      style={[styles.button, disponible && styles.buttonDisponible]}
-      onPress={handleInstall}
-      disabled={!disponible}
-      accessibilityLabel="Instalar Greenfit como app"
-      hitSlop={8}
-    >
-      <Ionicons name="download-outline" size={18} color={disponible ? colors.primary : colors.textSecondary} />
-    </TouchableOpacity>
+    <>
+      <TouchableOpacity
+        style={[styles.button, disponible && styles.buttonDisponible]}
+        onPress={handlePress}
+        accessibilityLabel="Instalar Greenfit como app"
+        hitSlop={8}
+      >
+        <Ionicons name="download-outline" size={18} color={disponible ? colors.primary : colors.textSecondary} />
+      </TouchableOpacity>
+
+      {showManual && (
+        <View style={styles.overlay}>
+          <View style={styles.card}>
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowManual(false)} hitSlop={10}>
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <View style={styles.iconCircle}>
+              <Ionicons name="download-outline" size={26} color={colors.primary} />
+            </View>
+
+            <Text style={styles.title}>Instalá Greenfit</Text>
+            {isIosSafariBrowser() ? (
+              <Text style={styles.text}>
+                Tocá <Text style={styles.bold}>Compartir</Text>{' '}
+                <Ionicons name="arrow-redo-outline" size={13} color={colors.textPrimary} /> y luego{' '}
+                <Text style={styles.bold}>"Agregar a inicio"</Text>.
+              </Text>
+            ) : (
+              <Text style={styles.text}>
+                Tocá el menú <Text style={styles.bold}>⋮</Text> de tu navegador y elegí{' '}
+                <Text style={styles.bold}>"Instalar aplicación"</Text> o{' '}
+                <Text style={styles.bold}>"Agregar a pantalla principal"</Text>.
+              </Text>
+            )}
+
+            <TouchableOpacity style={styles.primaryButton} onPress={() => setShowManual(false)}>
+              <Text style={styles.primaryButtonText}>Entendido</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </>
   );
 }
 
@@ -112,4 +123,51 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0, 255, 56, 0.35)',
     opacity: 1,
   },
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    backdropFilter: 'blur(4px)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 60,
+    padding: 20,
+  } as any,
+  card: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  closeButton: { position: 'absolute', top: 14, right: 14, zIndex: 1 },
+  iconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8 },
+  text: { color: colors.textSecondary, fontSize: 13.5, lineHeight: 19, textAlign: 'center', marginBottom: 20 },
+  bold: { fontWeight: '700', color: colors.textPrimary },
+  primaryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    width: '100%',
+    alignItems: 'center',
+  },
+  primaryButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
 });

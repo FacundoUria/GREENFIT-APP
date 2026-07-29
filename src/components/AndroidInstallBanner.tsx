@@ -3,21 +3,10 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
+import { BeforeInstallPromptEvent, isAlreadyStandalone } from '../lib/pwaInstall';
 
 const DISMISS_KEY = 'greenfit:android-install-banner-dismissed-at';
 const SNOOZE_DAYS = 14;
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
-
-function isAlreadyStandalone(): boolean {
-  return (
-    (window.navigator as any).standalone === true ||
-    window.matchMedia?.('(display-mode: standalone)').matches === true
-  );
-}
 
 // Chrome/Edge/Android (y Chromium en general) disparan `beforeinstallprompt`
 // en vez de instalar solos — hay que interceptarlo, guardar el evento, y
