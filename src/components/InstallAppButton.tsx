@@ -4,12 +4,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { BeforeInstallPromptEvent, isIosSafariBrowser, isAlreadyStandalone } from '../lib/pwaInstall';
 
-// Botón manual y discreto para instalar la PWA desde la pantalla de Login.
+// Botón manual y discreto para instalar la PWA (usado en Login y en Perfil).
 // Se muestra SIEMPRE (no depende de haber capturado `beforeinstallprompt`
 // todavía, ni de que el navegador lo dispare en absoluto) porque ese evento
 // puede tardar o directamente no existir (iOS Safari, Firefox). El único
 // motivo real para ocultarlo es que la PWA ya esté corriendo instalada.
-export default function LoginInstallButton() {
+//
+// `position: 'fixed'` (no 'absolute') a propósito: en mobile Safari/Chrome
+// la barra de direcciones cambia la altura visible sin recalcular `100vh`
+// del contenedor raíz, así que un elemento "absolute" anclado al fondo de
+// ese contenedor puede terminar fuera de la pantalla visible. "fixed" lo
+// ancla directo al viewport real del navegador, sin ese problema.
+//
+// `bottomOffset` deja subir el botón en pantallas que además tienen el Tab
+// Bar inferior (ej. Perfil) -- sin esto queda tapado detrás de esa barra,
+// que se dibuja encima por estar más abajo en el árbol/con fondo opaco.
+export default function InstallAppButton({ bottomOffset = 18 }: { bottomOffset?: number }) {
   const [deferredEvent, setDeferredEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [hidden, setHidden] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -60,7 +70,7 @@ export default function LoginInstallButton() {
   return (
     <>
       <TouchableOpacity
-        style={[styles.button, disponible && styles.buttonDisponible]}
+        style={[styles.button, { bottom: bottomOffset }, disponible && styles.buttonDisponible]}
         onPress={handlePress}
         accessibilityLabel="Instalar Greenfit como app"
         hitSlop={8}
@@ -106,8 +116,7 @@ export default function LoginInstallButton() {
 
 const styles = StyleSheet.create({
   button: {
-    position: 'absolute',
-    bottom: 18,
+    position: 'fixed',
     right: 18,
     width: 36,
     height: 36,
@@ -118,7 +127,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     opacity: 0.55,
-  },
+    zIndex: 40,
+  } as any,
   buttonDisponible: {
     borderColor: 'rgba(0, 255, 56, 0.35)',
     opacity: 1,

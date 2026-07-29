@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator 
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { dniToEmail } from '../../lib/dni';
-import LoginInstallButton from '../../components/LoginInstallButton';
+import InstallAppButton from '../../components/InstallAppButton';
 
 // No hay auto-registro: las cuentas las crea el admin ("Gestión de socios").
 // El socio ingresa con su DNI; por default, la contraseña también es su DNI
@@ -61,7 +61,7 @@ export default function LoginScreen() {
 
       <Text style={styles.hint}>Ingresá con tu DNI.</Text>
 
-      <LoginInstallButton />
+      <InstallAppButton />
     </View>
   );
 }

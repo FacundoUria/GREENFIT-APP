@@ -16,6 +16,7 @@ import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { usePushPermission } from '../../hooks/usePushPermission';
 import PushBlockedModal from '../../components/PushBlockedModal';
+import InstallAppButton from '../../components/InstallAppButton';
 
 interface ProfileForm {
   fullName: string;
@@ -127,6 +128,7 @@ export default function ProfileScreen({ navigation }: any) {
   }
 
   return (
+    <>
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       {error && <Text style={styles.error}>{error}</Text>}
 
@@ -224,6 +226,8 @@ export default function ProfileScreen({ navigation }: any) {
         <Text style={styles.logoutText}>Cerrar sesión</Text>
       </TouchableOpacity>
     </ScrollView>
+    <InstallAppButton bottomOffset={78} />
+    </>
   );
 }
 
