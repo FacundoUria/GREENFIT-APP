@@ -454,18 +454,17 @@ create policy "notifications_select_recipient" on notifications
 
 -- ── PUSH_SUBSCRIPTIONS (Web Push / VAPID) ──────────────────────
 -- Un socio puede tener más de una fila (distintos navegadores/dispositivos
--- PWA instalados) — por eso no hay unique(user_id), sino unique(endpoint):
--- cada endpoint identifica una única suscripción del navegador, y volver a
--- suscribirse desde el mismo browser hace upsert sobre esa fila en vez de
--- duplicarla.
+-- PWA instalados). La suscripción viaja entera como jsonb en `subscription`
+-- (forma estándar de PushSubscription.toJSON(): {endpoint, keys:{p256dh,auth}})
+-- en vez de columnas planas -- el cliente/edge functions filtran por
+-- `subscription->>endpoint` para no duplicar filas del mismo navegador.
 create table push_subscriptions (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references profiles(id) on delete cascade,
-  endpoint text not null unique,
-  p256dh text not null,
-  auth text not null,
+  subscription jsonb not null,
   user_agent text,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 create index idx_push_subscriptions_user on push_subscriptions(user_id);

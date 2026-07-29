@@ -71,7 +71,7 @@ export interface Booking {
   userId: string;
   gymClass: GymClass;
   bookingDate: string; // "YYYY-MM-DD" — la ocurrencia puntual reservada
-  attended: boolean;
+  attended: boolean | null; // null = todavía sin marcar por el admin
   createdAt: string;
 }
 

@@ -86,8 +86,13 @@ export default function HistoryScreen() {
                 {new Date(`${item.bookingDate}T00:00:00`).toLocaleDateString('es-AR')}
               </Text>
             </View>
-            <Text style={[styles.status, item.attended ? styles.statusOk : styles.statusBad]}>
-              {item.attended ? 'Asistió' : 'No asistió'}
+            <Text
+              style={[
+                styles.status,
+                item.attended === true ? styles.statusOk : item.attended === false ? styles.statusBad : styles.statusPending,
+              ]}
+            >
+              {item.attended === true ? 'Asistió' : item.attended === false ? 'No asistió' : 'Sin marcar'}
             </Text>
           </View>
         )}
@@ -115,4 +120,5 @@ const styles = StyleSheet.create({
   status: { fontSize: 12, fontWeight: '700' },
   statusOk: { color: colors.primary },
   statusBad: { color: colors.danger },
+  statusPending: { color: colors.textSecondary },
 });
