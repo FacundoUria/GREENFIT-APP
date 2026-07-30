@@ -39,6 +39,28 @@ export async function fetchPacks(options?: { activeOnly?: boolean }): Promise<Pa
   return packs;
 }
 
+// Autocuración: si el alta/edición de un socio en el panel admin nunca
+// llegó a sincronizar `user_credits` (import masivo, "Editar Socio" en vez
+// de "Registrar Pago", un texto de plan que no matcheó ninguna disciplina,
+// etc.) esto rellena esos huecos genuinos server-side antes de leer el
+// balance -- nunca pisa un balance que ya exista, porque eso puede reflejar
+// consumo real hecho desde la PWA. Se puede (y conviene) llamar en cada
+// login/focus: es idempotente, solo actúa donde hay cero filas.
+export async function syncMyMembership(): Promise<{ vinculado: boolean; sincronizados: number } | null> {
+  const { data, error } = await supabase.rpc('sync_my_membership').single();
+  if (error) {
+    console.warn('[GreenFit] No se pudo autocurar el balance del socio:', error.message);
+    return null;
+  }
+  const resultado = data as { vinculado: boolean; sincronizados: number } | null;
+  if (resultado && resultado.vinculado === false) {
+    console.warn(
+      '[GreenFit] El usuario autenticado no matchea ninguna ficha en la tabla socios -- su plan/créditos no se pueden resolver hasta que quede vinculado por DNI.'
+    );
+  }
+  return resultado;
+}
+
 // El balance más reciente del socio para CADA disciplina en la que tenga
 // algo cargado (una fila por disciplina, no una sola global).
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {

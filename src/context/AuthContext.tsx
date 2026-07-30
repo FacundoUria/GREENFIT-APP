@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { syncMyMembership } from '../lib/creditsApi';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -56,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(null);
           } else {
             setUser(profile);
+            syncMyMembership();
           }
         } catch {
           setUser(null);
@@ -92,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Tu cuenta está inactiva. Contactá al gimnasio para más información.');
       }
       setUser(profile);
+      syncMyMembership();
     } finally {
       setIsLoading(false);
     }

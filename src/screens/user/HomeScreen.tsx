@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances } from '../../lib/creditsApi';
+import { fetchPacks, fetchUserBalances, syncMyMembership } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { formatCurrency } from '../../lib/currency';
@@ -105,6 +105,13 @@ export default function HomeScreen({ navigation }: any) {
     if (!user) return;
     setError(null);
     try {
+      // Antes de leer el balance, se intenta autocurar server-side (rellena
+      // huecos genuinos en `user_credits` si el alta/edición del socio en el
+      // panel nunca llegó a sincronizarlos) -- tiene que ir ANTES y esperado,
+      // no en el mismo Promise.all, porque si no fetchUserBalances puede
+      // correr antes de que la reparación termine de insertar.
+      await syncMyMembership();
+
       const [balancesResult, bookingsResult, packsResult] = await Promise.all([
         fetchUserBalances(user.id),
         fetchUpcomingBookings(user.id),
