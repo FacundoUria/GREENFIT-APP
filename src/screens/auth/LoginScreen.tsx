@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { dniToEmail } from '../../lib/dni';
@@ -12,6 +13,7 @@ export default function LoginScreen() {
   const { login, isLoading } = useAuth();
   const [dni, setDni] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   async function handleLogin() {
@@ -40,14 +42,24 @@ export default function LoginScreen() {
         value={dni}
         onChangeText={setDni}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Contraseña"
-        placeholderTextColor={colors.textSecondary}
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={styles.passwordWrap}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="Contraseña"
+          placeholderTextColor={colors.textSecondary}
+          secureTextEntry={!showPassword}
+          value={password}
+          onChangeText={setPassword}
+        />
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword((prev) => !prev)}
+          hitSlop={10}
+          accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        >
+          <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -77,6 +89,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
+  },
+  passwordWrap: { position: 'relative', justifyContent: 'center', marginBottom: 14 },
+  passwordInput: { paddingRight: 48, marginBottom: 0 },
+  eyeButton: {
+    position: 'absolute',
+    right: 2,
+    top: 0,
+    bottom: 0,
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   button: {
     backgroundColor: colors.primary,

@@ -52,13 +52,24 @@ self.addEventListener('push', (event) => {
   const options = {
     body: payload.body,
     icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    // Silueta blanca sobre transparente para la barra de estado de Android
+    // (a diferencia de icon-192, que es a color) -- sin esto Android dibuja
+    // un cuadrado solido porque el ícono a color no tiene transparencia
+    // real. iOS Safari no soporta este campo y lo ignora sin romper nada.
+    badge: '/icons/badge-monochrome-96x96.png',
     tag: payload.tag || 'greenfit-notification',
     data: { url: payload.url || '/' },
     vibrate: [100, 50, 100],
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title, options));
+  event.waitUntil(
+    self.registration.showNotification(payload.title, options).catch(() =>
+      // Fallback ultra-minimo: si algún campo (badge, vibrate, etc.) hace
+      // fallar showNotification en algún navegador, igual mostramos el
+      // aviso con lo indispensable en vez de perder la notificación entera.
+      self.registration.showNotification(payload.title, { body: payload.body })
+    )
+  );
 });
 
 // Al tocar la notificación: si ya hay una pestaña de la app abierta la
