@@ -8,6 +8,7 @@ import {
   unsubscribeFromWebPush,
 } from '../lib/webPush';
 import { savePushSubscription, deletePushSubscription } from '../lib/pushApi';
+import { isIosSafariBrowser, isAlreadyStandalone } from '../lib/pwaInstall';
 
 async function persistSubscription(userId: string, subscription: PushSubscription) {
   const json = subscription.toJSON();
@@ -34,6 +35,12 @@ export function usePushPermission(userId: string | undefined) {
   const [enabled, setEnabled] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // iOS Safari solo expone la Push API cuando la PWA corre en modo
+  // standalone (agregada a la pantalla de inicio, iOS 16.4+). En una
+  // pestaña normal `isWebPushSupported()` da false sin explicar por qué --
+  // esta bandera distingue ese caso para mostrarle al socio cómo instalar
+  // la app en vez de ocultarle el bloque de notificaciones sin más.
+  const [iosNeedsInstall, setIosNeedsInstall] = useState(false);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -41,6 +48,7 @@ export function usePushPermission(userId: string | undefined) {
       if (Platform.OS === 'web') {
         const ok = isWebPushSupported();
         setSupported(ok);
+        setIosNeedsInstall(isIosSafariBrowser() && !isAlreadyStandalone());
         setPermission(currentWebPermission());
         setEnabled(ok ? !!(await getExistingSubscription()) : false);
       } else {
@@ -86,7 +94,7 @@ export function usePushPermission(userId: string | undefined) {
     [userId]
   );
 
-  return { supported, enabled, permission, isLoading, toggle };
+  return { supported, enabled, permission, isLoading, toggle, iosNeedsInstall };
 }
 
 // Se dispara una sola vez al loguearse (punto 3 del pedido: "solicitar

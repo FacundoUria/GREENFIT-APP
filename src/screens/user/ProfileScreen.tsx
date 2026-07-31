@@ -16,6 +16,7 @@ import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { usePushPermission } from '../../hooks/usePushPermission';
 import PushBlockedModal from '../../components/PushBlockedModal';
+import PushNeedsInstallModal from '../../components/PushNeedsInstallModal';
 import InstallAppButton from '../../components/InstallAppButton';
 
 interface ProfileForm {
@@ -74,6 +75,7 @@ export default function ProfileScreen({ navigation }: any) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPushBlockedModal, setShowPushBlockedModal] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const pushPermission = usePushPermission(user?.id);
   const pushBloqueado = pushPermission.permission === 'denied';
 
@@ -182,19 +184,26 @@ export default function ProfileScreen({ navigation }: any) {
         )}
       </TouchableOpacity>
 
-      {pushPermission.supported && (
+      {(pushPermission.supported || pushPermission.iosNeedsInstall) && (
         <SectionCard icon="notifications-outline" title="Notificaciones">
           <View style={styles.row}>
             <View style={{ flex: 1, paddingRight: 12 }}>
               <Text style={styles.rowText}>Notificaciones push</Text>
               <Text style={pushBloqueado ? styles.rowSubtextWarning : styles.rowSubtext}>
-                {pushBloqueado
+                {pushPermission.iosNeedsInstall
+                  ? 'Agregá Greenfit a tu pantalla de inicio para activarlas.'
+                  : pushBloqueado
                   ? 'Bloqueadas en este dispositivo.'
                   : 'Avisos de clases, vencimientos y novedades del gimnasio.'}
               </Text>
             </View>
             {pushPermission.isLoading ? (
               <ActivityIndicator color={colors.primary} size="small" />
+            ) : pushPermission.iosNeedsInstall ? (
+              <TouchableOpacity style={styles.howToButton} onPress={() => setShowInstallModal(true)}>
+                <Ionicons name="download-outline" size={13} color={colors.primary} />
+                <Text style={styles.howToButtonText}>¿Cómo activarlas?</Text>
+              </TouchableOpacity>
             ) : pushBloqueado ? (
               <TouchableOpacity style={styles.howToButton} onPress={() => setShowPushBlockedModal(true)}>
                 <Ionicons name="lock-closed" size={13} color={colors.warning} />
@@ -213,6 +222,7 @@ export default function ProfileScreen({ navigation }: any) {
       )}
 
       <PushBlockedModal visible={showPushBlockedModal} onClose={() => setShowPushBlockedModal(false)} />
+      <PushNeedsInstallModal visible={showInstallModal} onClose={() => setShowInstallModal(false)} />
 
       <SectionCard icon="ellipsis-horizontal-circle-outline" title="Más opciones">
         <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('History')}>
