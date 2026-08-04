@@ -5,9 +5,10 @@ import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
 
 import HomeStack from './HomeStack';
-import BookingScreen from '../screens/user/BookingScreen';
+import AgendaMobileView from '../screens/user/AgendaMobileView';
 import ProfileStack from './ProfileStack';
 import UserRoutineScreen from '../screens/user/UserRoutineScreen';
+import ComunidadMobileView from '../screens/user/ComunidadMobileView';
 import { useNotificationSubscription } from '../hooks/useNotificationSubscription';
 import { useAutoRequestWebPush } from '../hooks/usePushPermission';
 
@@ -17,6 +18,7 @@ const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Inicio: 'home',
   Reservas: 'calendar',
   'Mi Rutina': 'barbell',
+  Comunidad: 'people',
   Perfil: 'person',
 };
 
@@ -41,8 +43,21 @@ export default function MainTabs() {
       })}
     >
       <Tab.Screen name="Inicio" component={HomeStack} />
-      <Tab.Screen name="Reservas" component={BookingScreen} />
+      {/* La ruta sigue llamándose "Reservas" (HomeScreen navega a ella con
+          ese nombre para el banner "Reservar" -- ver HomeScreen.tsx) pero
+          ahora renderiza AgendaMobileView (Módulo 2 del rediseño): Agenda
+          reemplaza a la vieja pantalla de Reservas, solo cambia el label
+          visible del tab. */}
+      <Tab.Screen name="Reservas" component={AgendaMobileView} options={{ tabBarLabel: 'Agenda' }} />
       <Tab.Screen name="Mi Rutina" component={UserRoutineScreen} />
+      {/* Comunidad pasó a tab de primer nivel (antes vivía como pantalla
+          empujada desde el tile de Perfil) -- es la función de retención/
+          red social del gym, no puede quedar escondida. Progreso hizo el
+          camino inverso: dejó de ser tab y ahora se abre desde el tile
+          "Logros" de Mi Perfil (ver ProfileStack.tsx) -- mismo route name
+          "Progreso" en su nueva ubicación, así que ese tile no necesitó
+          ningún cambio de código, solo cambió A DÓNDE resuelve. */}
+      <Tab.Screen name="Comunidad" component={ComunidadMobileView} />
       <Tab.Screen name="Perfil" component={ProfileStack} />
     </Tab.Navigator>
   );

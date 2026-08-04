@@ -2,7 +2,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
 import MainTabs from './MainTabs';
-import NotificationsScreen from '../screens/user/NotificationsScreen';
+import NotificacionesMobileView from '../screens/user/NotificacionesMobileView';
 import CredentialScreen from '../screens/user/CredentialScreen';
 
 const Stack = createNativeStackNavigator();
@@ -20,7 +20,7 @@ export default function RootStack() {
       <Stack.Screen name="MainTabs" component={MainTabs} />
       <Stack.Screen
         name="Notifications"
-        component={NotificationsScreen}
+        component={NotificacionesMobileView}
         options={{
           headerShown: true,
           title: 'Notificaciones',

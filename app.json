@@ -16,7 +16,13 @@
       "**/*"
     ],
     "plugins": [
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "GreenFit necesita acceso a tus fotos para que puedas compartir imágenes en la Comunidad."
+        }
+      ]
     ],
     "android": {
       "package": "com.greenfit.app",

@@ -26,6 +26,7 @@ import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } f
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
+import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
@@ -100,6 +101,7 @@ export default function HomeScreen({ navigation }: any) {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -134,6 +136,19 @@ export default function HomeScreen({ navigation }: any) {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  // Efecto aparte e independiente del de arriba -- así el contador del
+  // badge se refresca solo al volver de la pantalla de Notificaciones (ahí
+  // es donde cambia el estado de leído/no leído) sin tocar el `load` de
+  // balances/reservas que ya funciona.
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return;
+      fetchUnreadNotificationCount(user.id)
+        .then(setUnreadCount)
+        .catch((err) => console.error('No se pudo calcular el contador de notificaciones:', err.message));
+    }, [user])
   );
 
   async function handleSelectPack(pack: Pack) {
@@ -216,6 +231,11 @@ export default function HomeScreen({ navigation }: any) {
           onPress={() => navigation.navigate('Notifications')}
         >
           <Ionicons name="notifications-outline" size={22} color={colors.textPrimary} />
+          {unreadCount > 0 && (
+            <View style={styles.bellBadge}>
+              <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -430,6 +450,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  bellBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    paddingHorizontal: 3,
+    backgroundColor: colors.danger,
+    borderWidth: 1.5,
+    borderColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: { color: colors.white, fontSize: 9.5, fontWeight: '800' },
   error: { color: colors.danger, marginBottom: 12 },
   text: { color: colors.textSecondary, lineHeight: 20 },
 
