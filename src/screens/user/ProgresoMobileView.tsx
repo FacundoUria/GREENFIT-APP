@@ -20,6 +20,14 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateOnly } from '../../lib/classesApi';
 import { otorgarXpPr } from '../../lib/xpApi';
+import {
+  checkMetasDisponible,
+  fetchMetaActiva,
+  crearMeta,
+  completarMeta,
+  diasParaCompletar,
+  MetaPersonal,
+} from '../../lib/metasApi';
 
 // Vista nueva y paralela (Módulo 5 del rediseño) -- standalone, todavía sin
 // enganchar a ningún tab (a diferencia de Agenda/Perfil/Notificaciones, acá
@@ -369,22 +377,31 @@ export default function ProgresoMobileView() {
   const [editingLift, setEditingLift] = useState<PRCatalogItem | null>(null);
   const [prCatalogo, setPrCatalogo] = useState<PRCatalogItem[]>(PR_CATALOGO);
 
+  const [modoDemoMetas, setModoDemoMetas] = useState(false);
+  const [metaActiva, setMetaActiva] = useState<MetaPersonal | null>(null);
+  const [nuevaMetaTexto, setNuevaMetaTexto] = useState('');
+  const [creandoMeta, setCreandoMeta] = useState(false);
+  const [completandoMeta, setCompletandoMeta] = useState(false);
+
   const load = useCallback(async () => {
     if (!user) return;
     setError(null);
     try {
-      const [mes, historicasData, prsData, historialData, catalogo] = await Promise.all([
+      const [mes, historicasData, prsData, historialData, catalogo, metasOk] = await Promise.all([
         fetchBookingsDelMes(user.id),
         fetchAsistenciasHistoricas(user.id),
         loadPRs(user.id),
         loadHistorial(user.id),
         fetchPRCatalog(),
+        checkMetasDisponible(),
       ]);
       setBookingsDelMes(mes);
       setHistoricas(historicasData);
       setPrs(prsData);
       setHistorial(historialData);
       setPrCatalogo(catalogo ?? PR_CATALOGO);
+      setModoDemoMetas(!metasOk);
+      setMetaActiva(await fetchMetaActiva(user.id, !metasOk));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu progreso.');
     } finally {
@@ -420,6 +437,34 @@ export default function ProgresoMobileView() {
       otorgarXpPr(user.id).catch((err) => console.error('No se pudo otorgar XP de PR:', err.message));
     }
     setEditingLift(null);
+  }
+
+  async function handleCrearMeta() {
+    if (!user || !nuevaMetaTexto.trim()) return;
+    setCreandoMeta(true);
+    try {
+      await crearMeta(user.id, nuevaMetaTexto.trim(), modoDemoMetas);
+      setNuevaMetaTexto('');
+      setMetaActiva(await fetchMetaActiva(user.id, modoDemoMetas));
+    } catch (err) {
+      Alert.alert('No se pudo crear la meta', err instanceof Error ? err.message : 'Intentá de nuevo.');
+    } finally {
+      setCreandoMeta(false);
+    }
+  }
+
+  async function handleCompletarMeta() {
+    if (!user || !metaActiva) return;
+    setCompletandoMeta(true);
+    try {
+      await completarMeta(user.id, metaActiva, modoDemoMetas);
+      setMetaActiva(null);
+      Alert.alert('¡Meta completada! 🎉', modoDemoMetas ? 'En modo demo esto no suma XP real todavía.' : 'Sumaste +300 XP.');
+    } catch (err) {
+      Alert.alert('No se pudo completar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+    } finally {
+      setCompletandoMeta(false);
+    }
   }
 
   if (!user) return null;
@@ -544,6 +589,66 @@ export default function ProgresoMobileView() {
         })}
       </View>
 
+      <View style={styles.sectionTitleRow}>
+        <Ionicons name="flag-outline" size={16} color={colors.primary} />
+        <Text style={styles.sectionTitle}>Mi meta personal</Text>
+      </View>
+      <View style={styles.card}>
+        {modoDemoMetas && (
+          <Text style={styles.metaDemoText}>
+            Modo demo: completar una meta acá todavía no suma XP real (falta desplegar la migración).
+          </Text>
+        )}
+        {metaActiva ? (
+          (() => {
+            const faltan = diasParaCompletar(metaActiva);
+            return (
+              <>
+                <Text style={styles.metaTexto}>{metaActiva.texto}</Text>
+                <Text style={styles.metaFecha}>
+                  Creada el {formatFechaCorta(metaActiva.createdAt)} ·{' '}
+                  {faltan > 0 ? `podés completarla en ${faltan} ${faltan === 1 ? 'día' : 'días'}` : 'ya podés completarla'}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.metaButton, faltan > 0 && styles.metaButtonDisabled]}
+                  disabled={faltan > 0 || completandoMeta}
+                  onPress={handleCompletarMeta}
+                >
+                  {completandoMeta ? (
+                    <ActivityIndicator color={colors.onPrimary} size="small" />
+                  ) : (
+                    <Text style={styles.metaButtonText}>
+                      {faltan > 0 ? `Disponible en ${faltan} ${faltan === 1 ? 'día' : 'días'}` : 'Marcar como completada (+300 XP)'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </>
+            );
+          })()
+        ) : (
+          <>
+            <TextInput
+              style={styles.metaInput}
+              placeholder="Ej: Bajar 5kg, hacer 10 dominadas seguidas..."
+              placeholderTextColor={colors.textSecondary}
+              value={nuevaMetaTexto}
+              onChangeText={setNuevaMetaTexto}
+            />
+            <TouchableOpacity
+              style={[styles.metaButton, !nuevaMetaTexto.trim() && styles.metaButtonDisabled]}
+              disabled={!nuevaMetaTexto.trim() || creandoMeta}
+              onPress={handleCrearMeta}
+            >
+              {creandoMeta ? (
+                <ActivityIndicator color={colors.onPrimary} size="small" />
+              ) : (
+                <Text style={styles.metaButtonText}>Crear meta</Text>
+              )}
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
       <PRModal
         lift={editingLift}
         current={editingLift ? prs[editingLift.id] ?? null : null}
@@ -650,6 +755,22 @@ const styles = StyleSheet.create({
   prDate: { color: colors.textSecondary, fontSize: 10.5, marginTop: 3 },
   prEmptyRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   prEmptyText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
+
+  metaDemoText: { color: colors.warning, fontSize: 11.5, fontWeight: '600', marginBottom: 10, lineHeight: 16 },
+  metaTexto: { color: colors.textPrimary, fontSize: 14.5, fontWeight: '700', lineHeight: 20 },
+  metaFecha: { color: colors.textSecondary, fontSize: 12, marginTop: 6, marginBottom: 14 },
+  metaInput: {
+    backgroundColor: colors.background,
+    borderRadius: 10,
+    padding: 14,
+    color: colors.textPrimary,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  metaButton: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  metaButtonDisabled: { backgroundColor: colors.surfaceAlt },
+  metaButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13.5 },
 
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
   modalCard: {

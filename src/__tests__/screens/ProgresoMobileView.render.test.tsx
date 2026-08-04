@@ -9,9 +9,10 @@ jest.mock('../../context/AuthContext', () => ({
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'gte', 'lte'].forEach((m) => {
+  ['select', 'eq', 'gte', 'lte', 'is', 'limit', 'order'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
+  chain.maybeSingle = jest.fn().mockResolvedValue(result);
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
 }
@@ -28,7 +29,12 @@ describe('ProgresoMobileView (Módulo 5 -- PRs y evolución de cargas)', () => {
     await AsyncStorage.clear();
     // Sin bookings del mes/históricos -- simplifica las métricas a 0 y deja
     // el foco de estos tests en la parte de PRs, que es 100% local.
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
+    // metas_personales aparte: .maybeSingle() espera null (no []) cuando no
+    // hay meta activa.
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'metas_personales') return makeChain({ data: null, error: null });
+      return makeChain({ data: [], error: null });
+    });
   });
 
   it('arranca con el estado vacío del gráfico cuando no hay PRs cargados', async () => {
