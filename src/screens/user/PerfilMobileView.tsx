@@ -458,9 +458,16 @@ const styles = StyleSheet.create({
   // divisoria de Racha/Miembro desde/Clases. Alto fijo generoso para que
   // el Pitbull sobresalga por arriba (se recorta prolijo contra el
   // overflow:hidden + borderRadius de athleteCard, no contra un hueco).
+  // bottom NEGATIVO a propósito: el final real de athleteHeroRow (bottom:0)
+  // no es la línea divisoria visible -- esa vive ~34px más abajo (el
+  // marginTop+paddingTop de statsRow), así que sin este offset quedaba un
+  // hueco entre la cintura del Pitbull y la línea. Empujarlo hacia abajo
+  // además ayuda a que la cabeza completa entre en la zona no recortada
+  // por el overflow:hidden de la tarjeta (antes quedaba más arriba, más
+  // cerca del borde de recorte).
   mascotWrap: {
     position: 'absolute',
-    bottom: 0,
+    bottom: -30,
     right: 0,
     width: MASCOT_WIDTH,
     height: 175,
