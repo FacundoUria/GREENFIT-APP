@@ -120,6 +120,82 @@ export async function fetchAsistenciaHoyRegistrada(userId: string, modoDemo: boo
   return !!data;
 }
 
+// -- Racha real + "Clases del mes" -- reemplazan al placeholder fijo de
+// PerfilMobileView y al conteo histórico ("Clases" = TODAS las asistencias
+// de siempre, no las del mes). Ambas se calculan sobre las mismas fechas de
+// 'asistencia' de xp_events (cubre clase confirmada por el admin Y el botón
+// "¡Hoy entrené!" autoreportado, sin distinguir entre ambas fuentes -- para
+// el socio, cualquiera de las dos es "entrené ese día"), con el mismo
+// fallback a bookings.attended si xp_events todavía no existe.
+
+export async function fetchFechasAsistencia(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('xp_events')
+    .select('event_date')
+    .eq('user_id', userId)
+    .eq('event_type', 'asistencia');
+  if (!error) return Array.from(new Set((data ?? []).map((row: any) => row.event_date as string)));
+  if (!isMissingRelationError(error)) throw new Error(error.message);
+
+  const { data: bookingsData, error: bookingsError } = await supabase
+    .from('bookings')
+    .select('booking_date')
+    .eq('user_id', userId)
+    .eq('attended', true);
+  if (bookingsError) throw new Error(bookingsError.message);
+  return Array.from(new Set((bookingsData ?? []).map((row: any) => row.booking_date as string)));
+}
+
+// Días CONSECUTIVOS contando hacia atrás desde hoy. Si hoy todavía no se
+// registró nada, arranca a contar desde ayer -- la racha no se "apaga" de
+// golpe a la medianoche si todavía queda margen en el día de hoy para
+// entrenar y mantenerla; recién se pierde si pasa un día ENTERO sin
+// registrar (el primer hueco corta el conteo ahí mismo).
+export function calcularRachaDias(fechasAsistencia: string[], hoy: Date = new Date()): number {
+  const fechasSet = new Set(fechasAsistencia);
+  const cursor = new Date(hoy);
+  cursor.setHours(0, 0, 0, 0);
+  if (!fechasSet.has(formatDateOnly(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  let racha = 0;
+  while (fechasSet.has(formatDateOnly(cursor))) {
+    racha++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return racha;
+}
+
+// "Clases del mes" -- días DISTINTOS con asistencia registrada dentro del
+// mes en curso (no clases totales de siempre, ese era el bug: PerfilMobileView
+// mostraba fetchClasesRealizadas(), un conteo histórico completo, bajo la
+// etiqueta "Clases").
+export async function fetchClasesDelMes(userId: string): Promise<number> {
+  const now = new Date();
+  const inicioMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const hoyStr = formatDateOnly(now);
+
+  const { data, error } = await supabase
+    .from('xp_events')
+    .select('event_date')
+    .eq('user_id', userId)
+    .eq('event_type', 'asistencia')
+    .gte('event_date', inicioMes)
+    .lte('event_date', hoyStr);
+  if (!error) return new Set((data ?? []).map((row: any) => row.event_date as string)).size;
+  if (!isMissingRelationError(error)) throw new Error(error.message);
+
+  const { count, error: countError } = await supabase
+    .from('bookings')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('attended', true)
+    .gte('booking_date', inicioMes)
+    .lte('booking_date', hoyStr);
+  if (countError) throw new Error(countError.message);
+  return count ?? 0;
+}
+
 export type ResultadoAsistenciaDiaria = 'otorgado' | 'ya_registrado_hoy';
 
 export async function otorgarXpAsistenciaDiaria(userId: string, modoDemo: boolean): Promise<ResultadoAsistenciaDiaria> {

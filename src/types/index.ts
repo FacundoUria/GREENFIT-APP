@@ -8,6 +8,7 @@ export interface User {
   dni: string | null;
   phone: string | null;
   role: Role;
+  avatarUrl: string | null;
 }
 
 export type DisciplineKind = 'credits' | 'membership';

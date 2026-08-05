@@ -10,18 +10,45 @@ interface AuthContextType {
   isBootstrapping: boolean; // loading inicial: ¿ya había sesión guardada?
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  // Actualiza SOLO el avatar en memoria tras una subida exitosa -- evita un
+  // roundtrip completo a fetchProfile() y hace que el nuevo avatar se vea al
+  // instante en cualquier pantalla que lea useAuth().user.avatarUrl (Perfil,
+  // Feed/Ranking de Comunidad vía el propio post/mensaje que se acaba de
+  // crear, etc.) sin esperar a la próxima carga.
+  updateAvatarUrl: (avatarUrl: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// 42703 = undefined_column (Postgres) -- pasa si backend/supabase_migration_avatar.sql
+// (columna profiles.avatar_url) todavía no se corrió en este ambiente.
+function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === '42703') return true;
+  return (error.message ?? '').toLowerCase().includes('column');
+}
+
 // Trae el profile (rol incluido) de la tabla `profiles` para un usuario ya autenticado.
 // Sin esto tenemos sesión de Supabase pero no sabemos si es socio o admin.
+//
+// El login/bootstrap de TODA la app depende de que esto no rompa -- por eso
+// pide avatar_url con un fallback defensivo: si esa columna todavía no
+// existe (migración de avatar sin correr), reintenta sin ella en vez de
+// tirar abajo el login entero por un campo que es puramente decorativo.
 async function fetchProfile(userId: string): Promise<User & { active: boolean }> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, dni, phone, role, active')
+    .select('id, full_name, dni, phone, role, active, avatar_url')
     .eq('id', userId)
     .single();
+
+  if (error && isMissingColumnError(error)) {
+    ({ data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, dni, phone, role, active')
+      .eq('id', userId)
+      .single());
+  }
 
   if (error || !data) {
     throw new Error('No se pudo cargar el perfil del usuario.');
@@ -34,6 +61,7 @@ async function fetchProfile(userId: string): Promise<User & { active: boolean }>
     phone: data.phone,
     role: data.role,
     active: data.active ?? true,
+    avatarUrl: (data as any).avatar_url ?? null,
   };
 }
 
@@ -105,8 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  function updateAvatarUrl(avatarUrl: string) {
+    setUser((prev) => (prev ? { ...prev, avatarUrl } : prev));
+  }
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, isBootstrapping, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isBootstrapping, login, logout, updateAvatarUrl }}>
       {children}
     </AuthContext.Provider>
   );

@@ -115,4 +115,12 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     );
     await waitFor(() => expect(getByText('Disponible')).toBeTruthy());
   });
+
+  it('NO muestra el botón flotante "+" (se sacó de Agenda -- ahora es exclusivo de Comunidad, para no confundirlo con "crear publicación")', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
+    const { getByText, queryByLabelText } = render(<AgendaMobileView />);
+    await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+    expect(queryByLabelText('Nueva publicación')).toBeNull();
+    expect(queryByLabelText('Volver a hoy')).toBeNull();
+  });
 });

@@ -186,13 +186,16 @@ on conflict do nothing;
 -- con un filtro, solo suma el XP de tipo 'asistencia' cuyas reservas
 -- pertenecen a esa disciplina (PRs/metas/posteos no son de una disciplina
 -- puntual, así que no entran en un filtro por disciplina).
+-- Requiere profiles.avatar_url (backend/supabase_migration_avatar.sql) --
+-- correr esa migración ANTES que esta, o el `p.avatar_url` de abajo falla
+-- con "column does not exist".
 create or replace function public.community_ranking_xp(p_discipline_id uuid default null)
-returns table (user_id uuid, full_name text, total_xp int)
+returns table (user_id uuid, full_name text, avatar_url text, total_xp int)
 language sql
 security definer
 stable
 as $$
-  select xe.user_id, p.full_name, sum(xe.xp_amount)::int as total_xp
+  select xe.user_id, p.full_name, p.avatar_url, sum(xe.xp_amount)::int as total_xp
   from xp_events xe
   join profiles p on p.id = xe.user_id
   where p_discipline_id is null
@@ -205,7 +208,7 @@ as $$
          where b.id = xe.reference_id and c.discipline_id = p_discipline_id
        )
      )
-  group by xe.user_id, p.full_name
+  group by xe.user_id, p.full_name, p.avatar_url
   order by total_xp desc
   limit 20;
 $$;

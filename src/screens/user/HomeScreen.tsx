@@ -28,6 +28,9 @@ import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 import HoyEntreneButton from '../../components/HoyEntreneButton';
+import XpProgressRing from '../../components/XpProgressRing';
+import XpInfoModal from '../../components/XpInfoModal';
+import { fetchTotalXp, calcularResumenXp, XP_POR_NIVEL } from '../../lib/xpApi';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
@@ -103,6 +106,8 @@ export default function HomeScreen({ navigation }: any) {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [totalXp, setTotalXp] = useState(0);
+  const [xpInfoVisible, setXpInfoVisible] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -115,14 +120,16 @@ export default function HomeScreen({ navigation }: any) {
       // correr antes de que la reparación termine de insertar.
       await syncMyMembership();
 
-      const [balancesResult, bookingsResult, packsResult] = await Promise.all([
+      const [balancesResult, bookingsResult, packsResult, xpResult] = await Promise.all([
         fetchUserBalances(user.id),
         fetchUpcomingBookings(user.id),
         fetchPacks({ activeOnly: true }),
+        fetchTotalXp(user.id),
       ]);
       setBalances(balancesResult);
       setUpcomingBookings(bookingsResult);
       setPacks(packsResult);
+      setTotalXp(xpResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu información.');
     } finally {
@@ -216,6 +223,7 @@ export default function HomeScreen({ navigation }: any) {
     return { balance: b, isMembership, status };
   });
   const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
+  const resumenXp = calcularResumenXp(totalXp);
 
   return (
     <ScrollView
@@ -302,7 +310,37 @@ export default function HomeScreen({ navigation }: any) {
         )}
       </View>
 
-      {user && <HoyEntreneButton userId={user.id} />}
+      {/* Widget "Progreso Diario & Check-In" -- reemplaza al botón suelto de
+          antes: ahora vive con el anillo de XP hacia el próximo nivel y el
+          acceso a las reglas, todo en un solo lugar del Dashboard. */}
+      {user && (
+        <View style={styles.progressCard}>
+          <View style={styles.progressHeaderRow}>
+            <Text style={styles.progressTitle}>Progreso Diario</Text>
+            <TouchableOpacity
+              onPress={() => setXpInfoVisible(true)}
+              hitSlop={8}
+              accessibilityLabel="¿Cómo ganar XP?"
+            >
+              <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.progressRingRow}>
+            <XpProgressRing
+              xpEnNivel={resumenXp.xpEnNivel}
+              xpParaNivel={XP_POR_NIVEL}
+              nivel={resumenXp.nivel}
+              size={78}
+              strokeWidth={7}
+            />
+            <Text style={styles.progressHint}>
+              Te faltan <Text style={styles.progressHintStrong}>{resumenXp.xpParaSubir} XP</Text> para el próximo
+              nivel.
+            </Text>
+          </View>
+          <HoyEntreneButton userId={user.id} />
+        </View>
+      )}
 
       {!isLoading &&
         (nextBooking ? (
@@ -348,18 +386,6 @@ export default function HomeScreen({ navigation }: any) {
               </Text>
             </View>
           ))}
-        </View>
-      )}
-
-      {!isLoading && (
-        <View style={styles.buyCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.buyCardTitle}>Mi Pase</Text>
-            <Text style={styles.buyCardText}>Sumá créditos o renová tu pase cuando quieras.</Text>
-          </View>
-          <TouchableOpacity style={styles.buyButton} onPress={() => setShowBuyModal(true)}>
-            <Text style={styles.buyButtonText}>Comprar</Text>
-          </TouchableOpacity>
         </View>
       )}
 
@@ -435,6 +461,8 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      <XpInfoModal visible={xpInfoVisible} onClose={() => setXpInfoVisible(false)} />
     </ScrollView>
   );
 }
@@ -575,21 +603,21 @@ const styles = StyleSheet.create({
   upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   upcomingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textSecondary },
   upcomingText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
-  buyCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+
+  progressCard: {
     backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 16,
     marginTop: 16,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.surfaceAlt,
   },
-  buyCardTitle: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  buyCardText: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-  buyButton: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
-  buyButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+  progressHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressTitle: { color: colors.textPrimary, fontSize: 14.5, fontWeight: '700' },
+  progressRingRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14, marginBottom: 4 },
+  progressHint: { flex: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
+  progressHintStrong: { color: colors.primary, fontWeight: '800' },
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: colors.background,

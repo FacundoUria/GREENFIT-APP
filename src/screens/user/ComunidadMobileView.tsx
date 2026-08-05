@@ -21,6 +21,7 @@ import { useAuth } from '../../context/AuthContext';
 import {
   checkComunidadDisponible,
   checkRankingDisponible,
+  checkMensajesDisponible,
   fetchMisClasesDelMes,
   fetchDisciplinasGrupales,
   fetchFeed,
@@ -28,23 +29,21 @@ import {
   toggleReaction,
   fetchComentarios,
   agregarComentario,
-  fetchGrupos,
-  crearGrupo,
-  unirseAGrupo,
-  eliminarGrupo,
-  puedeUnirseAGrupo,
-  fetchMensajesGrupo,
-  enviarMensajeGrupo,
   fetchRanking,
   subirFotoComunidad,
+  abrirChatPrivado,
+  fetchInboxMensajes,
+  fetchMensajesPrivados,
+  enviarMensajePrivado,
   ComunidadPost,
   ComunidadComentario,
-  ComunidadGrupo,
-  ComunidadMensaje,
   RankingEntry,
   DisciplinaGrupal,
+  DmThreadResumen,
+  DmMensaje,
 } from '../../lib/comunidadApi';
 import { fetchTotalXp, calcularResumenXp, otorgarXpPost } from '../../lib/xpApi';
+import Avatar from '../../components/Avatar';
 
 // Vista nueva y paralela (Módulo 6 del rediseño) -- tab de primer nivel en
 // MainTabs.tsx (Comunidad es la función de retención del gym, no puede
@@ -54,17 +53,16 @@ import { fetchTotalXp, calcularResumenXp, otorgarXpPost } from '../../lib/xpApi'
 // En resumen, las tablas `community_*` todavía no están desplegadas
 // (backend/supabase_migration_comunidad.sql existe pero no se corrió), así
 // que por default esta pantalla arranca en "modo demo" -- un banner arriba
-// de Feed/Grupos lo deja clarísimo, y el ranking usa datos de muestra salvo
-// el conteo propio del socio (fetchMisClasesDelMes), que siempre es real.
+// de Feed/Mensajes lo deja clarísimo, y el ranking usa datos de muestra
+// salvo el XP propio del socio, que siempre es real.
+//
+// "Mi Box" (grupos por disciplina) se reemplazó por "Mensajes" (chats
+// privados 1 a 1, ver backend/supabase_migration_mensajes.sql) -- decisión
+// explícita del usuario. Se abre un chat tocando el avatar/nombre de un
+// socio en el Feed o en el Ranking; la pestaña "Mensajes" es la bandeja de
+// chats activos (hilos con al menos un mensaje real).
 
-type Tab = 'feed' | 'grupos' | 'ranking';
-
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
+type Tab = 'feed' | 'mensajes' | 'ranking';
 
 function formatRelativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -83,12 +81,8 @@ interface AsistenciaHistorica {
 
 // Mismo query que ProgresoMobileView.fetchAsistenciasHistoricas -- se
 // duplica acá por el mismo criterio (vistas paralelas, no se tocan entre
-// sí). Sirve para resolver nivel + disciplina principal del USUARIO ACTUAL,
-// que sí puede leer sus propias reservas bajo RLS -- y de paso, qué
-// disciplinas grupales puede usar como filtro al crear un grupo restringido
-// (solo puede restringir a una disciplina en la que ÉL mismo tenga
-// actividad, si no su propio auto-join al crearlo chocaría contra la
-// policy de RLS que exige créditos en esa disciplina).
+// sí). Sirve para resolver la disciplina principal del USUARIO ACTUAL, que
+// sí puede leer sus propias reservas bajo RLS.
 async function fetchHistoricoPropio(userId: string): Promise<AsistenciaHistorica[]> {
   const { data, error } = await supabase
     .from('bookings')
@@ -104,15 +98,23 @@ async function fetchHistoricoPropio(userId: string): Promise<AsistenciaHistorica
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'feed', label: 'Feed' },
-  { key: 'grupos', label: 'Mi Box' },
+  { key: 'mensajes', label: 'Mensajes' },
   { key: 'ranking', label: 'Ranking' },
 ];
+
+interface DmChatActivo {
+  threadId: string;
+  otherUserId: string;
+  otherUserName: string;
+  otherAvatarUrl: string | null;
+}
 
 export default function ComunidadMobileView() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('feed');
   const [modoDemo, setModoDemo] = useState(false);
   const [rankingDemo, setRankingDemo] = useState(false);
+  const [mensajesDemo, setMensajesDemo] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -121,20 +123,16 @@ export default function ComunidadMobileView() {
   const [misClasesDelMes, setMisClasesDelMes] = useState(0);
   const [miXpTotal, setMiXpTotal] = useState(0);
   const [disciplinasGrupales, setDisciplinasGrupales] = useState<DisciplinaGrupal[]>([]);
-  const [misDisciplinasParaGrupo, setMisDisciplinasParaGrupo] = useState<DisciplinaGrupal[]>([]);
 
   const [posts, setPosts] = useState<ComunidadPost[]>([]);
   const [expandedComments, setExpandedComments] = useState<Record<string, ComunidadComentario[]>>({});
   const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
 
-  const [grupos, setGrupos] = useState<ComunidadGrupo[]>([]);
-  const [nuevoGrupoNombre, setNuevoGrupoNombre] = useState('');
-  const [nuevoGrupoDisciplina, setNuevoGrupoDisciplina] = useState<DisciplinaGrupal | null>(null);
-  const [creandoGrupo, setCreandoGrupo] = useState(false);
-  const [chatGroup, setChatGroup] = useState<ComunidadGrupo | null>(null);
-  const [chatMensajes, setChatMensajes] = useState<ComunidadMensaje[]>([]);
-  const [chatDraft, setChatDraft] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [inboxMensajes, setInboxMensajes] = useState<DmThreadResumen[]>([]);
+  const [dmChat, setDmChat] = useState<DmChatActivo | null>(null);
+  const [dmMensajes, setDmMensajes] = useState<DmMensaje[]>([]);
+  const [dmDraft, setDmDraft] = useState('');
+  const [dmLoading, setDmLoading] = useState(false);
 
   const [ranking, setRanking] = useState<RankingEntry[]>([]);
   const [rankingDisciplina, setRankingDisciplina] = useState<DisciplinaGrupal | null>(null);
@@ -148,9 +146,10 @@ export default function ComunidadMobileView() {
     if (!user) return;
     setError(null);
     try {
-      const [feedOk, rankOk, misClases, historico, gruposDisponibles, totalXp] = await Promise.all([
+      const [feedOk, rankOk, mensajesOk, misClases, historico, gruposDisponibles, totalXp] = await Promise.all([
         checkComunidadDisponible(),
         checkRankingDisponible(),
+        checkMensajesDisponible(),
         fetchMisClasesDelMes(user.id),
         fetchHistoricoPropio(user.id),
         fetchDisciplinasGrupales(),
@@ -158,6 +157,7 @@ export default function ComunidadMobileView() {
       ]);
       setModoDemo(!feedOk);
       setRankingDemo(!rankOk);
+      setMensajesDemo(!mensajesOk);
       setMisClasesDelMes(misClases);
       setMiXpTotal(totalXp);
       // Mismo nivel real (XP) que muestra el badge de Mi Perfil -- se
@@ -170,18 +170,15 @@ export default function ComunidadMobileView() {
       const top = Array.from(conteo.entries()).sort((a, b) => b[1] - a[1])[0];
       setMiDisciplina(top ? top[0] : null);
 
-      const misNombres = new Set(historico.map((h) => h.disciplineTitle));
-      setMisDisciplinasParaGrupo(gruposDisponibles.filter((d) => misNombres.has(d.name)));
-
-      const [feed, gruposList, rankingList] = await Promise.all([
+      const [feed, rankingList, inbox] = await Promise.all([
         fetchFeed(user.id, !feedOk),
-        fetchGrupos(user.id, !feedOk),
         fetchRanking(!rankOk, null),
+        fetchInboxMensajes(user.id, !mensajesOk),
       ]);
       setPosts(feed);
-      setGrupos(gruposList);
       setRanking(rankingList);
       setRankingDisciplina(null);
+      setInboxMensajes(inbox);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar la comunidad.');
     } finally {
@@ -238,7 +235,7 @@ export default function ComunidadMobileView() {
           }
         }
       }
-      await crearPost(user.id, user.name, composerText.trim(), miNivel, miDisciplina, mediaUrl, modoDemo);
+      await crearPost(user.id, user.name, user.avatarUrl, composerText.trim(), miNivel, miDisciplina, mediaUrl, modoDemo);
       // +25 XP, tope 1 por día (lo hace cumplir el índice único de
       // xp_events del lado del servidor) -- efecto secundario, no bloquea
       // la publicación si falla.
@@ -295,7 +292,7 @@ export default function ComunidadMobileView() {
     const texto = (commentDraft[postId] ?? '').trim();
     if (!texto) return;
     try {
-      await agregarComentario(user.id, user.name, postId, texto, modoDemo);
+      await agregarComentario(user.id, user.name, user.avatarUrl, postId, texto, modoDemo);
       setCommentDraft((prev) => ({ ...prev, [postId]: '' }));
       const comentarios = await fetchComentarios(user.id, postId, modoDemo);
       setExpandedComments((prev) => ({ ...prev, [postId]: comentarios }));
@@ -305,86 +302,55 @@ export default function ComunidadMobileView() {
     }
   }
 
-  // -- Grupos --
+  // -- Mensajes privados --
 
-  async function handleCrearGrupo() {
-    if (!user || !nuevoGrupoNombre.trim()) return;
-    setCreandoGrupo(true);
+  // Se llama al tocar el avatar/nombre de OTRO socio en el Feed o el
+  // Ranking -- abre (o crea) el hilo 1 a 1 y lo muestra directo, sin pasar
+  // por la bandeja. Tocarse a uno mismo no hace nada (no tiene sentido
+  // chatear con uno mismo).
+  async function handleAbrirChatPrivado(otherUserId: string, otherUserName: string, otherAvatarUrl: string | null) {
+    if (!user || otherUserId === user.id) return;
+    setDmLoading(true);
     try {
-      await crearGrupo(
-        user.id,
-        nuevoGrupoNombre.trim(),
-        nuevoGrupoDisciplina?.id ?? null,
-        nuevoGrupoDisciplina?.name ?? null,
-        modoDemo
-      );
-      setNuevoGrupoNombre('');
-      setNuevoGrupoDisciplina(null);
-      setGrupos(await fetchGrupos(user.id, modoDemo));
+      const threadId = await abrirChatPrivado(user.id, otherUserId, otherUserName, otherAvatarUrl, mensajesDemo);
+      setDmChat({ threadId, otherUserId, otherUserName, otherAvatarUrl });
+      setDmMensajes(await fetchMensajesPrivados(user.id, threadId, mensajesDemo));
     } catch (err) {
-      Alert.alert('No se pudo crear el grupo', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      Alert.alert('No se pudo abrir el chat', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
-      setCreandoGrupo(false);
+      setDmLoading(false);
     }
   }
 
-  async function handleUnirseGrupo(grupo: ComunidadGrupo) {
+  async function abrirDesdeInbox(thread: DmThreadResumen) {
     if (!user) return;
+    setDmChat({
+      threadId: thread.threadId,
+      otherUserId: thread.otherUserId,
+      otherUserName: thread.otherUserName,
+      otherAvatarUrl: thread.otherAvatarUrl,
+    });
+    setDmLoading(true);
     try {
-      const elegible = await puedeUnirseAGrupo(user.id, grupo.disciplineId);
-      if (!elegible) {
-        Alert.alert(
-          'Grupo restringido',
-          `"${grupo.name}" es solo para socios con créditos en ${grupo.disciplineName ?? 'esa disciplina'}.`
-        );
-        return;
-      }
-      await unirseAGrupo(user.id, grupo.id, modoDemo);
-      setGrupos(await fetchGrupos(user.id, modoDemo));
-    } catch (err) {
-      Alert.alert('No se pudo unir al grupo', err instanceof Error ? err.message : 'Intentá de nuevo.');
-    }
-  }
-
-  function handleEliminarGrupo(grupo: ComunidadGrupo) {
-    Alert.alert('Eliminar grupo', `¿Eliminar "${grupo.name}"? Esta acción no se puede deshacer.`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          if (!user) return;
-          try {
-            await eliminarGrupo(user.id, grupo.id, modoDemo);
-            if (chatGroup?.id === grupo.id) setChatGroup(null);
-            setGrupos(await fetchGrupos(user.id, modoDemo));
-          } catch (err) {
-            Alert.alert('No se pudo eliminar', err instanceof Error ? err.message : 'Intentá de nuevo.');
-          }
-        },
-      },
-    ]);
-  }
-
-  async function abrirChatGrupo(grupo: ComunidadGrupo) {
-    if (!user) return;
-    setChatGroup(grupo);
-    setChatLoading(true);
-    try {
-      setChatMensajes(await fetchMensajesGrupo(user.id, grupo.id, modoDemo));
+      setDmMensajes(await fetchMensajesPrivados(user.id, thread.threadId, mensajesDemo));
     } catch (err) {
       Alert.alert('No se pudieron cargar los mensajes', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
-      setChatLoading(false);
+      setDmLoading(false);
     }
   }
 
-  async function handleEnviarMensaje() {
-    if (!user || !chatGroup || !chatDraft.trim()) return;
+  async function handleEnviarMensajePrivado() {
+    if (!user || !dmChat || !dmDraft.trim()) return;
     try {
-      await enviarMensajeGrupo(user.id, user.name, chatGroup.id, chatDraft.trim(), modoDemo);
-      setChatDraft('');
-      setChatMensajes(await fetchMensajesGrupo(user.id, chatGroup.id, modoDemo));
+      await enviarMensajePrivado(user.id, user.name, user.avatarUrl, dmChat.threadId, dmDraft.trim(), mensajesDemo);
+      setDmDraft('');
+      setDmMensajes(await fetchMensajesPrivados(user.id, dmChat.threadId, mensajesDemo));
+      // Refresca la bandeja en segundo plano (best-effort) para que este
+      // hilo aparezca/suba en "Mensajes" la próxima vez que se abra ese tab.
+      fetchInboxMensajes(user.id, mensajesDemo)
+        .then(setInboxMensajes)
+        .catch(() => {});
     } catch (err) {
       Alert.alert('No se pudo enviar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
@@ -448,27 +414,36 @@ export default function ComunidadMobileView() {
                 return (
                   <View key={post.id} style={styles.postCard}>
                     <View style={styles.postHeaderRow}>
-                      <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{getInitials(post.authorName)}</Text>
-                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleAbrirChatPrivado(post.authorId, post.authorName, post.authorAvatarUrl)}
+                        disabled={post.authorId === user.id}
+                        accessibilityLabel={`Chatear con ${post.authorName}`}
+                      >
+                        <Avatar uri={post.authorAvatarUrl} name={post.authorName} size={38} />
+                      </TouchableOpacity>
                       <View style={{ flex: 1 }}>
-                        <View style={styles.postHeaderNameRow}>
-                          <Text style={styles.postAuthor} numberOfLines={1}>
-                            {post.authorName}
-                          </Text>
-                          {post.authorNivel != null && (
-                            <View style={styles.nivelBadge}>
-                              <Text style={styles.nivelBadgeText}>N{post.authorNivel}</Text>
-                            </View>
-                          )}
-                          {disciplineStyle && (
-                            <View style={[styles.disciplineBadge, { backgroundColor: `${disciplineStyle.color}26` }]}>
-                              <Text style={[styles.disciplineBadgeText, { color: disciplineStyle.color }]}>
-                                {post.authorDiscipline}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
+                        <TouchableOpacity
+                          onPress={() => handleAbrirChatPrivado(post.authorId, post.authorName, post.authorAvatarUrl)}
+                          disabled={post.authorId === user.id}
+                        >
+                          <View style={styles.postHeaderNameRow}>
+                            <Text style={styles.postAuthor} numberOfLines={1}>
+                              {post.authorName}
+                            </Text>
+                            {post.authorNivel != null && (
+                              <View style={styles.nivelBadge}>
+                                <Text style={styles.nivelBadgeText}>N{post.authorNivel}</Text>
+                              </View>
+                            )}
+                            {disciplineStyle && (
+                              <View style={[styles.disciplineBadge, { backgroundColor: `${disciplineStyle.color}26` }]}>
+                                <Text style={[styles.disciplineBadgeText, { color: disciplineStyle.color }]}>
+                                  {post.authorDiscipline}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </TouchableOpacity>
                         <Text style={styles.postTime}>{formatRelativeTime(post.createdAt)}</Text>
                       </View>
                     </View>
@@ -502,8 +477,11 @@ export default function ComunidadMobileView() {
                         {comentarios.length === 0 && <Text style={styles.emptyCommentsText}>Todavía no hay comentarios.</Text>}
                         {comentarios.map((c) => (
                           <View key={c.id} style={styles.commentRow}>
-                            <Text style={styles.commentAuthor}>{c.authorName}</Text>
-                            <Text style={styles.commentBody}>{c.body}</Text>
+                            <Avatar uri={c.authorAvatarUrl} name={c.authorName} size={22} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.commentAuthor}>{c.authorName}</Text>
+                              <Text style={styles.commentBody}>{c.body}</Text>
+                            </View>
                           </View>
                         ))}
                         <View style={styles.commentInputRow}>
@@ -526,111 +504,36 @@ export default function ComunidadMobileView() {
             </>
           )}
 
-          {tab === 'grupos' && (
+          {tab === 'mensajes' && (
             <>
-              {modoDemo && (
+              {mensajesDemo && (
                 <View style={styles.demoBanner}>
                   <Ionicons name="flask-outline" size={14} color={colors.warning} />
                   <Text style={styles.demoBannerText}>
-                    Modo demo: grupos de ejemplo guardados en este dispositivo, todavía no sincronizan con otros socios.
+                    Modo demo: los mensajes que mandes quedan guardados en este dispositivo -- todavía no está
+                    conectada la mensajería real (falta correr la migración de Mensajes).
                   </Text>
                 </View>
               )}
-              <View style={styles.crearGrupoRow}>
-                <TextInput
-                  style={styles.crearGrupoInput}
-                  placeholder="Nombre del grupo (ej: CrossFit Mañana)"
-                  placeholderTextColor={colors.textSecondary}
-                  value={nuevoGrupoNombre}
-                  onChangeText={setNuevoGrupoNombre}
-                />
-                <TouchableOpacity style={styles.crearGrupoButton} onPress={handleCrearGrupo} disabled={creandoGrupo}>
-                  {creandoGrupo ? (
-                    <ActivityIndicator color={colors.onPrimary} size="small" />
-                  ) : (
-                    <Ionicons name="add" size={20} color={colors.onPrimary} />
-                  )}
-                </TouchableOpacity>
-              </View>
-
-              {misDisciplinasParaGrupo.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipsRow}
-                  style={{ marginBottom: 16 }}
-                >
-                  <TouchableOpacity
-                    style={[styles.filterChip, !nuevoGrupoDisciplina && styles.filterChipActive]}
-                    onPress={() => setNuevoGrupoDisciplina(null)}
-                  >
-                    <Text style={[styles.filterChipText, !nuevoGrupoDisciplina && styles.filterChipTextActive]}>
-                      General
-                    </Text>
-                  </TouchableOpacity>
-                  {misDisciplinasParaGrupo.map((d) => (
-                    <TouchableOpacity
-                      key={d.id}
-                      style={[styles.filterChip, nuevoGrupoDisciplina?.id === d.id && styles.filterChipActive]}
-                      onPress={() => setNuevoGrupoDisciplina(d)}
-                    >
-                      <Text
-                        style={[styles.filterChipText, nuevoGrupoDisciplina?.id === d.id && styles.filterChipTextActive]}
-                      >
-                        {d.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+              {inboxMensajes.length === 0 && (
+                <Text style={styles.emptyText}>
+                  Todavía no tenés conversaciones. Iniciá una tocando el avatar de un socio en el Feed o el Ranking.
+                </Text>
               )}
-
-              {grupos.length === 0 && <Text style={styles.emptyText}>Todavía no hay grupos -- creá el primero.</Text>}
-              {grupos.map((g) => {
-                const disciplineStyle = g.disciplineName ? getDisciplineStyle(g.disciplineName) : null;
-                return (
-                  <View key={g.id} style={styles.groupCard}>
-                    <View style={styles.groupIconCircle}>
-                      <Ionicons name="people" size={18} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.groupNameRow}>
-                        <Text style={styles.groupName} numberOfLines={1}>
-                          {g.name}
-                        </Text>
-                        {disciplineStyle && (
-                          <View style={[styles.disciplineBadge, { backgroundColor: `${disciplineStyle.color}26` }]}>
-                            <Text style={[styles.disciplineBadgeText, { color: disciplineStyle.color }]}>
-                              {g.disciplineName}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={styles.groupMeta}>
-                        {g.memberCount} {g.memberCount === 1 ? 'miembro' : 'miembros'}
-                      </Text>
-                    </View>
-                    {g.createdBy === user.id && (
-                      <TouchableOpacity
-                        onPress={() => handleEliminarGrupo(g)}
-                        hitSlop={8}
-                        style={styles.groupDeleteButton}
-                        accessibilityLabel={`Eliminar ${g.name}`}
-                      >
-                        <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                      </TouchableOpacity>
-                    )}
-                    {g.isMember ? (
-                      <TouchableOpacity style={styles.groupOpenButton} onPress={() => abrirChatGrupo(g)}>
-                        <Text style={styles.groupOpenButtonText}>Abrir chat</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity style={styles.groupJoinButton} onPress={() => handleUnirseGrupo(g)}>
-                        <Text style={styles.groupJoinButtonText}>Unirme</Text>
-                      </TouchableOpacity>
-                    )}
+              {inboxMensajes.map((thread) => (
+                <TouchableOpacity key={thread.threadId} style={styles.inboxRow} onPress={() => abrirDesdeInbox(thread)}>
+                  <Avatar uri={thread.otherAvatarUrl} name={thread.otherUserName} size={44} />
+                  <View style={styles.inboxTextCol}>
+                    <Text style={styles.inboxName} numberOfLines={1}>
+                      {thread.otherUserName}
+                    </Text>
+                    <Text style={styles.inboxPreview} numberOfLines={1}>
+                      {thread.lastBody}
+                    </Text>
                   </View>
-                );
-              })}
+                  <Text style={styles.inboxTime}>{formatRelativeTime(thread.lastCreatedAt)}</Text>
+                </TouchableOpacity>
+              ))}
             </>
           )}
 
@@ -689,27 +592,36 @@ export default function ComunidadMobileView() {
                 <>
                   <View style={styles.podiumRow}>
                     {podio.map((entry, i) => (
-                      <View key={entry.userId} style={[styles.podiumCol, i === 0 && styles.podiumColFirst]}>
+                      <TouchableOpacity
+                        key={entry.userId}
+                        style={[styles.podiumCol, i === 0 && styles.podiumColFirst]}
+                        onPress={() => handleAbrirChatPrivado(entry.userId, entry.fullName, entry.avatarUrl)}
+                        disabled={entry.userId === user.id}
+                      >
                         <Text style={styles.podiumMedal}>{medallas[i]}</Text>
-                        <View style={styles.podiumAvatar}>
-                          <Text style={styles.avatarText}>{getInitials(entry.fullName)}</Text>
-                        </View>
+                        <Avatar uri={entry.avatarUrl} name={entry.fullName} size={40} />
                         <Text style={styles.podiumName} numberOfLines={1}>
                           {entry.fullName}
                         </Text>
                         <Text style={styles.podiumClases}>{entry.xp} XP</Text>
-                      </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
 
                   {resto.map((entry, i) => (
-                    <View key={entry.userId} style={styles.rankingRow}>
+                    <TouchableOpacity
+                      key={entry.userId}
+                      style={styles.rankingRow}
+                      onPress={() => handleAbrirChatPrivado(entry.userId, entry.fullName, entry.avatarUrl)}
+                      disabled={entry.userId === user.id}
+                    >
                       <Text style={styles.rankingPosition}>{i + 4}</Text>
+                      <Avatar uri={entry.avatarUrl} name={entry.fullName} size={30} />
                       <Text style={styles.rankingName} numberOfLines={1}>
                         {entry.fullName}
                       </Text>
                       <Text style={styles.rankingClases}>{entry.xp} XP</Text>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </>
               )}
@@ -772,34 +684,35 @@ export default function ComunidadMobileView() {
         </View>
       </Modal>
 
-      <Modal visible={!!chatGroup} transparent animationType="slide" onRequestClose={() => setChatGroup(null)}>
+      <Modal visible={!!dmChat} transparent animationType="slide" onRequestClose={() => setDmChat(null)}>
         <View style={styles.chatBackdrop}>
           <View style={styles.chatCard}>
             <View style={styles.chatHeaderRow}>
+              <Avatar uri={dmChat?.otherAvatarUrl} name={dmChat?.otherUserName ?? '?'} size={32} />
               <Text style={styles.chatTitle} numberOfLines={1}>
-                {chatGroup?.name}
+                {dmChat?.otherUserName}
               </Text>
-              {chatGroup?.createdBy === user.id && (
-                <TouchableOpacity onPress={() => chatGroup && handleEliminarGrupo(chatGroup)} hitSlop={10} style={{ marginRight: 12 }}>
-                  <Ionicons name="trash-outline" size={20} color={colors.danger} />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity onPress={() => setChatGroup(null)} hitSlop={10}>
+              <TouchableOpacity onPress={() => setDmChat(null)} hitSlop={10}>
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.chatMessages}>
-              {chatLoading ? (
+              {dmLoading ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: 12 }} />
-              ) : chatMensajes.length === 0 ? (
-                <Text style={styles.emptyText}>Sé el primero en escribir en este grupo.</Text>
+              ) : dmMensajes.length === 0 ? (
+                <Text style={styles.emptyText}>Escribile el primer mensaje.</Text>
               ) : (
-                chatMensajes.map((m) => (
-                  <View key={m.id} style={[styles.chatBubble, m.authorId === user.id && styles.chatBubbleMine]}>
-                    <Text style={styles.chatBubbleAuthor}>{m.authorId === user.id ? 'Vos' : m.authorName}</Text>
-                    <Text style={styles.chatBubbleBody}>{m.body}</Text>
-                  </View>
-                ))
+                dmMensajes.map((m) => {
+                  const mine = m.authorId === user.id;
+                  return (
+                    <View key={m.id} style={[styles.chatBubbleRow, mine && styles.chatBubbleRowMine]}>
+                      <Avatar uri={m.authorAvatarUrl} name={m.authorName} size={24} />
+                      <View style={[styles.chatBubble, mine && styles.chatBubbleMine]}>
+                        <Text style={styles.chatBubbleBody}>{m.body}</Text>
+                      </View>
+                    </View>
+                  );
+                })
               )}
             </ScrollView>
             <View style={styles.chatInputRow}>
@@ -807,10 +720,10 @@ export default function ComunidadMobileView() {
                 style={styles.chatInput}
                 placeholder="Escribí un mensaje..."
                 placeholderTextColor={colors.textSecondary}
-                value={chatDraft}
-                onChangeText={setChatDraft}
+                value={dmDraft}
+                onChangeText={setDmDraft}
               />
-              <TouchableOpacity onPress={handleEnviarMensaje}>
+              <TouchableOpacity onPress={handleEnviarMensajePrivado}>
                 <Ionicons name="send" size={20} color={colors.primary} />
               </TouchableOpacity>
             </View>
@@ -876,17 +789,6 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   postHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.background,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: { color: colors.primary, fontSize: 13, fontWeight: '800' },
   postHeaderNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   postAuthor: { color: colors.textPrimary, fontSize: 13.5, fontWeight: '700', flexShrink: 1 },
   nivelBadge: { backgroundColor: colors.primary, borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1.5 },
@@ -923,7 +825,7 @@ const styles = StyleSheet.create({
   commentButtonText: { color: colors.textSecondary, fontSize: 11.5, fontWeight: '600' },
   commentsBox: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.surfaceAlt, gap: 8 },
   emptyCommentsText: { color: colors.textSecondary, fontSize: 12 },
-  commentRow: { backgroundColor: colors.background, borderRadius: 10, padding: 8 },
+  commentRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: colors.background, borderRadius: 10, padding: 8 },
   commentAuthor: { color: colors.textPrimary, fontSize: 11.5, fontWeight: '700' },
   commentBody: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   commentInputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
@@ -939,29 +841,10 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
 
-  crearGrupoRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  crearGrupoInput: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: colors.textPrimary,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
-  crearGrupoButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  groupCard: {
+  inboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
@@ -969,29 +852,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  groupIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  groupNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
-  groupName: { color: colors.textPrimary, fontSize: 14, fontWeight: '700', flexShrink: 1 },
-  groupMeta: { color: colors.textSecondary, fontSize: 11.5, marginTop: 2 },
-  groupDeleteButton: { padding: 2 },
-  groupJoinButton: { backgroundColor: colors.primary, borderRadius: 20, paddingVertical: 8, paddingHorizontal: 14 },
-  groupJoinButtonText: { color: colors.onPrimary, fontSize: 12, fontWeight: '700' },
-  groupOpenButton: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  groupOpenButtonText: { color: colors.textPrimary, fontSize: 12, fontWeight: '700' },
+  inboxTextCol: { flex: 1, minWidth: 0 },
+  inboxName: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  inboxPreview: { color: colors.textSecondary, fontSize: 12.5, marginTop: 2 },
+  inboxTime: { color: colors.textSecondary, fontSize: 10.5 },
 
   miClasesCallout: {
     flexDirection: 'row',
@@ -1014,22 +878,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
+    gap: 6,
   },
   podiumColFirst: { borderColor: colors.primary, paddingVertical: 20 },
-  podiumMedal: { fontSize: 22, marginBottom: 6 },
-  podiumAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.background,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
+  podiumMedal: { fontSize: 22 },
   podiumName: { color: colors.textPrimary, fontSize: 11.5, fontWeight: '700', maxWidth: '100%' },
-  podiumClases: { color: colors.textSecondary, fontSize: 10.5, marginTop: 2 },
+  podiumClases: { color: colors.textSecondary, fontSize: 10.5 },
   rankingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1117,6 +971,7 @@ const styles = StyleSheet.create({
   chatHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     marginBottom: 12,
     paddingBottom: 10,
     borderBottomWidth: 1,
@@ -1124,18 +979,17 @@ const styles = StyleSheet.create({
   },
   chatTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1 },
   chatMessages: { flex: 1 },
+  chatBubbleRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 10, maxWidth: '85%' },
+  chatBubbleRowMine: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   chatBubble: {
-    alignSelf: 'flex-start',
     backgroundColor: colors.background,
     borderRadius: 12,
     padding: 10,
-    marginBottom: 8,
-    maxWidth: '80%',
+    flexShrink: 1,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  chatBubbleMine: { alignSelf: 'flex-end', backgroundColor: 'rgba(0, 255, 56, 0.12)', borderColor: colors.primary },
-  chatBubbleAuthor: { color: colors.textSecondary, fontSize: 10.5, fontWeight: '700', marginBottom: 2 },
+  chatBubbleMine: { backgroundColor: 'rgba(0, 255, 56, 0.12)', borderColor: colors.primary },
   chatBubbleBody: { color: colors.textPrimary, fontSize: 13 },
   chatInputRow: {
     flexDirection: 'row',

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
@@ -7,8 +8,20 @@ import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { supabase } from '../../lib/supabase';
 import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
-import { fetchTotalXp, calcularResumenXp, XP_POR_NIVEL } from '../../lib/xpApi';
+import {
+  fetchTotalXp,
+  calcularResumenXp,
+  fetchFechasAsistencia,
+  calcularRachaDias,
+  fetchClasesDelMes,
+  XP_POR_NIVEL,
+} from '../../lib/xpApi';
+import { checkAvatarDisponible, subirAvatarPerfil } from '../../lib/avatarApi';
+import Avatar, { getInitials } from '../../components/Avatar';
+import XpInfoModal from '../../components/XpInfoModal';
 import { UserCredit } from '../../types';
+
+export { getInitials };
 
 // Vista nueva y paralela a ProfileScreen (Módulo 3 del rediseño) -- no
 // reemplaza ni engancha en la navegación real todavía. ProfileScreen sigue
@@ -16,7 +29,10 @@ import { UserCredit } from '../../types';
 // visual gamificado que reusa exactamente los mismos datos reales que ya
 // existen (balances, configuración). Nivel/XP salen de xpApi.ts (real vía
 // xp_events, con fallback si esa tabla todavía no está desplegada -- ver
-// backend/supabase_migration_xp.sql). Racha sigue siendo placeholder.
+// backend/supabase_migration_xp.sql). Racha y "Clases (mes)" también son
+// reales ahora (antes: racha placeholder fijo, "Clases" era un conteo
+// histórico de TODAS las clases de siempre bajo una etiqueta que sugería
+// "del mes").
 
 // Mismo número que usa HomeScreen para "Contactar" en la Hero Card -- lo
 // reusamos tal cual para el acceso directo "Soporte" (no está exportado
@@ -39,49 +55,16 @@ function StatusBadge({ status }: { status: MembershipStatus }) {
   );
 }
 
-// Racha: sin tracking de asistencia día a día todavía no hay forma honesta
-// de calcularla (y una racha "diaria" mal calculada sobre datos de un
-// gimnasio -- que se pisa 2-3 veces por semana, no todos los días -- daría
-// un número engañoso). Placeholder fijo y claramente marcado hasta que
-// exista la lógica real.
-const RACHA_PLACEHOLDER_DIAS = 3;
-
-// Mismas 4 reglas de backend/supabase_migration_xp.sql, en el orden y con
-// el texto que se muestra en el modal "¿Cómo ganar XP?".
-const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
-  { emoji: '🏋️', label: 'Asistencia diaria / ¡Hoy entrené!', detalle: '+100 XP (máx. 1 al día)' },
-  { emoji: '💬', label: 'Publicar en la Comunidad', detalle: '+25 XP (máx. 1 al día)' },
-  { emoji: '🏆', label: 'Superar un Récord Personal (PR)', detalle: '+150 XP' },
-  { emoji: '🎯', label: 'Completar una Meta Personal', detalle: '+300 XP (límite 7 días)' },
-];
-
 const MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 function formatMesAnio(dateStr: string): string {
   const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`);
   return `${MESES_ABREV[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-export function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-async function fetchClasesRealizadas(userId: string): Promise<number> {
-  const { count, error } = await supabase
-    .from('bookings')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('attended', true);
-  if (error) throw new Error(error.message);
-  return count ?? 0;
-}
-
 // `created_at` de `profiles` no lo trae AuthContext (solo pide id/full_name/
-// dni/phone/role/active) -- se pide acá aparte, mismo criterio que ya usa
-// ProfileScreen.tsx para sus propios campos extra, en vez de tocar la query
-// de AuthContext.
+// dni/phone/role/active/avatar_url) -- se pide acá aparte, mismo criterio
+// que ya usa ProfileScreen.tsx para sus propios campos extra, en vez de
+// tocar la query de AuthContext.
 async function fetchMiembroDesde(userId: string): Promise<string | null> {
   const { data, error } = await supabase.from('profiles').select('created_at').eq('id', userId).single();
   if (error || !data?.created_at) return null;
@@ -134,11 +117,12 @@ interface PerfilMobileViewProps {
 }
 
 export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) {
-  const { user } = useAuth();
+  const { user, updateAvatarUrl } = useAuth();
   const { configuracion } = useConfiguracion();
 
   const [balances, setBalances] = useState<UserCredit[]>([]);
-  const [clasesRealizadas, setClasesRealizadas] = useState(0);
+  const [clasesDelMes, setClasesDelMes] = useState(0);
+  const [racha, setRacha] = useState(0);
   const [miembroDesde, setMiembroDesde] = useState<string | null>(null);
   const [totalXp, setTotalXp] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -146,21 +130,24 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
   const [comingSoonLabel, setComingSoonLabel] = useState<string | null>(null);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [xpInfoVisible, setXpInfoVisible] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
     setError(null);
     try {
-      const [balancesData, clases, desde, xp] = await Promise.all([
+      const [balancesData, clases, desde, xp, fechasAsistencia] = await Promise.all([
         fetchUserBalances(user.id),
-        fetchClasesRealizadas(user.id),
+        fetchClasesDelMes(user.id),
         fetchMiembroDesde(user.id),
         fetchTotalXp(user.id),
+        fetchFechasAsistencia(user.id),
       ]);
       setBalances(balancesData);
-      setClasesRealizadas(clases);
+      setClasesDelMes(clases);
       setMiembroDesde(desde);
       setTotalXp(xp);
+      setRacha(calcularRachaDias(fechasAsistencia));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu perfil.');
     } finally {
@@ -193,10 +180,44 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
     comingSoonTimer.current = setTimeout(() => setComingSoonLabel(null), 2400);
   }
 
+  // Tocar el avatar deja cambiar la foto de perfil -- sube a Storage
+  // (bucket 'avatars') y actualiza profiles.avatar_url; updateAvatarUrl()
+  // refleja el cambio al instante en memoria (AuthContext) sin esperar un
+  // refetch completo del perfil.
+  async function handleAvatarPress() {
+    if (!user || isUploadingAvatar) return;
+    const disponible = await checkAvatarDisponible();
+    if (!disponible) {
+      Alert.alert('Función no disponible', 'La foto de perfil todavía no está activada. Probá de nuevo más tarde.');
+      return;
+    }
+    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permiso.granted) {
+      Alert.alert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder cambiar tu foto de perfil.');
+      return;
+    }
+    const resultado = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (resultado.canceled || !resultado.assets[0]) return;
+
+    setIsUploadingAvatar(true);
+    try {
+      const url = await subirAvatarPerfil(user.id, resultado.assets[0].uri);
+      updateAvatarUrl(url);
+    } catch (err) {
+      Alert.alert('No se pudo actualizar la foto', err instanceof Error ? err.message : 'Intentá de nuevo.');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  }
+
   if (!user) return null;
 
   const resumenXp = calcularResumenXp(totalXp);
-  const initials = getInitials(user.name);
 
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
@@ -217,9 +238,21 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         <Image source={require('../../../assets/perro.png')} style={styles.mascotWatermark} resizeMode="contain" />
 
         <View style={styles.athleteTopRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>
+          <TouchableOpacity
+            onPress={handleAvatarPress}
+            disabled={isUploadingAvatar}
+            accessibilityLabel="Cambiar foto de perfil"
+            style={styles.avatarTouchable}
+          >
+            <Avatar uri={user.avatarUrl} name={user.name} size={60} />
+            <View style={styles.avatarCameraBadge}>
+              {isUploadingAvatar ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <Ionicons name="camera" size={12} color={colors.onPrimary} />
+              )}
+            </View>
+          </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.athleteName} numberOfLines={1}>
               {user.name}
@@ -254,20 +287,26 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         <View style={styles.statsRow}>
           <View style={styles.statCol}>
             <Ionicons name="flame" size={16} color={colors.warning} />
-            <Text style={styles.statValue}>{RACHA_PLACEHOLDER_DIAS}</Text>
+            <Text style={styles.statValue} testID="stat-racha">
+              {racha}
+            </Text>
             <Text style={styles.statLabel}>Racha</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statCol}>
             <Ionicons name="calendar" size={16} color={colors.primary} />
-            <Text style={styles.statValue}>{miembroDesde ? formatMesAnio(miembroDesde) : '--'}</Text>
+            <Text style={styles.statValue} testID="stat-miembro-desde">
+              {miembroDesde ? formatMesAnio(miembroDesde) : '--'}
+            </Text>
             <Text style={styles.statLabel}>Miembro desde</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statCol}>
             <Ionicons name="checkmark-done" size={16} color={colors.primary} />
-            <Text style={styles.statValue}>{clasesRealizadas}</Text>
-            <Text style={styles.statLabel}>Clases</Text>
+            <Text style={styles.statValue} testID="stat-clases">
+              {clasesDelMes}
+            </Text>
+            <Text style={styles.statLabel}>Clases (mes)</Text>
           </View>
         </View>
       </View>
@@ -336,28 +375,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         </View>
       )}
 
-      <Modal visible={xpInfoVisible} transparent animationType="fade" onRequestClose={() => setXpInfoVisible(false)}>
-        <View style={styles.xpModalBackdrop}>
-          <View style={styles.xpModalCard}>
-            <View style={styles.xpModalHeaderRow}>
-              <Text style={styles.xpModalTitle}>¿Cómo ganar XP?</Text>
-              <TouchableOpacity onPress={() => setXpInfoVisible(false)} hitSlop={10}>
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.xpModalSubtitle}>Cada {XP_POR_NIVEL} XP subís de nivel.</Text>
-            {REGLAS_XP.map((regla) => (
-              <View key={regla.label} style={styles.xpRuleRow}>
-                <Text style={styles.xpRuleEmoji}>{regla.emoji}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.xpRuleLabel}>{regla.label}</Text>
-                  <Text style={styles.xpRuleDetalle}>{regla.detalle}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </View>
-      </Modal>
+      <XpInfoModal visible={xpInfoVisible} onClose={() => setXpInfoVisible(false)} />
     </ScrollView>
   );
 }
@@ -379,17 +397,20 @@ const styles = StyleSheet.create({
   },
   mascotWatermark: { position: 'absolute', right: -14, top: -14, width: 96, height: 96, opacity: 0.1 },
   athleteTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.background,
+  avatarTouchable: { position: 'relative' },
+  avatarCameraBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.primary,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: colors.primary, fontSize: 20, fontWeight: '800' },
   athleteName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
   levelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   levelBadge: {
@@ -482,27 +503,4 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   comingSoonText: { color: colors.textSecondary, fontSize: 11.5 },
-
-  xpModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
-  xpModalCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
-  xpModalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  xpModalTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '800' },
-  xpModalSubtitle: { color: colors.textSecondary, fontSize: 12.5, marginTop: 4, marginBottom: 16 },
-  xpRuleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.surfaceAlt,
-  },
-  xpRuleEmoji: { fontSize: 22 },
-  xpRuleLabel: { color: colors.textPrimary, fontSize: 13.5, fontWeight: '700' },
-  xpRuleDetalle: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 2 },
 });

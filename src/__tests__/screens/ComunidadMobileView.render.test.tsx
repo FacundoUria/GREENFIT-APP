@@ -44,7 +44,7 @@ function configurarComoNoDesplegado() {
   mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
 }
 
-describe('ComunidadMobileView (Módulo 6 -- Feed, Grupos, Ranking)', () => {
+describe('ComunidadMobileView (Módulo 6 -- Feed, Mensajes/DM, Ranking)', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     await AsyncStorage.clear();
@@ -88,5 +88,64 @@ describe('ComunidadMobileView (Módulo 6 -- Feed, Grupos, Ranking)', () => {
     await waitFor(() => expect(getByText(/Ranking de ejemplo/)).toBeTruthy());
     expect(getByText('0 XP')).toBeTruthy(); // "Vos: 0 XP totales" -- real, sin datos simulados
     expect(getByText('Lucía Fernández')).toBeTruthy();
+  });
+
+  it('la pestaña "Mi Box" se reemplazó por "Mensajes" -- arranca vacía, sin rastro de Grupos', async () => {
+    const { getByText, queryByText } = render(<ComunidadMobileView />);
+    await waitFor(() => expect(getByText('Feed')).toBeTruthy());
+
+    expect(queryByText('Mi Box')).toBeNull();
+    fireEvent.press(getByText('Mensajes'));
+
+    await waitFor(() => expect(getByText(/Todavía no tenés conversaciones/)).toBeTruthy());
+    expect(queryByText(/creá el primero/)).toBeNull(); // texto viejo de "crear grupo"
+  });
+
+  it('tocar el avatar de otro socio en el Feed abre un chat privado 1 a 1 y permite mandar un mensaje', async () => {
+    const { getByText, getByPlaceholderText } = render(<ComunidadMobileView />);
+    // "Equipo GreenFit" es el autor semilla del primer post demo -- distinto
+    // del usuario actual (user-1), así que tocar su nombre debe abrir chat.
+    await waitFor(() => expect(getByText(/Bienvenidos a la Comunidad GreenFit/)).toBeTruthy());
+
+    fireEvent.press(getByText('Equipo GreenFit'));
+
+    const input = await waitFor(() => getByPlaceholderText('Escribí un mensaje...'));
+    fireEvent.changeText(input, '¡Hola equipo!');
+    fireEvent.press(getByText('Ionicons:send'));
+
+    await waitFor(() => expect(getByText('¡Hola equipo!')).toBeTruthy());
+  });
+
+  it('después de mandar un mensaje privado, el hilo aparece en la bandeja de Mensajes', async () => {
+    const { getByText, getByPlaceholderText } = render(<ComunidadMobileView />);
+    await waitFor(() => expect(getByText(/Bienvenidos a la Comunidad GreenFit/)).toBeTruthy());
+
+    fireEvent.press(getByText('Equipo GreenFit'));
+    const input = await waitFor(() => getByPlaceholderText('Escribí un mensaje...'));
+    fireEvent.changeText(input, '¡Hola equipo!');
+    fireEvent.press(getByText('Ionicons:send'));
+    await waitFor(() => expect(getByText('¡Hola equipo!')).toBeTruthy());
+
+    // Cierra el chat y va a la bandeja
+    fireEvent.press(getByText('Ionicons:close'));
+    fireEvent.press(getByText('Mensajes'));
+
+    await waitFor(() => expect(getByText('¡Hola equipo!')).toBeTruthy()); // preview del último mensaje
+  });
+
+  it('tocar el propio nombre de autor en un post propio NO abre ningún chat (no tiene sentido chatear con uno mismo)', async () => {
+    const { getByText, getByPlaceholderText, queryByPlaceholderText, getAllByText } = render(<ComunidadMobileView />);
+    await waitFor(() => expect(getByText(/Bienvenidos a la Comunidad GreenFit/)).toBeTruthy());
+
+    fireEvent.press(getByText('Ionicons:add'));
+    const composerInput = await waitFor(() => getByPlaceholderText('¿Qué entrenaste hoy?'));
+    fireEvent.changeText(composerInput, 'Mi propio post');
+    fireEvent.press(getByText('Publicar'));
+    await waitFor(() => expect(getByText('Mi propio post')).toBeTruthy());
+
+    // "Facundo Uria" (MOCK_USER) aparece ahora como autor de su propio post
+    // -- tocarlo no debe disparar el modal de chat privado.
+    fireEvent.press(getAllByText('Facundo Uria')[0]);
+    expect(queryByPlaceholderText('Escribí un mensaje...')).toBeNull();
   });
 });

@@ -210,7 +210,7 @@ export default function AgendaMobileView() {
       ? { label: 'Sin cupo', bg: colors.surfaceAlt, fg: colors.danger, icon: 'close-circle' as const }
       : sinCreditos
       ? { label: 'Sin créditos', bg: colors.surfaceAlt, fg: colors.warning, icon: 'alert-circle' as const }
-      : { label: 'Disponible', bg: colors.surfaceAlt, fg: colors.textSecondary, icon: 'ellipse-outline' as const };
+      : { label: 'Disponible', bg: 'rgba(0, 255, 56, 0.14)', fg: colors.primary, icon: 'ellipse-outline' as const };
 
     return (
       <TouchableOpacity
@@ -311,17 +311,6 @@ export default function AgendaMobileView() {
         </>
       )}
 
-      {/* Preview visual del futuro botón central "+ Reserva" de la bottom
-          nav (todavía no existe esa nav -- ver Módulo Navegación). Acá
-          funciona como acceso rápido real: vuelve la agenda a HOY. */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setSelectedDate(new Date())}
-        accessibilityLabel="Volver a hoy"
-      >
-        <Ionicons name="add" size={26} color={colors.onPrimary} />
-      </TouchableOpacity>
-
       <CancelBookingModal
         visible={!!cancelTarget}
         className={cancelTarget?.title ?? ''}
@@ -373,19 +362,24 @@ const styles = StyleSheet.create({
     borderColor: colors.warning,
   },
   closedBannerText: { flex: 1, color: colors.textPrimary, fontSize: 13.5, lineHeight: 19 },
-  listContent: { padding: 16, paddingBottom: 96 },
+  listContent: { padding: 16, paddingBottom: 32 },
   card: {
     flexDirection: 'row',
     gap: 12,
     backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
-    borderLeftWidth: 4,
+    borderLeftWidth: 5,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  cardBooked: { borderColor: colors.primary },
+  cardBooked: { borderColor: colors.primary, shadowOpacity: 0.2, elevation: 4 },
   iconCircle: {
     width: 36,
     height: 36,
@@ -411,20 +405,4 @@ const styles = StyleSheet.create({
   footerItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   footerText: { color: colors.textSecondary, fontSize: 11 },
   countdownSoon: { color: colors.primary, fontWeight: '700' },
-  fab: {
-    position: 'absolute',
-    bottom: 20,
-    alignSelf: 'center',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
 });

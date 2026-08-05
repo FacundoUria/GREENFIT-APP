@@ -1,9 +1,12 @@
 import React from 'react';
 import { Linking } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { formatDateOnly } from '../../lib/classesApi';
 
+const mockUpdateAvatarUrl = jest.fn();
+const mockUser = { id: 'user-1', name: 'Facundo Uria', dni: '30111222', phone: null, role: 'socio', avatarUrl: null as string | null };
 jest.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', dni: '30111222', phone: null, role: 'socio' } }),
+  useAuth: () => ({ user: mockUser, updateAvatarUrl: mockUpdateAvatarUrl }),
 }));
 
 jest.mock('../../context/ConfiguracionContext', () => ({
@@ -24,6 +27,16 @@ jest.mock('../../lib/creditsApi', () => ({
   ]),
 }));
 
+jest.mock('../../lib/avatarApi', () => ({
+  checkAvatarDisponible: jest.fn().mockResolvedValue(true),
+  subirAvatarPerfil: jest.fn().mockResolvedValue('https://cdn/avatars/user-1/avatar.jpg?t=123'),
+}));
+
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
+  launchImageLibraryAsync: jest.fn().mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///tmp/foto.jpg' }] }),
+}));
+
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
@@ -39,6 +52,8 @@ function makeChain(result: any) {
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn() } }));
 
 import { supabase } from '../../lib/supabase';
+import * as ImagePicker from 'expo-image-picker';
+import { checkAvatarDisponible, subirAvatarPerfil } from '../../lib/avatarApi';
 import PerfilMobileView from '../../screens/user/PerfilMobileView';
 
 const mockedFrom = supabase.from as jest.Mock;
@@ -46,12 +61,26 @@ const mockedFrom = supabase.from as jest.Mock;
 // 1150 XP reales en xp_events -> nivel floor(1150/500)+1 = 3, con 150/500
 // XP de progreso dentro de ese nivel (fórmula que xpApi.test.ts verifica
 // por separado, acá solo se prueba que PerfilMobileView la conecta bien al
-// badge y a la barra de progreso).
+// badge y a la barra de progreso). HOY y AYER tienen asistencia real -> la
+// racha (días consecutivos) y "Clases (mes)" (días distintos del mes con
+// asistencia) dan 2, ambos calculados sobre las mismas 2 filas de
+// xp_events -- fechas relativas a la fecha real de ejecución del test, no
+// hardcodeadas, para que nunca se desalinee con "hoy".
+const HOY = formatDateOnly(new Date());
+const AYER = formatDateOnly(new Date(Date.now() - 86_400_000));
+
 function configurarMocksReales() {
   mockedFrom.mockImplementation((table: string) => {
-    if (table === 'bookings') return makeChain({ count: 12, error: null });
     if (table === 'profiles') return makeChain({ data: { created_at: '2025-01-15T00:00:00.000Z' }, error: null });
-    if (table === 'xp_events') return makeChain({ data: [{ xp_amount: 700 }, { xp_amount: 450 }], error: null });
+    if (table === 'xp_events') {
+      return makeChain({
+        data: [
+          { xp_amount: 700, event_date: HOY },
+          { xp_amount: 450, event_date: AYER },
+        ],
+        error: null,
+      });
+    }
     return makeChain({ data: [], error: null });
   });
 }
@@ -59,13 +88,18 @@ function configurarMocksReales() {
 describe('PerfilMobileView (Módulo 3)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUser.avatarUrl = null;
     configurarMocksReales();
   });
 
   it('calcula el nivel real a partir del XP acumulado (1150 XP -> NIVEL 3)', async () => {
-    const { getByText } = render(<PerfilMobileView />);
+    const { getByText, getByTestId } = render(<PerfilMobileView />);
     await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
-    expect(getByText('12')).toBeTruthy(); // stat "Clases"
+    // Racha real (2 días consecutivos: hoy + ayer) y "Clases (mes)" (2 días
+    // distintos con asistencia este mes) -- ya no un placeholder fijo ni el
+    // conteo histórico total bajo la etiqueta "Clases".
+    expect(getByTestId('stat-racha').props.children).toBe(2);
+    expect(getByTestId('stat-clases').props.children).toBe(2);
   });
 
   it('muestra la barra de progreso "X / 500 XP" del nivel actual', async () => {
@@ -112,5 +146,32 @@ describe('PerfilMobileView (Módulo 3)', () => {
     expect(getByText('+150 XP')).toBeTruthy();
     expect(getByText('Completar una Meta Personal')).toBeTruthy();
     expect(getByText('+300 XP (límite 7 días)')).toBeTruthy();
+  });
+
+  it('tocar el avatar sube una foto nueva y la refleja al instante vía updateAvatarUrl', async () => {
+    const { getByText, getByLabelText } = render(<PerfilMobileView />);
+    await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
+
+    fireEvent.press(getByLabelText('Cambiar foto de perfil'));
+
+    await waitFor(() => expect(checkAvatarDisponible).toHaveBeenCalled());
+    await waitFor(() => expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(subirAvatarPerfil).toHaveBeenCalledWith('user-1', 'file:///tmp/foto.jpg')
+    );
+    await waitFor(() =>
+      expect(mockUpdateAvatarUrl).toHaveBeenCalledWith('https://cdn/avatars/user-1/avatar.jpg?t=123')
+    );
+  });
+
+  it('si la función de avatar todavía no está disponible, no intenta abrir el picker', async () => {
+    (checkAvatarDisponible as jest.Mock).mockResolvedValue(false);
+    const { getByText, getByLabelText } = render(<PerfilMobileView />);
+    await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
+
+    fireEvent.press(getByLabelText('Cambiar foto de perfil'));
+
+    await waitFor(() => expect(checkAvatarDisponible).toHaveBeenCalled());
+    expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
   });
 });
