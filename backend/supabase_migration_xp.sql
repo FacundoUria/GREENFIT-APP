@@ -4,8 +4,13 @@
 -- partir de clases con asistencia real (mismo peso que la regla real, +100
 -- por clase) -- el número de nivel no "salta" feo el día que se active esto.
 --
--- Se descartó el check-in diario para simplificar. Reglas vigentes:
---   1) Asistencia a clase confirmada (disciplinas grupales)  -> +100 XP (automático, trigger sobre bookings.attended)
+-- Reglas vigentes (el "check-in diario" que se había descartado terminó
+-- volviendo como botón "¡Hoy entrené!" -- ver nota en la regla 1):
+--   1) Asistencia (clase confirmada por el admin, O botón              -> +100 XP -- máx 1 por día
+--      "¡Hoy entrené!" autoreportado por el socio)                        combinando AMBAS fuentes (índice único
+--                                                                          de abajo), automático vía trigger para
+--                                                                          la clase confirmada, client-side para
+--                                                                          el botón.
 --   2) Registrar/superar un PR (Aparatos y Clases)           -> +150 XP (client-side, ProgresoMobileView)
 --   3) Completar una Meta personal                           -> +300 XP (automático, trigger sobre metas_personales.completed_at)
 --   4) Publicar en el Feed/Comunidad (máx 1 por día)         -> +25 XP (client-side, ComunidadMobileView)
@@ -24,11 +29,15 @@ create table xp_events (
 
 create index idx_xp_events_user on xp_events(user_id);
 
--- Como máximo 1 fila de tipo 'asistencia' por reserva (protege contra el
--- trigger disparando dos veces por lo que sea), 1 fila de tipo 'meta' por
--- meta completada, y máximo 1 fila de tipo 'post' por socio por día (el
--- límite de "máx 1 por día" pedido).
+-- 1 fila de tipo 'asistencia' por reserva (protege el trigger de clase
+-- confirmada contra disparar dos veces), 1 fila 'meta' por meta completada,
+-- y el cap de "máximo 1 por día" para 'asistencia' Y 'post': el índice de
+-- (user_id, event_date) para 'asistencia' es compartido por las DOS fuentes
+-- (trigger de clase confirmada Y botón "¡Hoy entrené!") -- la que llegue
+-- primero ese día gana, la segunda es un no-op silencioso (23505), nunca
+-- se acredita doble en el mismo día.
 create unique index idx_xp_events_asistencia_unica on xp_events(reference_id) where event_type = 'asistencia';
+create unique index idx_xp_events_asistencia_por_dia on xp_events(user_id, event_date) where event_type = 'asistencia';
 create unique index idx_xp_events_meta_unica on xp_events(reference_id) where event_type = 'meta';
 create unique index idx_xp_events_post_por_dia on xp_events(user_id, event_date) where event_type = 'post';
 
@@ -36,16 +45,20 @@ alter table xp_events enable row level security;
 
 create policy "xp_events_select_own" on xp_events
   for select using (auth.uid() = user_id);
--- 'asistencia' y 'meta' NO son insertables por el cliente -- los crean
--- únicamente los triggers de abajo (corren security definer, bypasean esta
--- policy), porque ambos tienen una regla de negocio que hay que validar
--- server-side (asistencia: viene de otra app; meta: los 7 días mínimos).
--- 'pr' y 'post' sí los inserta el propio socio activo directo.
+-- 'meta' NO es insertable por el cliente -- solo lo crea el trigger de
+-- completar_meta_personal() (security definer, bypasea esta policy),
+-- porque tiene una regla de negocio (7 días mínimos) que hay que validar
+-- server-side. 'asistencia' SÍ es insertable por el cliente ahora (botón
+-- "¡Hoy entrené!", autoreportado -- mismo nivel de confianza que un PR
+-- autoreportado) además de seguir llegando vía trigger para la clase
+-- confirmada por el admin; el índice único de arriba es lo que evita que
+-- ninguna de las dos fuentes duplique el cupo diario. 'pr' y 'post' sí los
+-- inserta el propio socio activo directo, como ya hacían.
 create policy "xp_events_insert_own" on xp_events
   for insert with check (
     auth.uid() = user_id
     and public.is_active_socio()
-    and event_type in ('pr', 'post')
+    and event_type in ('pr', 'post', 'asistencia')
   );
 
 -- ============================================================
@@ -138,3 +151,63 @@ $$ language plpgsql security definer;
 create trigger trg_completar_meta_personal
   before update of completed_at on metas_personales
   for each row execute procedure public.completar_meta_personal();
+
+-- ============================================================
+-- BACKFILL único: asistencias que los socios YA tenían confirmadas antes de
+-- activar este sistema. El trigger de arriba solo captura asistencias
+-- NUEVAS hacia adelante -- sin este backfill, todo socio arrancaría en 0
+-- XP de asistencia pese a tener meses de historial real. Seguro de correr
+-- más de una vez: el índice único de xp_events (reference_id donde
+-- event_type='asistencia') hace que `on conflict do nothing` evite
+-- duplicar si por lo que sea se vuelve a ejecutar este bloque.
+-- ============================================================
+
+insert into xp_events (user_id, event_type, xp_amount, reference_id, event_date)
+select b.user_id, 'asistencia', 100, b.id, b.booking_date
+from bookings b
+join classes c on c.id = b.class_id
+join disciplines d on d.id = c.discipline_id
+where b.attended = true
+  and d.kind = 'credits'
+on conflict do nothing;
+
+-- ============================================================
+-- RANKING DE COMUNIDAD POR XP TOTAL
+--
+-- Reemplaza a community_ranking_mes() (que rankeaba por CLASES asistidas
+-- en el mes) -- ahora el ranking ordena por XP TOTAL acumulado de siempre
+-- (asistencia + PRs + metas + posteos), que es el mismo ledger que ya
+-- alimenta el Nivel de Mi Perfil. Un socio no puede leer el xp_events de
+-- otro (xp_events_select_own es auth.uid() = user_id), así que esto
+-- necesita el mismo patrón security definer que ya usa community_ranking_mes().
+--
+-- p_discipline_id sigue siendo opcional para el selector de disciplina que
+-- ya existía en la UI: sin filtro (null) suma TODO el XP de la persona;
+-- con un filtro, solo suma el XP de tipo 'asistencia' cuyas reservas
+-- pertenecen a esa disciplina (PRs/metas/posteos no son de una disciplina
+-- puntual, así que no entran en un filtro por disciplina).
+create or replace function public.community_ranking_xp(p_discipline_id uuid default null)
+returns table (user_id uuid, full_name text, total_xp int)
+language sql
+security definer
+stable
+as $$
+  select xe.user_id, p.full_name, sum(xe.xp_amount)::int as total_xp
+  from xp_events xe
+  join profiles p on p.id = xe.user_id
+  where p_discipline_id is null
+     or (
+       xe.event_type = 'asistencia'
+       and exists (
+         select 1
+         from bookings b
+         join classes c on c.id = b.class_id
+         where b.id = xe.reference_id and c.discipline_id = p_discipline_id
+       )
+     )
+  group by xe.user_id, p.full_name
+  order by total_xp desc
+  limit 20;
+$$;
+
+grant execute on function public.community_ranking_xp(uuid) to authenticated;

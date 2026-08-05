@@ -119,6 +119,7 @@ export default function ComunidadMobileView() {
   const [miNivel, setMiNivel] = useState(1);
   const [miDisciplina, setMiDisciplina] = useState<string | null>(null);
   const [misClasesDelMes, setMisClasesDelMes] = useState(0);
+  const [miXpTotal, setMiXpTotal] = useState(0);
   const [disciplinasGrupales, setDisciplinasGrupales] = useState<DisciplinaGrupal[]>([]);
   const [misDisciplinasParaGrupo, setMisDisciplinasParaGrupo] = useState<DisciplinaGrupal[]>([]);
 
@@ -158,6 +159,7 @@ export default function ComunidadMobileView() {
       setModoDemo(!feedOk);
       setRankingDemo(!rankOk);
       setMisClasesDelMes(misClases);
+      setMiXpTotal(totalXp);
       // Mismo nivel real (XP) que muestra el badge de Mi Perfil -- se
       // snapshotea acá para author_nivel de los posteos nuevos.
       setMiNivel(calcularResumenXp(totalXp).nivel);
@@ -637,8 +639,8 @@ export default function ComunidadMobileView() {
               <View style={styles.miClasesCallout}>
                 <Ionicons name="ribbon-outline" size={18} color={colors.primary} />
                 <Text style={styles.miClasesText}>
-                  Vos: <Text style={{ fontWeight: '800', color: colors.textPrimary }}>{misClasesDelMes}</Text> clases
-                  este mes {rankingDisciplina ? `en ${rankingDisciplina.name}` : 'en disciplinas grupales'}
+                  Vos: <Text style={{ fontWeight: '800', color: colors.textPrimary }}>{miXpTotal} XP</Text> totales
+                  {rankingDisciplina ? ` · ${misClasesDelMes} clases en ${rankingDisciplina.name} este mes` : ''}
                 </Text>
               </View>
 
@@ -647,7 +649,7 @@ export default function ComunidadMobileView() {
                   <Ionicons name="flask-outline" size={14} color={colors.warning} />
                   <Text style={styles.demoBannerText}>
                     Ranking de ejemplo -- se activa con datos reales del box apenas se despliegue la función del
-                    servidor (community_ranking_mes).
+                    servidor (community_ranking_xp).
                   </Text>
                 </View>
               ) : (
@@ -682,7 +684,7 @@ export default function ComunidadMobileView() {
               )}
 
               {ranking.length === 0 ? (
-                <Text style={styles.emptyText}>Todavía no hay clases registradas este mes en esta disciplina.</Text>
+                <Text style={styles.emptyText}>Todavía no hay XP registrado en esta disciplina.</Text>
               ) : (
                 <>
                   <View style={styles.podiumRow}>
@@ -695,7 +697,7 @@ export default function ComunidadMobileView() {
                         <Text style={styles.podiumName} numberOfLines={1}>
                           {entry.fullName}
                         </Text>
-                        <Text style={styles.podiumClases}>{entry.clases} clases</Text>
+                        <Text style={styles.podiumClases}>{entry.xp} XP</Text>
                       </View>
                     ))}
                   </View>
@@ -706,7 +708,7 @@ export default function ComunidadMobileView() {
                       <Text style={styles.rankingName} numberOfLines={1}>
                         {entry.fullName}
                       </Text>
-                      <Text style={styles.rankingClases}>{entry.clases} clases</Text>
+                      <Text style={styles.rankingClases}>{entry.xp} XP</Text>
                     </View>
                   ))}
                 </>

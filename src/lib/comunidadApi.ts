@@ -62,7 +62,7 @@ export interface ComunidadMensaje {
 export interface RankingEntry {
   userId: string;
   fullName: string;
-  clases: number;
+  xp: number;
 }
 
 export interface DisciplinaGrupal {
@@ -86,8 +86,24 @@ export async function checkComunidadDisponible(): Promise<boolean> {
 }
 
 export async function checkRankingDisponible(): Promise<boolean> {
-  const { error } = await supabase.rpc('community_ranking_mes');
+  const { error } = await supabase.rpc('community_ranking_xp');
   return !(error && isMissingRelationError(error));
+}
+
+// El embed `profiles(full_name)` de PostgREST corre bajo la RLS del socio
+// que MIRA el feed -- profiles_select_own_or_admin es "cada uno lo suyo",
+// así que ese embed siempre volvía null para posts/comentarios/mensajes de
+// OTRO socio (de ahí el bug de "Socio GreenFit" en vez del nombre real).
+// Fix: un RPC security definer que devuelve solo id+full_name para un lote
+// de ids (ver backend/supabase_migration_comunidad_fix_autor.sql).
+async function fetchAuthorNamesMap(ids: string[]): Promise<Map<string, string>> {
+  const uniqueIds = Array.from(new Set(ids));
+  if (uniqueIds.length === 0) return new Map();
+  const { data, error } = await supabase.rpc('community_author_names', { p_ids: uniqueIds });
+  if (error) throw new Error(error.message);
+  const map = new Map<string, string>();
+  for (const row of data ?? []) map.set(row.id, row.full_name);
+  return map;
 }
 
 // Clases con asistencia real de ESTE socio en el mes en curso, SOLO en
@@ -189,7 +205,7 @@ export async function subirFotoComunidad(userId: string, localUri: string): Prom
 async function fetchFeedReal(userId: string): Promise<ComunidadPost[]> {
   const { data: posts, error } = await supabase
     .from('community_posts')
-    .select('id, author_id, body, media_url, author_nivel, author_discipline, created_at, profiles(full_name)')
+    .select('id, author_id, body, media_url, author_nivel, author_discipline, created_at')
     .order('created_at', { ascending: false })
     .limit(30);
   if (error) throw new Error(error.message);
@@ -197,10 +213,12 @@ async function fetchFeedReal(userId: string): Promise<ComunidadPost[]> {
   const postIds = (posts ?? []).map((p: any) => p.id);
   if (postIds.length === 0) return [];
 
-  const [{ data: reactions, error: reactionsError }, { data: comments, error: commentsError }] = await Promise.all([
-    supabase.from('community_reactions').select('post_id, user_id').in('post_id', postIds),
-    supabase.from('community_comments').select('post_id').in('post_id', postIds),
-  ]);
+  const [{ data: reactions, error: reactionsError }, { data: comments, error: commentsError }, authorNames] =
+    await Promise.all([
+      supabase.from('community_reactions').select('post_id, user_id').in('post_id', postIds),
+      supabase.from('community_comments').select('post_id').in('post_id', postIds),
+      fetchAuthorNamesMap((posts ?? []).map((p: any) => p.author_id)),
+    ]);
   if (reactionsError) throw new Error(reactionsError.message);
   if (commentsError) throw new Error(commentsError.message);
 
@@ -215,22 +233,19 @@ async function fetchFeedReal(userId: string): Promise<ComunidadPost[]> {
     commentCountByPost.set(c.post_id, (commentCountByPost.get(c.post_id) ?? 0) + 1);
   }
 
-  return (posts ?? []).map((p: any) => {
-    const author = Array.isArray(p.profiles) ? p.profiles[0] : p.profiles;
-    return {
-      id: p.id,
-      authorId: p.author_id,
-      authorName: author?.full_name ?? 'Socio GreenFit',
-      authorNivel: p.author_nivel,
-      authorDiscipline: p.author_discipline,
-      body: p.body,
-      mediaUrl: p.media_url,
-      createdAt: p.created_at,
-      reactionCount: reactionCountByPost.get(p.id) ?? 0,
-      reactedByMe: reactedByMeSet.has(p.id),
-      commentCount: commentCountByPost.get(p.id) ?? 0,
-    };
-  });
+  return (posts ?? []).map((p: any) => ({
+    id: p.id,
+    authorId: p.author_id,
+    authorName: authorNames.get(p.author_id) ?? 'Socio GreenFit',
+    authorNivel: p.author_nivel,
+    authorDiscipline: p.author_discipline,
+    body: p.body,
+    mediaUrl: p.media_url,
+    createdAt: p.created_at,
+    reactionCount: reactionCountByPost.get(p.id) ?? 0,
+    reactedByMe: reactedByMeSet.has(p.id),
+    commentCount: commentCountByPost.get(p.id) ?? 0,
+  }));
 }
 
 async function crearPostReal(
@@ -264,21 +279,19 @@ async function toggleReactionReal(userId: string, postId: string, currentlyReact
 async function fetchComentariosReal(postId: string): Promise<ComunidadComentario[]> {
   const { data, error } = await supabase
     .from('community_comments')
-    .select('id, post_id, author_id, body, created_at, profiles(full_name)')
+    .select('id, post_id, author_id, body, created_at')
     .eq('post_id', postId)
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((c: any) => {
-    const author = Array.isArray(c.profiles) ? c.profiles[0] : c.profiles;
-    return {
-      id: c.id,
-      postId: c.post_id,
-      authorId: c.author_id,
-      authorName: author?.full_name ?? 'Socio GreenFit',
-      body: c.body,
-      createdAt: c.created_at,
-    };
-  });
+  const authorNames = await fetchAuthorNamesMap((data ?? []).map((c: any) => c.author_id));
+  return (data ?? []).map((c: any) => ({
+    id: c.id,
+    postId: c.post_id,
+    authorId: c.author_id,
+    authorName: authorNames.get(c.author_id) ?? 'Socio GreenFit',
+    body: c.body,
+    createdAt: c.created_at,
+  }));
 }
 
 async function agregarComentarioReal(userId: string, postId: string, body: string): Promise<void> {
@@ -342,21 +355,19 @@ async function eliminarGrupoReal(groupId: string): Promise<void> {
 async function fetchMensajesGrupoReal(groupId: string): Promise<ComunidadMensaje[]> {
   const { data, error } = await supabase
     .from('community_group_messages')
-    .select('id, group_id, author_id, body, created_at, profiles(full_name)')
+    .select('id, group_id, author_id, body, created_at')
     .eq('group_id', groupId)
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((m: any) => {
-    const author = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-    return {
-      id: m.id,
-      groupId: m.group_id,
-      authorId: m.author_id,
-      authorName: author?.full_name ?? 'Socio GreenFit',
-      body: m.body,
-      createdAt: m.created_at,
-    };
-  });
+  const authorNames = await fetchAuthorNamesMap((data ?? []).map((m: any) => m.author_id));
+  return (data ?? []).map((m: any) => ({
+    id: m.id,
+    groupId: m.group_id,
+    authorId: m.author_id,
+    authorName: authorNames.get(m.author_id) ?? 'Socio GreenFit',
+    body: m.body,
+    createdAt: m.created_at,
+  }));
 }
 
 async function enviarMensajeGrupoReal(userId: string, groupId: string, body: string): Promise<void> {
@@ -365,9 +376,9 @@ async function enviarMensajeGrupoReal(userId: string, groupId: string, body: str
 }
 
 async function fetchRankingReal(disciplineId: string | null): Promise<RankingEntry[]> {
-  const { data, error } = await supabase.rpc('community_ranking_mes', { p_discipline_id: disciplineId });
+  const { data, error } = await supabase.rpc('community_ranking_xp', { p_discipline_id: disciplineId });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r: any) => ({ userId: r.user_id, fullName: r.full_name, clases: r.clases }));
+  return (data ?? []).map((r: any) => ({ userId: r.user_id, fullName: r.full_name, xp: r.total_xp }));
 }
 
 // ============================================================
@@ -676,15 +687,15 @@ export async function enviarMensajeGrupo(
 
 // Ranking demo: SIEMPRE datos de muestra (no hay forma honesta de simular
 // "el resto del box" localmente) -- ignora el filtro de disciplina, la
-// vista lo bannerea como ejemplo y muestra aparte, siempre real, el conteo
-// propio del mes (fetchMisClasesDelMes).
+// vista lo bannerea como ejemplo y muestra aparte, siempre real, el XP
+// propio del socio (fetchTotalXp en xpApi.ts).
 export async function fetchRanking(modoDemo: boolean, disciplineId: string | null = null): Promise<RankingEntry[]> {
   if (!modoDemo) return fetchRankingReal(disciplineId);
   return [
-    { userId: 'demo-1', fullName: 'Lucía Fernández', clases: 18 },
-    { userId: 'demo-2', fullName: 'Tomás Ibarra', clases: 15 },
-    { userId: 'demo-3', fullName: 'Sofía Gómez', clases: 12 },
-    { userId: 'demo-4', fullName: 'Bruno Álvarez', clases: 9 },
-    { userId: 'demo-5', fullName: 'Valentina Ríos', clases: 7 },
+    { userId: 'demo-1', fullName: 'Lucía Fernández', xp: 1850 },
+    { userId: 'demo-2', fullName: 'Tomás Ibarra', xp: 1500 },
+    { userId: 'demo-3', fullName: 'Sofía Gómez', xp: 1200 },
+    { userId: 'demo-4', fullName: 'Bruno Álvarez', xp: 900 },
+    { userId: 'demo-5', fullName: 'Valentina Ríos', xp: 700 },
   ];
 }

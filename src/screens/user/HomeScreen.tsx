@@ -27,6 +27,7 @@ import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
+import HoyEntreneButton from '../../components/HoyEntreneButton';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
@@ -300,6 +301,8 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         )}
       </View>
+
+      {user && <HoyEntreneButton userId={user.id} />}
 
       {!isLoading &&
         (nextBooking ? (

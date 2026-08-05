@@ -15,7 +15,7 @@ jest.mock('../../context/AuthContext', () => ({
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'gte', 'lte', 'limit', 'order', 'in'].forEach((m) => {
+  ['select', 'eq', 'gte', 'lte', 'limit', 'order', 'in', 'insert'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
@@ -86,7 +86,7 @@ describe('ComunidadMobileView (Módulo 6 -- Feed, Grupos, Ranking)', () => {
     fireEvent.press(getByText('Ranking'));
 
     await waitFor(() => expect(getByText(/Ranking de ejemplo/)).toBeTruthy());
-    expect(getByText('0')).toBeTruthy(); // "Vos: 0 clases este mes" -- real, sin datos simulados
+    expect(getByText('0 XP')).toBeTruthy(); // "Vos: 0 XP totales" -- real, sin datos simulados
     expect(getByText('Lucía Fernández')).toBeTruthy();
   });
 });

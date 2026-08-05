@@ -96,4 +96,21 @@ describe('PerfilMobileView (Módulo 3)', () => {
     expect(openURLSpy).toHaveBeenCalledWith(expect.stringContaining('wa.me'));
     expect(onNavigate).not.toHaveBeenCalled();
   });
+
+  it('el botón "¿Cómo ganar XP?" abre el modal con las 4 reglas completas', async () => {
+    const { getByText, getByLabelText } = render(<PerfilMobileView />);
+    await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
+
+    fireEvent.press(getByLabelText('¿Cómo ganar XP?'));
+
+    await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
+    expect(getByText('Asistencia diaria / ¡Hoy entrené!')).toBeTruthy();
+    expect(getByText('+100 XP (máx. 1 al día)')).toBeTruthy();
+    expect(getByText('Publicar en la Comunidad')).toBeTruthy();
+    expect(getByText('+25 XP (máx. 1 al día)')).toBeTruthy();
+    expect(getByText('Superar un Récord Personal (PR)')).toBeTruthy();
+    expect(getByText('+150 XP')).toBeTruthy();
+    expect(getByText('Completar una Meta Personal')).toBeTruthy();
+    expect(getByText('+300 XP (límite 7 días)')).toBeTruthy();
+  });
 });

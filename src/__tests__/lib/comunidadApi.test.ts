@@ -30,6 +30,16 @@ import {
 const mockedFrom = supabase.from as jest.Mock;
 const mockedRpc = supabase.rpc as jest.Mock;
 
+function makeChain(result: any) {
+  const chain: any = {};
+  const self = () => chain;
+  ['select', 'eq', 'order', 'limit', 'in'].forEach((m) => {
+    chain[m] = jest.fn(self);
+  });
+  chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
+  return chain;
+}
+
 describe('checkComunidadDisponible (Módulo 6 -- detección de tablas reales vs. modo demo)', () => {
   afterEach(() => jest.clearAllMocks());
 
@@ -56,7 +66,7 @@ describe('checkComunidadDisponible (Módulo 6 -- detección de tablas reales vs.
 describe('checkRankingDisponible', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('devuelve false si el RPC community_ranking_mes no está desplegado (PGRST202)', async () => {
+  it('devuelve false si el RPC community_ranking_xp no está desplegado (PGRST202)', async () => {
     mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
     expect(await checkRankingDisponible()).toBe(false);
   });
@@ -64,6 +74,85 @@ describe('checkRankingDisponible', () => {
   it('devuelve true si el RPC responde', async () => {
     mockedRpc.mockResolvedValue({ data: [], error: null });
     expect(await checkRankingDisponible()).toBe(true);
+  });
+});
+
+describe('Ranking real -- ordena por XP total (Módulo 6, corregido)', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('fetchRanking en modo real llama a community_ranking_xp y mapea total_xp -> xp', async () => {
+    mockedRpc.mockResolvedValue({
+      data: [
+        { user_id: 'u1', full_name: 'Lucía Fernández', total_xp: 1850 },
+        { user_id: 'u2', full_name: 'Tomás Ibarra', total_xp: 900 },
+      ],
+      error: null,
+    });
+    const ranking = await fetchRanking(false, null);
+    expect(mockedRpc).toHaveBeenCalledWith('community_ranking_xp', { p_discipline_id: null });
+    expect(ranking).toEqual([
+      { userId: 'u1', fullName: 'Lucía Fernández', xp: 1850 },
+      { userId: 'u2', fullName: 'Tomás Ibarra', xp: 900 },
+    ]);
+  });
+});
+
+describe('Feed real -- nombre de autor vía RPC (fix del bug "Socio GreenFit")', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('resuelve el full_name real de otro socio a través de community_author_names, no del embed bloqueado por RLS', async () => {
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'community_posts') {
+        return makeChain({
+          data: [
+            {
+              id: 'post-1',
+              author_id: 'otro-socio',
+              body: 'Hola comunidad',
+              media_url: null,
+              author_nivel: 3,
+              author_discipline: 'CrossFit',
+              created_at: new Date().toISOString(),
+            },
+          ],
+          error: null,
+        });
+      }
+      // community_reactions / community_comments para ese post
+      return makeChain({ data: [], error: null });
+    });
+    mockedRpc.mockResolvedValue({ data: [{ id: 'otro-socio', full_name: 'Martina Ríos' }], error: null });
+
+    const feed = await fetchFeed('yo', false);
+
+    expect(mockedRpc).toHaveBeenCalledWith('community_author_names', { p_ids: ['otro-socio'] });
+    expect(feed[0].authorName).toBe('Martina Ríos');
+  });
+
+  it('cae al fallback "Socio GreenFit" solo si el RPC no devuelve esa fila (perfil borrado, etc.)', async () => {
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'community_posts') {
+        return makeChain({
+          data: [
+            {
+              id: 'post-1',
+              author_id: 'socio-borrado',
+              body: 'Post huérfano',
+              media_url: null,
+              author_nivel: null,
+              author_discipline: null,
+              created_at: new Date().toISOString(),
+            },
+          ],
+          error: null,
+        });
+      }
+      return makeChain({ data: [], error: null });
+    });
+    mockedRpc.mockResolvedValue({ data: [], error: null });
+
+    const feed = await fetchFeed('yo', false);
+    expect(feed[0].authorName).toBe('Socio GreenFit');
   });
 });
 
@@ -202,7 +291,7 @@ describe('fetchRanking en modo demo', () => {
   it('devuelve una lista de ejemplo ya ordenada de mayor a menor', async () => {
     const ranking = await fetchRanking(true);
     expect(ranking.length).toBeGreaterThan(0);
-    const clases = ranking.map((r) => r.clases);
-    expect([...clases].sort((a, b) => b - a)).toEqual(clases);
+    const xp = ranking.map((r) => r.xp);
+    expect([...xp].sort((a, b) => b - a)).toEqual(xp);
   });
 });

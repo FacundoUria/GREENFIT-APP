@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
@@ -45,6 +45,15 @@ function StatusBadge({ status }: { status: MembershipStatus }) {
 // un número engañoso). Placeholder fijo y claramente marcado hasta que
 // exista la lógica real.
 const RACHA_PLACEHOLDER_DIAS = 3;
+
+// Mismas 4 reglas de backend/supabase_migration_xp.sql, en el orden y con
+// el texto que se muestra en el modal "¿Cómo ganar XP?".
+const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
+  { emoji: '🏋️', label: 'Asistencia diaria / ¡Hoy entrené!', detalle: '+100 XP (máx. 1 al día)' },
+  { emoji: '💬', label: 'Publicar en la Comunidad', detalle: '+25 XP (máx. 1 al día)' },
+  { emoji: '🏆', label: 'Superar un Récord Personal (PR)', detalle: '+150 XP' },
+  { emoji: '🎯', label: 'Completar una Meta Personal', detalle: '+300 XP (límite 7 días)' },
+];
 
 const MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 function formatMesAnio(dateStr: string): string {
@@ -136,6 +145,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
   const [error, setError] = useState<string | null>(null);
   const [comingSoonLabel, setComingSoonLabel] = useState<string | null>(null);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [xpInfoVisible, setXpInfoVisible] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -214,9 +224,18 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
             <Text style={styles.athleteName} numberOfLines={1}>
               {user.name}
             </Text>
-            <View style={styles.levelBadge}>
-              <Ionicons name="flash" size={11} color={colors.onPrimary} />
-              <Text style={styles.levelBadgeText}>NIVEL {resumenXp.nivel}</Text>
+            <View style={styles.levelRow}>
+              <View style={styles.levelBadge}>
+                <Ionicons name="flash" size={11} color={colors.onPrimary} />
+                <Text style={styles.levelBadgeText}>NIVEL {resumenXp.nivel}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setXpInfoVisible(true)}
+                hitSlop={8}
+                accessibilityLabel="¿Cómo ganar XP?"
+              >
+                <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -316,6 +335,29 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
           <Text style={styles.comingSoonText}>{comingSoonLabel}</Text>
         </View>
       )}
+
+      <Modal visible={xpInfoVisible} transparent animationType="fade" onRequestClose={() => setXpInfoVisible(false)}>
+        <View style={styles.xpModalBackdrop}>
+          <View style={styles.xpModalCard}>
+            <View style={styles.xpModalHeaderRow}>
+              <Text style={styles.xpModalTitle}>¿Cómo ganar XP?</Text>
+              <TouchableOpacity onPress={() => setXpInfoVisible(false)} hitSlop={10}>
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.xpModalSubtitle}>Cada {XP_POR_NIVEL} XP subís de nivel.</Text>
+            {REGLAS_XP.map((regla) => (
+              <View key={regla.label} style={styles.xpRuleRow}>
+                <Text style={styles.xpRuleEmoji}>{regla.emoji}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.xpRuleLabel}>{regla.label}</Text>
+                  <Text style={styles.xpRuleDetalle}>{regla.detalle}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -349,6 +391,7 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: colors.primary, fontSize: 20, fontWeight: '800' },
   athleteName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  levelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   levelBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -358,7 +401,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingVertical: 3,
     paddingHorizontal: 9,
-    marginTop: 6,
   },
   levelBadgeText: { color: colors.onPrimary, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.4 },
   xpBarWrap: { marginTop: 14, gap: 4 },
@@ -440,4 +482,27 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   comingSoonText: { color: colors.textSecondary, fontSize: 11.5 },
+
+  xpModalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
+  xpModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  xpModalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  xpModalTitle: { color: colors.textPrimary, fontSize: 17, fontWeight: '800' },
+  xpModalSubtitle: { color: colors.textSecondary, fontSize: 12.5, marginTop: 4, marginBottom: 16 },
+  xpRuleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceAlt,
+  },
+  xpRuleEmoji: { fontSize: 22 },
+  xpRuleLabel: { color: colors.textPrimary, fontSize: 13.5, fontWeight: '700' },
+  xpRuleDetalle: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 2 },
 });
