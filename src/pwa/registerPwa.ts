@@ -78,8 +78,19 @@ async function registerServiceWorker() {
 
 // Se llama una sola vez, apenas arranca la app. En nativo (iOS/Android) es
 // un no-op: no hay `document`/`navigator.serviceWorker` real y no aplica.
+//
+// EXPO_PUBLIC_E2E_MODE desactiva el service worker a propósito: su handler
+// de `fetch` (ver public/sw.js) re-emite cada request DESDE SU PROPIO
+// CONTEXTO ("self.respondWith(fetch(event.request))"), que corre fuera del
+// frame de la página -- el page.route() de Playwright no lo intercepta, así
+// que apenas el SW toma control (unos segundos después de cargar, vía
+// clients.claim()) cualquier request posterior empieza a pegarle a la red
+// REAL en vez de al mock. Esto se detectó en la práctica: el login fallaba
+// con "Failed to fetch" solo después de que pasaban unos segundos en la
+// pantalla, nunca en el primer request.
 export function registerPwa() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+  if (process.env.EXPO_PUBLIC_E2E_MODE === 'true') return;
   injectHeadTags();
   registerServiceWorker();
 }

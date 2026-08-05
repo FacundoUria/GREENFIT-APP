@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -186,10 +187,18 @@ export default function ComunidadMobileView() {
     }
   }, [user]);
 
-  useEffect(() => {
-    setIsLoading(true);
-    load();
-  }, [load]);
+  // useFocusEffect (no useEffect a secas) -- Comunidad es un tab, React
+  // Navigation la mantiene montada al cambiar de tab, así que un useEffect
+  // normal solo cargaba una vez y el Ranking/XP quedaban desactualizados
+  // para siempre después de la primera visita (mismo bug ya corregido en
+  // PerfilMobileView -- ver el comentario largo ahí). Mismo criterio que
+  // ya usa HomeScreen.tsx.
+  useFocusEffect(
+    useCallback(() => {
+      setIsLoading(true);
+      load();
+    }, [load])
+  );
 
   if (!user) return null;
 

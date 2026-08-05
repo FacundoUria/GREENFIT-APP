@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
@@ -117,7 +118,7 @@ interface PerfilMobileViewProps {
 }
 
 export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) {
-  const { user, updateAvatarUrl } = useAuth();
+  const { user, updateAvatarUrl, logout } = useAuth();
   const { configuracion } = useConfiguracion();
 
   const [balances, setBalances] = useState<UserCredit[]>([]);
@@ -155,10 +156,19 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
     }
   }, [user]);
 
-  useEffect(() => {
-    setIsLoading(true);
-    load();
-  }, [load]);
+  // useFocusEffect (no useEffect a secas) -- React Navigation mantiene esta
+  // pantalla MONTADA al cambiar de tab o volver de una pantalla empujada
+  // (Progreso, Comunidad), así que un useEffect normal solo cargaba una vez
+  // y nunca volvía a pedir el XP/racha/clases reales. Este era el bug real
+  // detrás de "el Check-in Rápido del admin no se refleja en la PWA": no es
+  // que el dato esté mal, es que esta pantalla no lo volvía a pedir al
+  // volver a foco. Mismo criterio que ya usa HomeScreen.tsx.
+  useFocusEffect(
+    useCallback(() => {
+      setIsLoading(true);
+      load();
+    }, [load])
+  );
 
   useEffect(() => {
     return () => {
@@ -229,7 +239,15 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.header}>Mi Perfil</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.header}>Mi Perfil</Text>
+        {/* Sutil a propósito -- el logout "completo" ya vive en Mis Datos
+            (ProfileScreen.tsx); esto es solo un atajo rápido desde el hub,
+            sin llamar la atención con color de peligro ni texto. */}
+        <TouchableOpacity onPress={logout} hitSlop={10} accessibilityLabel="Cerrar sesión">
+          <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
       {!!error && <Text style={styles.error}>{error}</Text>}
 
@@ -383,7 +401,8 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16, paddingBottom: 40 },
-  header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 14 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
   error: { color: colors.danger, marginBottom: 12 },
 
   athleteCard: {

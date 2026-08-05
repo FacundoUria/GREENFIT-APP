@@ -3,10 +3,26 @@ import { Linking } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { formatDateOnly } from '../../lib/classesApi';
 
+// PerfilMobileView usa useFocusEffect (no useEffect a secas) para refrescar
+// XP/racha/clases cada vez que la pantalla vuelve a foco -- ver el bugfix de
+// sincronización de XP. Sin un NavigationContainer real, hay que mockearlo
+// para que dispare el callback una vez al montar (mismo criterio que
+// HomeScreen.render.test.tsx).
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ReactActual = require('react');
+    ReactActual.useEffect(() => {
+      callback();
+    }, []);
+  },
+}));
+
 const mockUpdateAvatarUrl = jest.fn();
+const mockLogout = jest.fn();
 const mockUser = { id: 'user-1', name: 'Facundo Uria', dni: '30111222', phone: null, role: 'socio', avatarUrl: null as string | null };
 jest.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ user: mockUser, updateAvatarUrl: mockUpdateAvatarUrl }),
+  useAuth: () => ({ user: mockUser, updateAvatarUrl: mockUpdateAvatarUrl, logout: mockLogout }),
 }));
 
 jest.mock('../../context/ConfiguracionContext', () => ({
@@ -173,5 +189,14 @@ describe('PerfilMobileView (Módulo 3)', () => {
 
     await waitFor(() => expect(checkAvatarDisponible).toHaveBeenCalled());
     expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
+  });
+
+  it('el botón sutil de "Cerrar sesión" llama a logout()', async () => {
+    const { getByText, getByLabelText } = render(<PerfilMobileView />);
+    await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
+
+    fireEvent.press(getByLabelText('Cerrar sesión'));
+
+    expect(mockLogout).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,20 @@ import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
+// ComunidadMobileView usa useFocusEffect (no useEffect a secas) para
+// refrescar Feed/Ranking/Mensajes cada vez que el tab vuelve a foco -- ver
+// el bugfix de sincronización de XP. Sin un NavigationContainer real, hay
+// que mockearlo (mismo criterio que HomeScreen.render.test.tsx).
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ReactActual = require('react');
+    ReactActual.useEffect(() => {
+      callback();
+    }, []);
+  },
+}));
+
 // user como referencia estable (fuera del factory) -- si `useAuth()` devolviera
 // un objeto nuevo en cada llamada, el `useCallback([user])` de la pantalla
 // recrearía `load` en cada render y el useEffect([load]) reentraría en loop.

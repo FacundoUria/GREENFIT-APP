@@ -8,8 +8,10 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
+    "build:e2e-web": "node e2e/scripts/build-e2e-web.js",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -39,12 +41,14 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/react-native": "^12.9.0",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "^54.0.12",
     "jest-expo": "^54.0.17",
     "react-test-renderer": "^19.1.0",
+    "serve": "^14.2.6",
     "typescript": "~5.9.2"
   },
   "private": true,
@@ -55,7 +59,8 @@
     ],
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "/dist/"
+      "/dist/",
+      "/e2e/"
     ]
   }
 }

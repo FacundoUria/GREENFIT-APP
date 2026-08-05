@@ -1,0 +1,66 @@
+import { test, expect } from '@playwright/test';
+import { loginComoSocio, SOCIO_DEMO } from './support/auth';
+import { tablasBase } from './support/fixtures';
+import { irATab } from './support/nav';
+
+// Cubre el checklist de Perfil: avatar sincronizado, racha/"Clases (mes)"
+// reales y el botón sutil de Logout.
+test.describe('PWA -- Mi Perfil', () => {
+  test('muestra avatar real, nivel/racha/clases calculados sobre XP real', async ({ page }) => {
+    const avatarUrl = 'https://e2e-mock.supabase.co/storage/v1/object/public/avatars/e2e/avatar.jpg';
+    await loginComoSocio(page, {
+      user: { ...SOCIO_DEMO, avatarUrl },
+      tables: tablasBase(),
+    });
+
+    await irATab(page, 'Perfil');
+    await expect(page.getByText('Mi Perfil')).toBeVisible();
+
+    // Nivel real: 700 + 450 = 1150 XP -> NIVEL 3, 150/500 de progreso.
+    await expect(page.getByText('NIVEL 3')).toBeVisible();
+    await expect(page.getByText('150 / 500 XP')).toBeVisible();
+
+    // Avatar real (no el fallback de iniciales) -- sincronizado desde
+    // profiles.avatar_url. React Native Web puede renderizar <Image> como
+    // <img src> o como un <div> con background-image según la versión --
+    // se busca la URL en cualquiera de las dos formas en vez de asumir una.
+    await expect(page.locator(`img[src*="avatar.jpg"], [style*="avatar.jpg"]`).first()).toBeVisible();
+    // Y el fallback de iniciales ("FE") NO debe estar -- confirma que
+    // realmente se está usando la foto, no cayendo al fallback por error.
+    await expect(page.getByText('FE', { exact: true })).toHaveCount(0);
+
+    // Racha (2 días consecutivos: hoy + ayer) y "Clases (mes)" (2 días
+    // distintos con asistencia este mes) -- ya no un placeholder fijo.
+    await expect(page.getByTestId('stat-racha')).toHaveText('2');
+    await expect(page.getByTestId('stat-clases')).toHaveText('2');
+  });
+
+  test('el ícono "¿Cómo ganar XP?" abre el modal con las 4 reglas', async ({ page }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+    await irATab(page, 'Perfil');
+    await expect(page.getByText('Mi Perfil')).toBeVisible();
+
+    // .last(): React Navigation mantiene Home (tab inicial) montado de
+    // fondo -- Home también tiene su propio ícono "¿Cómo ganar XP?" en el
+    // widget de Progreso Diario, así que hay 2 en el DOM. Perfil se montó
+    // DESPUÉS (recién al navegar acá), por lo que es el último en el árbol.
+    await page.getByLabel('¿Cómo ganar XP?').last().click();
+
+    await expect(page.getByText('¿Cómo ganar XP?')).toBeVisible();
+    await expect(page.getByText('Asistencia diaria / ¡Hoy entrené!')).toBeVisible();
+    await expect(page.getByText('Publicar en la Comunidad')).toBeVisible();
+    await expect(page.getByText('Superar un Récord Personal (PR)')).toBeVisible();
+    await expect(page.getByText('Completar una Meta Personal')).toBeVisible();
+  });
+
+  test('el botón sutil de Logout cierra la sesión y vuelve a Login', async ({ page }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+    await irATab(page, 'Perfil');
+    await expect(page.getByText('Mi Perfil')).toBeVisible();
+
+    await page.getByLabel('Cerrar sesión').click();
+
+    await expect(page.getByPlaceholder('DNI')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Ingresar', { exact: true })).toBeVisible();
+  });
+});
