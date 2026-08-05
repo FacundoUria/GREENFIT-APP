@@ -89,14 +89,20 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(getByText('350 XP')).toBeTruthy();
   });
 
-  it('el botón "¡Hoy entrené!" está en el widget y al tocarlo otorga +100 XP y se deshabilita', async () => {
+  it('el botón "¡Hoy entrené!" está en el widget y al tocarlo otorga +100 XP, pasa a "ya registrado" y actualiza el contador de XP al instante (sin recargar la pantalla)', async () => {
     const { getByText } = render(<HomeScreen navigation={navigation} />);
     const boton = await waitFor(() => getByText('¡Hoy entrené! (+100 XP)'));
 
     fireEvent.press(boton);
 
     await waitFor(() => expect(otorgarXpAsistenciaDiaria).toHaveBeenCalledWith('user-1', false));
-    await waitFor(() => expect(getByText('¡Entrenamiento de hoy registrado! +100 XP')).toBeTruthy());
+    await waitFor(() => expect(getByText('Entrenamiento de hoy ya registrado')).toBeTruthy());
+    // Update optimista: 650 + 100 = 750 XP -> sigue en NIVEL 2, pero el
+    // progreso pasa de 150/500 a 250/500 en el mismo render, sin esperar a
+    // un refetch (fetchTotalXp real solo se llamó UNA vez, al montar).
+    await waitFor(() => expect(getByText('250/500')).toBeTruthy());
+    expect(getByText('250 XP')).toBeTruthy();
+    expect(fetchTotalXp).toHaveBeenCalledTimes(1);
   });
 
   it('el ícono "¿Cómo ganar XP?" abre el modal con las reglas', async () => {

@@ -31,7 +31,7 @@ test.describe('PWA -- Home / Dashboard', () => {
 
     await boton.click();
 
-    await expect(page.getByText('¡Entrenamiento de hoy registrado! +100 XP')).toBeVisible();
+    await expect(page.getByText('Entrenamiento de hoy ya registrado')).toBeVisible();
   });
 
   test('el ícono de reglas de XP abre el modal', async ({ page }) => {

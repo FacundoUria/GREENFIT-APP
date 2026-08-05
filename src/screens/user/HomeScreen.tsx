@@ -338,7 +338,15 @@ export default function HomeScreen({ navigation }: any) {
               nivel.
             </Text>
           </View>
-          <HoyEntreneButton userId={user.id} />
+          <HoyEntreneButton
+            userId={user.id}
+            // Update optimista: suma los +100 XP reales al contador YA
+            // cargado en memoria, sin esperar a un refetch (useFocusEffect
+            // recién vuelve a pedir el total al cambiar de pantalla y
+            // volver -- sin esto, el anillo/contador quedaban desactualizados
+            // hasta ese momento).
+            onClaimed={() => setTotalXp((prev) => prev + 100)}
+          />
         </View>
       )}
 
