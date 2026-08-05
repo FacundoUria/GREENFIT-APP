@@ -440,29 +440,30 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
     overflow: 'hidden',
   },
-  // `position:relative` (explícito) + minHeight le da al Pitbull una zona
-  // alta y con aire propio para "sobresalir" -- el mascotWrap se ancla
-  // directamente a esta fila (no a toda la tarjeta), así nunca invade la
-  // fila de stats (Racha/Miembro desde/Clases) de más abajo.
-  // minHeight amplio para que el Pitbull tenga alto real donde "llenar" --
-  // mascotWrap se estira top:0/bottom:0 a ESTA fila exacta (nunca a toda la
-  // tarjeta), así el borde inferior del torso queda pegado a la línea
-  // divisoria de arriba de Racha/Miembro desde/Clases, sin invadirla.
-  athleteHeroRow: { position: 'relative', flexDirection: 'row', alignItems: 'flex-start', minHeight: 210 },
+  // `position:relative` (explícito, sin minHeight forzado) -- el alto de
+  // esta fila lo define SOLO su contenido en flujo normal (athleteInfoCol);
+  // mascotWrap es absoluto, así que no participa del cálculo de alto de
+  // flexbox. Antes había un minHeight:210 fijo pensado para darle aire al
+  // Pitbull, pero como athleteInfoCol es más bajo que eso, dejaba un hueco
+  // vacío entre la barra de XP y la fila de stats -- se saca por completo.
+  athleteHeroRow: { position: 'relative', flexDirection: 'row', alignItems: 'flex-start' },
   // paddingRight reserva el espacio del Pitbull (absoluto, sin ocupar hueco
   // en el flujo) para que el nombre/nivel/barra de XP nunca queden debajo.
   // zIndex explícito: el texto SIEMPRE queda en capa superior al Pitbull,
   // aunque algún cambio futuro haga que se toquen los bordes.
   athleteInfoCol: { flex: 1, minWidth: 0, paddingRight: MASCOT_WIDTH - 50, zIndex: 2 },
-  // top/right/bottom: 0 -- estira la imagen a TODO el alto disponible de la
-  // fila, sin ningún vacío arriba ni abajo (resizeMode="cover" en el <Image>
-  // hace el zoom/recorte necesario para llenar el box de punta a punta).
+  // bottom:0 (no top+bottom estirado) -- el borde inferior del torso queda
+  // pegado al final REAL de la fila (que ahora es tan alta como su
+  // contenido, no un minHeight artificial), justo antes de la línea
+  // divisoria de Racha/Miembro desde/Clases. Alto fijo generoso para que
+  // el Pitbull sobresalga por arriba (se recorta prolijo contra el
+  // overflow:hidden + borderRadius de athleteCard, no contra un hueco).
   mascotWrap: {
     position: 'absolute',
-    top: 0,
-    right: 0,
     bottom: 0,
+    right: 0,
     width: MASCOT_WIDTH,
+    height: 175,
   },
   // cover (no contain): llena el contenedor de punta a punta -- prioriza
   // "sin vacíos" por sobre mostrar la silueta completa, mismo criterio que
