@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Defs, RadialGradient, Stop, Circle } from 'react-native-svg';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
@@ -50,49 +49,19 @@ const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: 
 
 // Ilustración de la mascota (Pitbull GreenFit) con alta presencia visual --
 // reemplaza al viejo watermark de esquina (perro.png a 96x96, opacity 0.1).
-// Plano medio (cabeza/hombros/torso con la remera GreenFit, sin cuerpo
-// entero) a propósito, igual que la maqueta de referencia: el recorte de
-// cuerpo entero, en un box chico con resizeMode="contain", dejaba barras de
-// fondo negro visibles a los costados (letterboxing) que se leían como una
-// "caja" alrededor de la imagen. Con este recorte + resizeMode="cover" la
-// imagen llena el contenedor de punta a punta, sin barras ni bordes.
-//
-// El PNG fuente NO tiene canal alfa real (es un recorte de una pieza de arte
-// generada sobre fondo negro sólido -- remera/pelaje oscuro del propio
-// personaje son del mismo tono que el fondo, así que un chroma-key destruye
-// la ilustración en vez de aislarla; se probó y se descartó). Para
-// disimular el fondo negro restante se usa `mix-blend-mode: screen` sobre
-// el <img> en web: screen() hace que el negro puro no aporte nada a la
-// mezcla (se vuelve perceptualmente invisible contra el fondo de la
-// tarjeta), mientras el pelaje claro y el splash verde sí se funden con
-// luz. `mixBlendMode` no existe en el tipado de ImageStyle de RN (es CSS
-// puro) -- se aplica solo en `Platform.OS === 'web'`; en nativo no hay
-// blend modes, ahí la imagen se ve tal cual, sin romper nada.
-const MASCOT_WIDTH = 168;
-const MASCOT_GLOW_SIZE = 260;
+// `assets/perfil-mascota.png` es un recorte PROPIO (ffmpeg) de UNA sola
+// pose (la de doble bíceps, 3er cuadrante de una grilla de 4 que el usuario
+// pasó con el fondo ya removido de verdad -- PNG con canal alfa real) --
+// solo la silueta, sin ningún glow/aura detrás: el fondo de esa zona es el
+// mismo colors.surface plano de toda la tarjeta, sin ninguna capa extra.
+const MASCOT_WIDTH = 190;
 
 function MascotHero() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mixBlendMode es CSS puro, sin tipo en RN
-  const screenBlend: any = Platform.OS === 'web' ? { mixBlendMode: 'screen' } : null;
-
   return (
     <View style={styles.mascotWrap} pointerEvents="none">
-      {/* Resplandor ambiental verde DETRÁS de la imagen -- la única capa
-          extra sobre el Pitbull; nada de máscaras ni degradés encima. */}
-      <Svg width={MASCOT_GLOW_SIZE} height={MASCOT_GLOW_SIZE} style={styles.mascotGlowSvg}>
-        <Defs>
-          <RadialGradient id="mascotGlow" cx="50%" cy="42%" r="58%">
-            <Stop offset="0%" stopColor="#22c55e" stopOpacity={0.65} />
-            <Stop offset="45%" stopColor="#22c55e" stopOpacity={0.35} />
-            <Stop offset="100%" stopColor="#22c55e" stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
-        <Circle cx={MASCOT_GLOW_SIZE / 2} cy={MASCOT_GLOW_SIZE / 2} r={MASCOT_GLOW_SIZE / 2} fill="url(#mascotGlow)" />
-      </Svg>
-
       <Image
         source={require('../../../assets/perfil-mascota.png')}
-        style={[styles.mascotHero, screenBlend]}
+        style={[styles.mascotHero]}
         resizeMode="cover"
         accessibilityLabel="Mascota GreenFit"
       />
@@ -475,34 +444,29 @@ const styles = StyleSheet.create({
   // alta y con aire propio para "sobresalir" -- el mascotWrap se ancla
   // directamente a esta fila (no a toda la tarjeta), así nunca invade la
   // fila de stats (Racha/Miembro desde/Clases) de más abajo.
-  athleteHeroRow: { position: 'relative', flexDirection: 'row', alignItems: 'flex-start', minHeight: 150 },
+  // minHeight amplio para que el Pitbull tenga alto real donde "llenar" --
+  // mascotWrap se estira top:0/bottom:0 a ESTA fila exacta (nunca a toda la
+  // tarjeta), así el borde inferior del torso queda pegado a la línea
+  // divisoria de arriba de Racha/Miembro desde/Clases, sin invadirla.
+  athleteHeroRow: { position: 'relative', flexDirection: 'row', alignItems: 'flex-start', minHeight: 210 },
   // paddingRight reserva el espacio del Pitbull (absoluto, sin ocupar hueco
   // en el flujo) para que el nombre/nivel/barra de XP nunca queden debajo.
   // zIndex explícito: el texto SIEMPRE queda en capa superior al Pitbull,
   // aunque algún cambio futuro haga que se toquen los bordes.
-  athleteInfoCol: { flex: 1, minWidth: 0, paddingRight: MASCOT_WIDTH - 40, zIndex: 2 },
-  // Sin rounded-full/overflow-hidden ni máscara circular -- bordes negativos
-  // (right/bottom) para que sangre levemente más allá del padding de la
-  // tarjeta, con fuerza visual, tal cual la maqueta de referencia.
+  athleteInfoCol: { flex: 1, minWidth: 0, paddingRight: MASCOT_WIDTH - 50, zIndex: 2 },
+  // top/right/bottom: 0 -- estira la imagen a TODO el alto disponible de la
+  // fila, sin ningún vacío arriba ni abajo (resizeMode="cover" en el <Image>
+  // hace el zoom/recorte necesario para llenar el box de punta a punta).
   mascotWrap: {
     position: 'absolute',
-    top: -8,
-    right: -10,
+    top: 0,
+    right: 0,
     bottom: 0,
     width: MASCOT_WIDTH,
-    zIndex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  mascotGlowSvg: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -MASCOT_GLOW_SIZE / 2 }, { translateY: -MASCOT_GLOW_SIZE / 2 }],
-  },
-  // Nítida al 100% -- sin opacity, sin tintColor, sin ningún filtro que la
-  // oscurezca. mixBlendMode (agregado inline en el JSX, solo en web) es lo
-  // único que toca su fondo, y no afecta el pelaje/remera del Pitbull.
+  // cover (no contain): llena el contenedor de punta a punta -- prioriza
+  // "sin vacíos" por sobre mostrar la silueta completa, mismo criterio que
+  // la maqueta de referencia (el Pitbull sangra por los bordes del recorte).
   mascotHero: { width: '100%', height: '100%' },
   athleteTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatarTouchable: { position: 'relative' },
