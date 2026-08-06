@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Linking,
   Alert,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -23,82 +24,117 @@ import {
 import { formatDateOnly } from '../../lib/classesApi';
 import { Routine, RoutineExercise } from '../../types';
 import VideoModal from '../../components/VideoModal';
+import RoutineCompleteModal from '../../components/RoutineCompleteModal';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
-function MetricBlock({ label, value }: { label: string; value: string }) {
+// Chip chico con ícono para un dato de la sub-línea (Series x Reps / Carga /
+// Descanso) -- reemplaza la grilla rígida de 4 rectángulos: acá son solo
+// texto en línea, mucho más liviano de leer de un vistazo.
+function MetaChip({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   return (
-    <View style={styles.metricBlock}>
-      <Text style={styles.metricValue} numberOfLines={1}>
-        {value}
+    <View style={styles.metaChip}>
+      <Ionicons name={icon} size={13} color={colors.textSecondary} />
+      <Text style={styles.metaChipText} numberOfLines={1}>
+        {text}
       </Text>
-      <Text style={styles.metricLabel}>{label}</Text>
     </View>
   );
 }
 
-function ExerciseCard({
-  orden,
+// Encabezado de sección por grupo muscular ("PECHO", "TRÍCEPS"...) -- agrupa
+// visualmente el entrenamiento de un vistazo, mismo color por grupo que usa
+// el Admin (colorGrupoMuscular, paleta compartida entre las dos apps).
+function GroupHeader({ grupo }: { grupo: string }) {
+  const color = colorGrupoMuscular(grupo);
+  return (
+    <View style={styles.groupHeaderRow}>
+      <View style={[styles.groupPill, { backgroundColor: color.bg }]}>
+        <Text style={[styles.groupPillText, { color: color.text }]}>{grupo.toUpperCase()}</Text>
+      </View>
+      <View style={styles.groupHeaderLine} />
+    </View>
+  );
+}
+
+// Fila de checklist ancha: nombre + sub-línea con íconos a la izquierda,
+// checkbox táctil gigante (48x48 mín.) a la derecha. Al completarse, una
+// transición suave (Animated, no LayoutAnimation -- no-op en react-native-web,
+// el target principal de esta pantalla) tiñe el borde de verde neón y
+// suaviza el texto, para dar feedback claro de "ítem cumplido".
+function ExerciseRow({
   bloque,
   completado,
   onToggle,
   onVerDemo,
 }: {
-  orden: number;
   bloque: RoutineExercise;
   completado: boolean;
   onToggle: () => void;
   onVerDemo: (url: string) => void;
 }) {
-  const color = colorGrupoMuscular(bloque.exercise.muscleGroup);
+  const anim = useRef(new Animated.Value(completado ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: completado ? 1 : 0,
+      duration: 260,
+      useNativeDriver: false, // interpola color/opacidad, no soportado por el driver nativo
+    }).start();
+  }, [completado, anim]);
+
+  const borderColor = anim.interpolate({ inputRange: [0, 1], outputRange: [colors.surfaceAlt, colors.primary] });
+  const nameOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] });
+
   const instrucciones = bloque.notes || bloque.exercise.description;
+  const cargaYDescanso = [bloque.weightSuggestion, bloque.restSeconds ? `${bloque.restSeconds}s descanso` : null].filter(
+    Boolean,
+  );
 
   return (
-    <View style={[styles.exerciseCard, completado && styles.exerciseCardCompleted]}>
-      <View style={styles.exerciseHeader}>
-        <View style={styles.orderBadge}>
-          <Text style={styles.orderBadgeText}>#{orden}</Text>
+    <Animated.View style={[styles.exerciseRow, { borderColor }]}>
+      <View style={styles.exerciseRowMain}>
+        <Animated.Text style={[styles.exerciseName, { opacity: nameOpacity }]} numberOfLines={2}>
+          {bloque.exercise.name}
+        </Animated.Text>
+
+        <View style={styles.metaLine}>
+          <MetaChip icon="repeat-outline" text={`${bloque.sets ?? '-'} × ${bloque.reps || '-'}`} />
+          {cargaYDescanso.map((texto) => (
+            <MetaChip key={texto} icon={texto === bloque.weightSuggestion ? 'barbell-outline' : 'time-outline'} text={texto!} />
+          ))}
         </View>
-        <View style={styles.exerciseHeaderInfo}>
-          <Text style={styles.exerciseName} numberOfLines={2}>
-            {bloque.exercise.name}
-          </Text>
-          <View style={[styles.muscleBadge, { backgroundColor: color.bg }]}>
-            <Text style={[styles.muscleBadgeText, { color: color.text }]} numberOfLines={1}>
-              {bloque.exercise.muscleGroup}
-            </Text>
+
+        {!!instrucciones && (
+          <View style={styles.instructionsBox}>
+            <Ionicons name="information-circle-outline" size={15} color={colors.textSecondary} />
+            <Text style={styles.instructionsText}>{instrucciones}</Text>
           </View>
-        </View>
-        <TouchableOpacity onPress={onToggle} hitSlop={8} style={styles.checkboxTouchable}>
-          <Ionicons
-            name={completado ? 'checkmark-circle' : 'ellipse-outline'}
-            size={30}
-            color={completado ? colors.primary : colors.textSecondary}
-          />
-        </TouchableOpacity>
+        )}
+
+        {!!bloque.exercise.videoUrl && (
+          <TouchableOpacity style={styles.videoButton} onPress={() => onVerDemo(bloque.exercise.videoUrl!)}>
+            <Ionicons name="play-circle" size={16} color={colors.primary} />
+            <Text style={styles.videoButtonText}>Ver Demo</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
-      <View style={styles.metricsGrid}>
-        <MetricBlock label="Series" value={String(bloque.sets ?? '-')} />
-        <MetricBlock label="Reps" value={bloque.reps || '-'} />
-        <MetricBlock label="Carga" value={bloque.weightSuggestion || '-'} />
-        <MetricBlock label="Descanso" value={bloque.restSeconds ? `${bloque.restSeconds}s` : '-'} />
-      </View>
-
-      {!!instrucciones && (
-        <View style={styles.instructionsBox}>
-          <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
-          <Text style={styles.instructionsText}>{instrucciones}</Text>
-        </View>
-      )}
-
-      {!!bloque.exercise.videoUrl && (
-        <TouchableOpacity style={styles.videoButton} onPress={() => onVerDemo(bloque.exercise.videoUrl!)}>
-          <Ionicons name="play-circle" size={18} color={colors.onPrimary} />
-          <Text style={styles.videoButtonText}>Ver Demo</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+      <TouchableOpacity
+        onPress={onToggle}
+        hitSlop={6}
+        style={styles.checkButton}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: completado }}
+        accessibilityLabel={completado ? `${bloque.exercise.name}, completado` : `Marcar ${bloque.exercise.name} como completado`}
+      >
+        <Ionicons
+          name={completado ? 'checkmark-circle' : 'ellipse-outline'}
+          size={40}
+          color={completado ? colors.primary : colors.textSecondary}
+        />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -112,6 +148,7 @@ export default function UserRoutineScreen() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const [completados, setCompletados] = useState<Set<string>>(new Set());
+  const [modalFinalVisible, setModalFinalVisible] = useState(false);
 
   const todayStr = useMemo(() => formatDateOnly(new Date()), []);
 
@@ -140,8 +177,25 @@ export default function UserRoutineScreen() {
   const diaActual = routine?.days[selectedDayIdx] ?? null;
   const totalDia = diaActual?.exercises.length ?? 0;
   const completadosDia = diaActual ? diaActual.exercises.filter((e) => completados.has(e.id)).length : 0;
-  const progresoPct = totalDia > 0 ? Math.round((completadosDia / totalDia) * 100) : 0;
   const diaCompleto = totalDia > 0 && completadosDia === totalDia;
+
+  // Agrupa los ejercicios del día por grupo muscular, respetando el orden en
+  // que el entrenador los cargó (no alfabético) -- así el bloque "Pecho"
+  // sigue viéndose antes que "Tríceps" si así se armó la rutina.
+  const gruposDelDia = useMemo(() => {
+    if (!diaActual) return [];
+    const orden: string[] = [];
+    const porGrupo = new Map<string, RoutineExercise[]>();
+    for (const bloque of diaActual.exercises) {
+      const grupo = bloque.exercise.muscleGroup || 'Otros';
+      if (!porGrupo.has(grupo)) {
+        porGrupo.set(grupo, []);
+        orden.push(grupo);
+      }
+      porGrupo.get(grupo)!.push(bloque);
+    }
+    return orden.map((grupo) => ({ grupo, ejercicios: porGrupo.get(grupo)! }));
+  }, [diaActual]);
 
   async function handleToggle(routineExerciseId: string) {
     if (!user) return;
@@ -173,10 +227,6 @@ export default function UserRoutineScreen() {
     }
   }
 
-  function handleFinalizar() {
-    Alert.alert('¡Entrenamiento completado! 💪', 'Registramos todos los ejercicios de hoy. ¡Buen trabajo!');
-  }
-
   return (
     <ScrollView
       style={styles.container}
@@ -204,21 +254,40 @@ export default function UserRoutineScreen() {
 
       {routine && diaActual && (
         <>
-          {/* Header: nombre del plan, progreso de hoy */}
+          {/* Header tipo "ficha de entrenamiento": ícono temático + título
+              personalizado, badge de Día/enfoque debajo, y a la derecha un
+              indicador de progreso en pill (sin barra de porcentaje --
+              "2 de 5 completados" se lee más rápido, sobre todo para
+              adultos mayores). */}
           <View style={styles.heroCard}>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {routine.title}
-            </Text>
-
-            <View style={styles.progressRow}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${progresoPct}%` }]} />
+            <View style={styles.heroTopRow}>
+              <View style={styles.heroTitleGroup}>
+                <View style={styles.heroIconCircle}>
+                  <Text style={styles.heroIconEmoji}>🏋️‍♂️</Text>
+                </View>
+                <View style={styles.heroTitleTextGroup}>
+                  <Text style={styles.heroTitle} numberOfLines={2}>
+                    Rutina de {(user?.name || 'vos').split(' ')[0]}
+                  </Text>
+                  <View style={styles.heroFocusPill}>
+                    <Text style={styles.heroFocusPillText} numberOfLines={1}>
+                      {diaActual.title?.trim() || 'Entrenamiento de Hoy'}
+                    </Text>
+                  </View>
+                </View>
               </View>
-              <Text style={styles.progressPct}>{progresoPct}%</Text>
+
+              <View style={[styles.progressPill, diaCompleto && styles.progressPillDone]}>
+                <Ionicons
+                  name={diaCompleto ? 'checkmark-circle' : 'ellipse-outline'}
+                  size={14}
+                  color={colors.primary}
+                />
+                <Text style={styles.progressPillText}>
+                  {totalDia > 0 ? `${completadosDia}/${totalDia} completados` : '0/0'}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.progressLabel}>
-              {completadosDia} de {totalDia} ejercicios completados hoy
-            </Text>
           </View>
 
           {/* Selector de días */}
@@ -249,28 +318,39 @@ export default function UserRoutineScreen() {
           {diaActual.exercises.length === 0 ? (
             <Text style={styles.empty}>Este día todavía no tiene ejercicios cargados.</Text>
           ) : (
-            diaActual.exercises.map((bloque, idx) => (
-              <ExerciseCard
-                key={bloque.id}
-                orden={idx + 1}
-                bloque={bloque}
-                completado={completados.has(bloque.id)}
-                onToggle={() => handleToggle(bloque.id)}
-                onVerDemo={setVideoUrl}
-              />
+            gruposDelDia.map(({ grupo, ejercicios }) => (
+              <View key={grupo} style={styles.groupBlock}>
+                <GroupHeader grupo={grupo} />
+                {ejercicios.map((bloque) => (
+                  <ExerciseRow
+                    key={bloque.id}
+                    bloque={bloque}
+                    completado={completados.has(bloque.id)}
+                    onToggle={() => handleToggle(bloque.id)}
+                    onVerDemo={setVideoUrl}
+                  />
+                ))}
+              </View>
             ))
           )}
 
-          {diaCompleto && (
-            <TouchableOpacity style={styles.finishButton} onPress={handleFinalizar}>
-              <Ionicons name="trophy" size={18} color={colors.onPrimary} />
-              <Text style={styles.finishButtonText}>Finalizar Entrenamiento</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.finishButton, diaCompleto && styles.finishButtonDone]}
+            onPress={() => setModalFinalVisible(true)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.finishButtonText}>🔥 Finalizar Entrenamiento</Text>
+          </TouchableOpacity>
         </>
       )}
 
       <VideoModal visible={!!videoUrl} videoUrl={videoUrl} onClose={() => setVideoUrl(null)} />
+      <RoutineCompleteModal
+        visible={modalFinalVisible}
+        completos={completadosDia}
+        total={totalDia}
+        onClose={() => setModalFinalVisible(false)}
+      />
     </ScrollView>
   );
 }
@@ -329,18 +409,48 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  heroTitle: { color: colors.textPrimary, fontSize: 19, fontWeight: '700' },
-  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 16 },
-  progressTrack: {
-    flex: 1,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.surfaceAlt,
-    overflow: 'hidden',
+  heroTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
+  heroTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 },
+  heroIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 255, 56, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
-  progressFill: { height: 8, borderRadius: 4, backgroundColor: colors.primary },
-  progressPct: { color: colors.primary, fontWeight: '700', fontSize: 13, width: 38, textAlign: 'right' },
-  progressLabel: { color: colors.textSecondary, fontSize: 12, marginTop: 6 },
+  heroIconEmoji: { fontSize: 22 },
+  heroTitleTextGroup: { flexShrink: 1 },
+  heroTitle: { color: colors.textPrimary, fontSize: 19, fontWeight: '700' },
+  heroFocusPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.background,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  heroFocusPillText: { color: colors.textSecondary, fontSize: 11.5, fontWeight: '600' },
+
+  // Pill "tecnológica" del progreso: fondo oscuro + borde verde neón
+  // translúcido, en vez de un texto suelto -- mismo dato ("2 de 5
+  // completados") pero con más jerarquía visual.
+  progressPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.background,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 56, 0.3)',
+  },
+  progressPillDone: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 56, 0.1)' },
+  progressPillText: { color: colors.primary, fontSize: 12.5, fontWeight: '800' },
 
   dayTabsScroll: { marginBottom: 14 },
   dayTabsRow: { gap: 8, paddingRight: 8 },
@@ -357,46 +467,36 @@ const styles = StyleSheet.create({
   dayTabText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
   dayTabTextSelected: { color: colors.onPrimary },
 
-  exerciseCard: {
+  groupBlock: { marginBottom: 6 },
+  groupHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, marginBottom: 10 },
+  groupPill: { borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6 },
+  groupPillText: { fontSize: 12.5, fontWeight: '800', letterSpacing: 0.5 },
+  groupHeaderLine: { flex: 1, height: 1, backgroundColor: colors.surfaceAlt },
+
+  exerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     backgroundColor: colors.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
+    borderWidth: 2,
   },
-  exerciseCardCompleted: { borderColor: colors.primary, opacity: 0.85 },
-  exerciseHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  orderBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  orderBadgeText: { color: colors.textSecondary, fontSize: 11.5, fontWeight: '700' },
-  exerciseHeaderInfo: { flex: 1, minWidth: 0 },
-  exerciseName: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  muscleBadge: { alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 3, marginTop: 5 },
-  muscleBadgeText: { fontSize: 11, fontWeight: '700' },
-  checkboxTouchable: { padding: 2 },
+  exerciseRowMain: { flex: 1, minWidth: 0 },
+  exerciseName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
 
-  metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
-  metricBlock: {
-    flexBasis: '47%',
-    flexGrow: 1,
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    paddingVertical: 10,
+  metaLine: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  metaChip: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
-  metricValue: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  metricLabel: { color: colors.textSecondary, fontSize: 10.5, marginTop: 2, textTransform: 'uppercase' },
+  metaChipText: { color: colors.textSecondary, fontSize: 12.5, fontWeight: '600' },
 
   instructionsBox: {
     flexDirection: 'row',
@@ -412,24 +512,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 10,
+    alignSelf: 'flex-start',
     marginTop: 12,
   },
-  videoButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+  videoButtonText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
 
-  finishButton: {
-    flexDirection: 'row',
+  // Botón/checkbox táctil: 48x48 mínimo recomendado para el pulgar (incluso
+  // en adultos mayores), bien separado del texto para que no haya toques
+  // accidentales sobre el nombre/detalles.
+  checkButton: {
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+  },
+
+  finishButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.primary,
     borderRadius: 14,
-    paddingVertical: 16,
-    marginTop: 6,
+    paddingVertical: 18,
+    marginTop: 10,
     marginBottom: 10,
   },
-  finishButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 15 },
+  finishButtonDone: { backgroundColor: colors.primaryDark },
+  finishButtonText: { color: colors.onPrimary, fontWeight: '800', fontSize: 16 },
 });
