@@ -9,6 +9,9 @@ import {
   parseExternalReference,
   extractPaymentId,
   resolveBackUrls,
+  resolveInitPoint,
+  createMpPreference,
+  MpApiError,
   MP_BACK_URLS,
 } from '../../../supabase/functions/_shared/mercadopago';
 
@@ -82,6 +85,102 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
       backUrls,
     });
     expect(req.back_urls).toEqual(backUrls);
+  });
+
+  it('con payerEmail, arma el objeto payer -- requisito mínimo de una preferencia bien formada', () => {
+    const req = buildPreferenceRequest({
+      pack: packCreditos,
+      userId: 'user-1',
+      notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
+      payerEmail: 'socio@greenfit.test',
+    });
+    expect(req.payer).toEqual({ email: 'socio@greenfit.test' });
+  });
+
+  it('sin payerEmail (usuario sin email cargado), no manda ningún payer en vez de uno vacío/inválido', () => {
+    const req = buildPreferenceRequest({
+      pack: packCreditos,
+      userId: 'user-1',
+      notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
+    });
+    expect(req.payer).toBeUndefined();
+  });
+});
+
+describe('resolveInitPoint -- bug "Tuvimos un problema (COW00...)": un token TEST- solo puede abrir sandbox_init_point', () => {
+  it('con un access token TEST- (cuenta de prueba), devuelve sandbox_init_point', () => {
+    expect(
+      resolveInitPoint('TEST-1234', { initPoint: 'https://mp.test/prod', sandboxInitPoint: 'https://mp.test/sandbox' })
+    ).toBe('https://mp.test/sandbox');
+  });
+
+  it('con un access token APP_USR- (cuenta real), devuelve init_point', () => {
+    expect(
+      resolveInitPoint('APP_USR-1234', { initPoint: 'https://mp.test/prod', sandboxInitPoint: 'https://mp.test/sandbox' })
+    ).toBe('https://mp.test/prod');
+  });
+
+  it('TEST- sin sandbox_init_point en la respuesta de Mercado Pago -- tira, nunca cae silenciosamente a init_point (reproduciría el bug)', () => {
+    expect(() => resolveInitPoint('TEST-1234', { initPoint: 'https://mp.test/prod', sandboxInitPoint: null })).toThrow(
+      /sandbox_init_point/
+    );
+  });
+
+  it('APP_USR- sin init_point en la respuesta de Mercado Pago -- tira en vez de devolver un string vacío', () => {
+    expect(() => resolveInitPoint('APP_USR-1234', { initPoint: '', sandboxInitPoint: 'https://mp.test/sandbox' })).toThrow(
+      /init_point/
+    );
+  });
+});
+
+describe('createMpPreference -- captura la respuesta exacta de Mercado Pago para poder diagnosticar errores reales', () => {
+  const originalFetch = global.fetch;
+  const body = {
+    items: [{ title: 'Pack', quantity: 1, unit_price: 100, currency_id: 'ARS' }],
+    external_reference: '{}',
+    back_urls: MP_BACK_URLS,
+    auto_return: 'approved',
+    notification_url: 'https://x.supabase.co/functions/v1/mp-webhook',
+  };
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it('éxito: devuelve id, initPoint y sandboxInitPoint tal cual los mandó Mercado Pago', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: () => Promise.resolve({ id: 'pref-1', init_point: 'https://mp.test/prod', sandbox_init_point: 'https://mp.test/sandbox' }),
+    }) as unknown as typeof fetch;
+
+    const result = await createMpPreference('TEST-1234', body);
+    expect(result).toEqual({ id: 'pref-1', initPoint: 'https://mp.test/prod', sandboxInitPoint: 'https://mp.test/sandbox' });
+  });
+
+  it('Mercado Pago responde con error -- tira MpApiError con el status y el body EXACTOS de la respuesta (para loguearlos/mostrarlos)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ message: 'invalid access token' }),
+    }) as unknown as typeof fetch;
+
+    await expect(createMpPreference('TOKEN-INVALIDO', body)).rejects.toMatchObject({
+      name: 'MpApiError',
+      message: 'invalid access token',
+      status: 400,
+      body: { message: 'invalid access token' },
+    });
+  });
+
+  it('Mercado Pago responde con error sin `message` en el body -- arma un mensaje genérico con el status', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({}),
+    }) as unknown as typeof fetch;
+
+    await expect(createMpPreference('TEST-1234', body)).rejects.toThrow(/Mercado Pago respondió 500/);
   });
 });
 

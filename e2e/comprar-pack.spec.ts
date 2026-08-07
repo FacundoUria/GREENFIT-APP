@@ -112,4 +112,44 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     await expect(page.getByText('Checkout Mercado Pago (mock)')).toBeVisible();
     await expect(page.getByText('does not support this platform')).toHaveCount(0);
   });
+
+  // Bug crítico (2026-08-07): "Tuvimos un problema (COW00...)" en el
+  // checkout de Mercado Pago -- create-payment-preference ahora puede
+  // rechazar la preferencia con un error real (token vencido, Mercado Pago
+  // la rechazó, etc.). Antes, paymentsApi.ts caía SIEMPRE al mock ante
+  // cualquier error (aunque la función estuviera desplegada), así que la
+  // PWA redirigía igual a una URL de mentira sin avisar nada -- y
+  // Alert.alert no muestra nada en Web (es un no-op literal en
+  // react-native-web), así que ni siquiera hacía falta este bug para que
+  // el socio se quedara sin feedback.
+  test('si create-payment-preference devuelve un error real, avisa con un mensaje claro en vez de redirigir a una URL rota', async ({
+    page,
+  }) => {
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), user_credits: [BALANCE_VENCIDO], packs: [PACK_CROSSFIT] },
+    });
+
+    // Sobreescribe el mock exitoso por defecto de create-payment-preference
+    // (ver e2e/support/supabaseMock.ts) -- simula que la Edge Function SÍ
+    // está desplegada pero Mercado Pago rechazó la preferencia.
+    await page.route('**/functions/v1/create-payment-preference', (route) =>
+      route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Mercado Pago respondió 400 al crear la preferencia.' }),
+      })
+    );
+
+    let mensajeDialog = '';
+    page.once('dialog', async (dialog) => {
+      mensajeDialog = dialog.message();
+      await dialog.dismiss();
+    });
+
+    await page.getByText('Renovar').click();
+    await page.getByText('Pack 12 clases CrossFit').click();
+
+    await expect.poll(() => mensajeDialog).toBe('Mercado Pago respondió 400 al crear la preferencia.');
+    expect(page.url()).not.toContain('mercadopago');
+  });
 });

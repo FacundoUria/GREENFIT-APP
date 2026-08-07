@@ -27,6 +27,7 @@ export interface MpPreferenceRequest {
   back_urls: { success: string; pending: string; failure: string };
   auto_return: string;
   notification_url: string;
+  payer?: { email: string };
 }
 
 // URLs de esquema custom, para nativo (Expo Go / build instalada) -- ya las
@@ -69,8 +70,9 @@ export function buildPreferenceRequest(params: {
   userId: string;
   notificationUrl: string;
   backUrls?: { success: string; pending: string; failure: string };
+  payerEmail?: string | null;
 }): MpPreferenceRequest {
-  const { pack, userId, notificationUrl, backUrls } = params;
+  const { pack, userId, notificationUrl, backUrls, payerEmail } = params;
   const externalReference: ExternalReference = {
     user_id: userId,
     pack_id: pack.id,
@@ -85,6 +87,11 @@ export function buildPreferenceRequest(params: {
     back_urls: backUrls ?? MP_BACK_URLS,
     auto_return: 'approved',
     notification_url: notificationUrl,
+    // Sin `payer`, Mercado Pago igual arma la preferencia pero el checkout
+    // le pide el email al socio de cero -- mandarlo precargado (el email
+    // real de la cuenta autenticada) es parte de los "requisitos mínimos"
+    // de una preferencia bien formada, no solo comodidad.
+    ...(payerEmail ? { payer: { email: payerEmail } } : {}),
   };
 }
 
@@ -117,20 +124,67 @@ export interface MpPayment {
   external_reference: string | null;
 }
 
+// Error explícito de la API de Mercado Pago (no un fallo de red genérico)
+// -- lleva el status HTTP y el body completo para poder loguearlos tal
+// cual en create-payment-preference/index.ts ("capturar la respuesta
+// exacta de Mercado Pago") y devolverle al cliente un mensaje real en vez
+// de un init_point roto.
+export class MpApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = 'MpApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function createMpPreference(
   accessToken: string,
   body: MpPreferenceRequest
-): Promise<{ id: string; initPoint: string }> {
+): Promise<{ id: string; initPoint: string; sandboxInitPoint: string | null }> {
   const res = await fetch('https://api.mercadopago.com/checkout/preferences', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   const data = await res.json();
+  // Log de diagnóstico SIEMPRE (éxito o error) -- "Tuvimos un problema
+  // (COW00...)" en el checkout no deja ningún rastro del lado de la PWA,
+  // así que la única forma real de diagnosticarlo es viendo qué contestó
+  // Mercado Pago en los logs de la Edge Function (Supabase Dashboard >
+  // Edge Functions > create-payment-preference > Logs).
+  console.log('[mercadopago] POST /checkout/preferences ->', res.status, JSON.stringify(data));
   if (!res.ok) {
-    throw new Error(data?.message ?? `Mercado Pago respondió ${res.status} al crear la preferencia.`);
+    throw new MpApiError(
+      data?.message ?? `Mercado Pago respondió ${res.status} al crear la preferencia.`,
+      res.status,
+      data
+    );
   }
-  return { id: data.id, initPoint: data.init_point };
+  return { id: data.id, initPoint: data.init_point, sandboxInitPoint: data.sandbox_init_point ?? null };
+}
+
+// Un access token de TEST- (cuenta de prueba) solo puede abrir
+// sandbox_init_point -- usar init_point con un token de test es exactamente
+// el síntoma reportado ("Tuvimos un problema", código COW00...: Mercado
+// Pago rechaza el checkout de producción para una preferencia de prueba).
+// Con un token real (APP_USR-) es al revés: corresponde init_point.
+export function resolveInitPoint(
+  accessToken: string,
+  preference: { initPoint: string; sandboxInitPoint: string | null }
+): string {
+  if (accessToken.startsWith('TEST-')) {
+    if (!preference.sandboxInitPoint) {
+      throw new Error('Mercado Pago no devolvió sandbox_init_point para un access token de prueba (TEST-).');
+    }
+    return preference.sandboxInitPoint;
+  }
+  if (!preference.initPoint) {
+    throw new Error('Mercado Pago no devolvió init_point.');
+  }
+  return preference.initPoint;
 }
 
 export async function fetchMpPayment(accessToken: string, paymentId: string): Promise<MpPayment> {

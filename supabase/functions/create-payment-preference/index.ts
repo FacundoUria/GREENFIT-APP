@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { createAdminClient } from '../_shared/adminGuard.ts';
-import { buildPreferenceRequest, createMpPreference, resolveBackUrls } from '../_shared/mercadopago.ts';
+import { buildPreferenceRequest, createMpPreference, resolveBackUrls, resolveInitPoint, MpApiError } from '../_shared/mercadopago.ts';
 
 interface CreatePreferenceBody {
   packId: string;
@@ -71,8 +71,21 @@ serve(async (req) => {
     }
 
     const accessToken = Deno.env.get('MP_ACCESS_TOKEN');
+    // Log de diagnóstico: NUNCA el token completo -- alcanza con saber que
+    // está seteado y su prefijo (TEST- = cuenta de prueba, APP_USR- = cuenta
+    // real) para poder ver en los logs de la función si el ambiente
+    // configurado en los secrets de Supabase es el que se esperaba.
+    console.log(
+      '[create-payment-preference] MP_ACCESS_TOKEN presente:',
+      !!accessToken,
+      'prefijo:',
+      accessToken ? accessToken.slice(0, 8) : null
+    );
     if (!accessToken) {
       return jsonResponse({ error: 'Falta MP_ACCESS_TOKEN configurado en los secrets de Supabase.' }, 500);
+    }
+    if (!accessToken.startsWith('TEST-') && !accessToken.startsWith('APP_USR-')) {
+      console.error('[create-payment-preference] MP_ACCESS_TOKEN con formato inesperado (no empieza con TEST- ni APP_USR-).');
     }
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     if (!supabaseUrl) {
@@ -98,13 +111,29 @@ serve(async (req) => {
       userId,
       notificationUrl: `${supabaseUrl}/functions/v1/mp-webhook`,
       backUrls,
+      payerEmail: user.email,
     });
 
-    const { id, initPoint } = await createMpPreference(accessToken, preferenceBody);
+    const preference = await createMpPreference(accessToken, preferenceBody);
+    // TEST- (cuenta de prueba) solo puede abrir sandbox_init_point --
+    // devolver init_point ahí es EXACTAMENTE el "Tuvimos un problema
+    // (COW00...)" que ve el socio en el checkout. APP_USR- (cuenta real) es
+    // al revés.
+    const initPoint = resolveInitPoint(accessToken, preference);
 
-    return jsonResponse({ initPoint, preferenceId: id }, 200);
+    return jsonResponse({ initPoint, preferenceId: preference.id }, 200);
   } catch (err) {
     if (err instanceof Response) return err;
+    if (err instanceof MpApiError) {
+      // La respuesta exacta de Mercado Pago ya quedó logueada dentro de
+      // createMpPreference (status + body completo) -- acá solo se decide
+      // qué tan explícito es el mensaje que recibe el cliente. 502: el
+      // problema es de un servicio de terceros (Mercado Pago), no de esta
+      // función.
+      console.error('[create-payment-preference] Mercado Pago rechazó la preferencia:', err.status, JSON.stringify(err.body));
+      return jsonResponse({ error: err.message }, 502);
+    }
+    console.error('[create-payment-preference] Error inesperado:', err);
     return jsonResponse(
       { error: err instanceof Error ? err.message : 'Error inesperado creando la preferencia.' },
       500

@@ -153,6 +153,23 @@ export async function mockSupabase(page: Page, options: MockSupabaseOptions) {
         return;
       }
 
+      // Simula la Edge Function real (supabase/functions/create-payment-
+      // preference) -- devuelve un initPoint real y determinístico. Antes
+      // de esto, esta ruta caía al 404 genérico de "sin fixture" de más
+      // abajo y paymentsApi.ts lo interpretaba como "función no
+      // desplegada" (caía a su propio mock interno) -- deployado significa
+      // "la función SÍ contesta", así que emularlo acá con un 404 genérico
+      // ya no es correcto: paymentsApi.ts ahora distingue ese caso de un
+      // error real y lo muestra en pantalla en vez de redirigir.
+      if (pathname === '/functions/v1/create-payment-preference') {
+        const payload = request.postDataJSON() as { packId?: string } | null;
+        await responderJson(route, 200, {
+          initPoint: `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=E2E-MOCK-${payload?.packId ?? 'sin-pack'}`,
+          preferenceId: `e2e-pref-${payload?.packId ?? 'sin-pack'}`,
+        });
+        return;
+      }
+
       if (pathname.startsWith('/rest/v1/rpc/')) {
         const fnName = pathname.replace('/rest/v1/rpc/', '');
         if (fnName in rpc) {
