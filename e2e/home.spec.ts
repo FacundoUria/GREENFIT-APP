@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, AYER_STR } from './support/fixtures';
+import { tablasBase, AYER_STR, HOY_STR } from './support/fixtures';
 
 // Cubre el checklist de Home: widget "Progreso Diario" (anillo de XP +
 // "¡Hoy entrené!" + reglas), y la ausencia de la vieja tarjeta "Mi Pase".
@@ -15,32 +15,54 @@ test.describe('PWA -- Home / Dashboard', () => {
     await expect(page.getByText('Comprar')).toHaveCount(0);
   });
 
-  test('el botón "¡Hoy entrené!" otorga +100 XP y pasa a estado registrado', async ({ page }) => {
+  // Regla de oro: los +100 XP diarios SOLO los acredita el Admin (Check-in
+  // Rápido, o la asistencia confirmada de una clase reservada) -- el socio
+  // ya no tiene ningún botón para autoreportarse. El widget de "Progreso
+  // Diario" es de solo lectura, refleja lo que ya haya acreditado el Admin.
+  test('sin check-in del Admin hoy, el widget muestra el estado neutro (sin ninguna acción para autoreportarse)', async ({
+    page,
+  }) => {
     await loginComoSocio(page, {
       tables: {
         ...tablasBase(),
-        // Sin fila de HOY a propósito -- el check-in todavía no se hizo.
+        // Sin fila de HOY a propósito -- el Admin todavía no dio el check-in.
         xp_events: [
           { id: 'xp-ayer', user_id: SOCIO_DEMO.id, event_type: 'asistencia', xp_amount: 450, event_date: AYER_STR, reference_id: null },
         ],
       },
     });
 
-    const boton = page.getByText('¡Hoy entrené! (+100 XP)', { exact: true });
-    await expect(boton).toBeVisible();
+    await expect(page.getByText('Todavía no registraste tu entrada hoy')).toBeVisible();
+    // El viejo botón autoreportable no existe en ningún lado de la pantalla.
+    await expect(page.getByText('¡Hoy entrené!', { exact: false })).toHaveCount(0);
+  });
 
-    await boton.click();
+  test('si el Admin ya acreditó la asistencia de hoy, el widget la muestra en verde apenas se carga la pantalla', async ({
+    page,
+  }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        xp_events: [
+          { id: 'xp-hoy', user_id: SOCIO_DEMO.id, event_type: 'asistencia', xp_amount: 100, event_date: HOY_STR, reference_id: null },
+        ],
+      },
+    });
 
     await expect(page.getByText('Entrenamiento de hoy ya registrado')).toBeVisible();
   });
 
-  test('el ícono de reglas de XP abre el modal', async ({ page }) => {
+  test('el ícono de reglas de XP abre el modal con la única regla vigente', async ({ page }) => {
     await loginComoSocio(page, { tables: tablasBase() });
 
     await page.getByLabel('¿Cómo ganar XP?').first().click();
 
     await expect(page.getByText('¿Cómo ganar XP?')).toBeVisible();
-    await expect(page.getByText('Asistencia diaria / ¡Hoy entrené!')).toBeVisible();
+    await expect(page.getByText('Asistencia diaria', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Acreditados presencialmente al realizar tu check-in en el gimnasio/)).toBeVisible();
+    await expect(page.getByText('Publicar en la Comunidad')).toHaveCount(0);
+    await expect(page.getByText('Superar un Récord Personal (PR)')).toHaveCount(0);
+    await expect(page.getByText('Completar una Meta Personal')).toHaveCount(0);
   });
 
   // Tarjeta de perfil gamificada -- vivía SOLO en Mi Perfil, ahora también

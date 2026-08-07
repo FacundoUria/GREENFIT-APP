@@ -19,7 +19,6 @@ import { getDisciplineStyle } from '../../theme/disciplineColors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateOnly } from '../../lib/classesApi';
-import { otorgarXpPr } from '../../lib/xpApi';
 import {
   checkMetasDisponible,
   fetchMetaActiva,
@@ -417,13 +416,9 @@ export default function ProgresoMobileView() {
   async function handleSavePR(value: number) {
     if (!user || !editingLift) return;
     const lift = editingLift;
-    const anterior = prs[lift.id] ?? null;
-    // "Registrar / superar" un PR -- primera carga de ESE PR, o una mejora
-    // real sobre el anterior (más kilos si es 'peso'; menos segundos si es
-    // 'tiempo', porque ahí más rápido = mejor). Cargar un valor peor o
-    // idéntico no otorga XP.
-    const esRecordNuevo = !anterior || (lift.kind === 'peso' ? value > anterior.value : value < anterior.value);
-
+    // Registrar/superar un PR sigue funcionando igual que siempre -- ya no
+    // otorga XP (esa regla se dio de baja, ver REGLAS_XP en XpInfoModal.tsx
+    // y backend/supabase_migration_xp_solo_asistencia.sql).
     const next = { ...prs, [lift.id]: { value, updatedAt: new Date().toISOString() } };
     setPrs(next);
     await savePRs(user.id, next);
@@ -431,10 +426,6 @@ export default function ProgresoMobileView() {
     if (lift.kind === 'peso') {
       const totalKg = prCatalogo.filter((l) => l.kind === 'peso').reduce((acc, l) => acc + (next[l.id]?.value ?? 0), 0);
       setHistorial(await appendHistorialPunto(user.id, totalKg));
-    }
-    if (esRecordNuevo) {
-      // Efecto secundario, no bloquea el guardado del PR si falla.
-      otorgarXpPr(user.id).catch((err) => console.error('No se pudo otorgar XP de PR:', err.message));
     }
     setEditingLift(null);
   }

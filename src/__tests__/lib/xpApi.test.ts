@@ -1,5 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 jest.mock('../../lib/supabase', () => ({
   supabase: { from: jest.fn() },
 }));
@@ -9,11 +7,7 @@ import { supabase } from '../../lib/supabase';
 import {
   calcularResumenXp,
   fetchTotalXp,
-  otorgarXpPr,
-  otorgarXpPost,
-  checkXpDisponible,
   fetchAsistenciaHoyRegistrada,
-  otorgarXpAsistenciaDiaria,
   fetchFechasAsistencia,
   calcularRachaDias,
   fetchClasesDelMes,
@@ -78,77 +72,28 @@ describe('fetchTotalXp', () => {
   });
 });
 
-describe('otorgarXpPr / otorgarXpPost', () => {
+// otorgarXpPr/otorgarXpPost/checkXpDisponible/otorgarXpAsistenciaDiaria se
+// dieron de baja -- el socio ya no tiene ninguna vía de autoreporte de XP
+// (ver backend/supabase_migration_xp_solo_asistencia.sql). fetchAsistenciaHoyRegistrada
+// pasa a ser de SOLO LECTURA, sin el parámetro modoDemo (ya no hay AsyncStorage
+// de por medio: si xp_events no existe, no hay forma real de saber si el
+// Admin ya acreditó hoy, así que simplemente responde `false`).
+describe('fetchAsistenciaHoyRegistrada (solo lectura -- refleja lo que acreditó el Admin)', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('otorgarXpPr no rompe si xp_events todavía no existe', async () => {
-    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'no existe' } }));
-    await expect(otorgarXpPr('user-1')).resolves.toBeUndefined();
-  });
-
-  it('otorgarXpPost no rompe si ya se ganó el XP de hoy (23505 unique_violation)', async () => {
-    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '23505', message: 'duplicate key' } }));
-    await expect(otorgarXpPost('user-1')).resolves.toBeUndefined();
-  });
-
-  it('otorgarXpPost inserta event_type=post, xp_amount=25 en el camino feliz', async () => {
-    const insertMock = jest.fn().mockResolvedValue({ data: null, error: null });
-    mockedFrom.mockReturnValue({ insert: insertMock });
-    await otorgarXpPost('user-1');
-    expect(insertMock).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: 'user-1', event_type: 'post', xp_amount: 25 })
-    );
-  });
-});
-
-describe('checkXpDisponible', () => {
-  afterEach(() => jest.clearAllMocks());
-
-  it('devuelve false si xp_events todavía no existe', async () => {
-    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'no existe' } }));
-    expect(await checkXpDisponible()).toBe(false);
-  });
-
-  it('devuelve true si la tabla responde', async () => {
-    mockedFrom.mockReturnValue(makeChain({ data: [], error: null }));
-    expect(await checkXpDisponible()).toBe(true);
-  });
-});
-
-describe('Botón "¡Hoy entrené!" -- asistencia diaria autoreportada', () => {
-  const userId = 'user-hoy-entrene';
-
-  beforeEach(async () => {
-    jest.clearAllMocks();
-    await AsyncStorage.clear();
-  });
-
-  it('real: fetchAsistenciaHoyRegistrada es false si no hay fila de hoy', async () => {
+  it('false si no hay fila de asistencia de hoy', async () => {
     mockedFrom.mockReturnValue(makeChain({ data: null, error: null }));
-    expect(await fetchAsistenciaHoyRegistrada(userId, false)).toBe(false);
+    expect(await fetchAsistenciaHoyRegistrada('user-1')).toBe(false);
   });
 
-  it('real: otorgarXpAsistenciaDiaria inserta +100 XP event_type=asistencia', async () => {
-    const insertMock = jest.fn().mockResolvedValue({ data: null, error: null });
-    mockedFrom.mockReturnValue({ insert: insertMock });
-    const resultado = await otorgarXpAsistenciaDiaria(userId, false);
-    expect(resultado).toBe('otorgado');
-    expect(insertMock).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: userId, event_type: 'asistencia', xp_amount: 100 })
-    );
+  it('true si el Admin (o el trigger de clase) ya acreditó la asistencia de hoy', async () => {
+    mockedFrom.mockReturnValue(makeChain({ data: { id: 'xp-1' }, error: null }));
+    expect(await fetchAsistenciaHoyRegistrada('user-1')).toBe(true);
   });
 
-  it('real: un segundo intento el mismo día (23505, ya sea por trigger de clase o por el botón) no rompe', async () => {
-    mockedFrom.mockReturnValue({
-      insert: jest.fn().mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate key' } }),
-    });
-    expect(await otorgarXpAsistenciaDiaria(userId, false)).toBe('ya_registrado_hoy');
-  });
-
-  it('demo: arranca sin registrar, otorgar lo marca, y queda registrado hasta que cambia el día', async () => {
-    expect(await fetchAsistenciaHoyRegistrada(userId, true)).toBe(false);
-    expect(await otorgarXpAsistenciaDiaria(userId, true)).toBe('otorgado');
-    expect(await fetchAsistenciaHoyRegistrada(userId, true)).toBe(true);
+  it('si xp_events todavía no existe, responde false en vez de romper', async () => {
+    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'no existe' } }));
+    expect(await fetchAsistenciaHoyRegistrada('user-1')).toBe(false);
   });
 });
 

@@ -27,7 +27,7 @@ import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
-import HoyEntreneButton from '../../components/HoyEntreneButton';
+import AsistenciaHoyStatus from '../../components/AsistenciaHoyStatus';
 import XpProgressRing from '../../components/XpProgressRing';
 import XpInfoModal from '../../components/XpInfoModal';
 import AthleteProfileCard from '../../components/AthleteProfileCard';
@@ -386,15 +386,12 @@ export default function HomeScreen({ navigation }: any) {
               nivel.
             </Text>
           </View>
-          <HoyEntreneButton
-            userId={user.id}
-            // Update optimista: suma los +100 XP reales al contador YA
-            // cargado en memoria, sin esperar a un refetch (useFocusEffect
-            // recién vuelve a pedir el total al cambiar de pantalla y
-            // volver -- sin esto, el anillo/contador quedaban desactualizados
-            // hasta ese momento).
-            onClaimed={() => setTotalXp((prev) => prev + 100)}
-          />
+          {/* Solo lectura -- el socio ya no autoreporta su asistencia, la
+              acredita el Admin (Check-in Rápido o clase confirmada). El
+              useFocusEffect de arriba ya vuelve a pedir el XP total al
+              volver a esta pantalla, así que este estado se pone al día
+              solo apenas el Admin lo acredita, sin ninguna acción acá. */}
+          <AsistenciaHoyStatus userId={user.id} />
         </View>
       )}
 

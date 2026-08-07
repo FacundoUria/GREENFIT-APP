@@ -6,12 +6,16 @@ import { XP_POR_NIVEL } from '../lib/xpApi';
 
 // Modal "¿Cómo ganar XP?" -- extraído de PerfilMobileView (vivía inline
 // ahí) para que HomeScreen pueda abrir exactamente el mismo modal desde el
-// nuevo widget "Progreso Diario & Check-In" sin duplicar las 4 reglas.
+// nuevo widget "Progreso Diario & Check-In". Regla única vigente: publicar
+// en la Comunidad, superar un PR y completar una Meta dejaron de otorgar
+// XP -- la ÚNICA fuente es la asistencia acreditada por el Admin (ver
+// backend/supabase_migration_xp_solo_asistencia.sql).
 export const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
-  { emoji: '🏋️', label: 'Asistencia diaria / ¡Hoy entrené!', detalle: '+100 XP (máx. 1 al día)' },
-  { emoji: '💬', label: 'Publicar en la Comunidad', detalle: '+25 XP (máx. 1 al día)' },
-  { emoji: '🏆', label: 'Superar un Récord Personal (PR)', detalle: '+150 XP' },
-  { emoji: '🎯', label: 'Completar una Meta Personal', detalle: '+300 XP (límite 7 días)' },
+  {
+    emoji: '🏋️',
+    label: 'Asistencia diaria',
+    detalle: '+100 XP -- Acreditados presencialmente al realizar tu check-in en el gimnasio.',
+  },
 ];
 
 interface XpInfoModalProps {

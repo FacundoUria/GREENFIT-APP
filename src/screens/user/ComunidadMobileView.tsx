@@ -43,7 +43,7 @@ import {
   DmThreadResumen,
   DmMensaje,
 } from '../../lib/comunidadApi';
-import { fetchTotalXp, calcularResumenXp, otorgarXpPost } from '../../lib/xpApi';
+import { fetchTotalXp, calcularResumenXp } from '../../lib/xpApi';
 import Avatar from '../../components/Avatar';
 
 // Vista nueva y paralela (Módulo 6 del rediseño) -- tab de primer nivel en
@@ -244,11 +244,10 @@ export default function ComunidadMobileView() {
           }
         }
       }
+      // Publicar sigue funcionando igual que siempre -- ya no otorga XP
+      // (esa regla se dio de baja, ver REGLAS_XP en XpInfoModal.tsx y
+      // backend/supabase_migration_xp_solo_asistencia.sql).
       await crearPost(user.id, user.name, user.avatarUrl, composerText.trim(), miNivel, miDisciplina, mediaUrl, modoDemo);
-      // +25 XP, tope 1 por día (lo hace cumplir el índice único de
-      // xp_events del lado del servidor) -- efecto secundario, no bloquea
-      // la publicación si falla.
-      otorgarXpPost(user.id).catch((err) => console.error('No se pudo otorgar XP de post:', err.message));
       setComposerText('');
       setComposerImageUri(null);
       setComposerVisible(false);

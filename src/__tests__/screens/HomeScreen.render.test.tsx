@@ -39,19 +39,16 @@ jest.mock('../../lib/creditsApi', () => ({
 }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
 
-// fetchTotalXp/checkXpDisponible/fetchAsistenciaHoyRegistrada/
-// otorgarXpAsistenciaDiaria/fetchClasesDelMes/fetchMiembroDesde/
-// fetchFechasAsistencia se mockean (tocan red -- makeChain de abajo no
-// implementa .single()/.maybeSingle(), así que la versión real de
-// fetchMiembroDesde rompería contra ese mock); calcularResumenXp/
+// fetchTotalXp/fetchAsistenciaHoyRegistrada/fetchClasesDelMes/
+// fetchMiembroDesde/fetchFechasAsistencia se mockean (tocan red -- makeChain
+// de abajo no implementa .single()/.maybeSingle(), así que la versión real
+// de fetchMiembroDesde rompería contra ese mock); calcularResumenXp/
 // calcularRachaDias/XP_POR_NIVEL quedan REALES (son lógica pura, ya
 // cubierta aparte en xpApi.test.ts) para no reinventar la fórmula acá.
 jest.mock('../../lib/xpApi', () => ({
   ...jest.requireActual('../../lib/xpApi'),
   fetchTotalXp: jest.fn(),
-  checkXpDisponible: jest.fn(),
   fetchAsistenciaHoyRegistrada: jest.fn(),
-  otorgarXpAsistenciaDiaria: jest.fn(),
   fetchClasesDelMes: jest.fn(),
   fetchMiembroDesde: jest.fn(),
   fetchFechasAsistencia: jest.fn(),
@@ -60,9 +57,7 @@ jest.mock('../../lib/xpApi', () => ({
 import { supabase } from '../../lib/supabase';
 import {
   fetchTotalXp,
-  checkXpDisponible,
   fetchAsistenciaHoyRegistrada,
-  otorgarXpAsistenciaDiaria,
   fetchClasesDelMes,
   fetchMiembroDesde,
   fetchFechasAsistencia,
@@ -87,9 +82,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     jest.clearAllMocks();
     mockedFrom.mockImplementation(() => makeChain({ data: [], error: null })); // sin reservas próximas
     (fetchTotalXp as jest.Mock).mockResolvedValue(650); // nivel 2, 150/500 XP, faltan 350
-    (checkXpDisponible as jest.Mock).mockResolvedValue(true);
     (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(false);
-    (otorgarXpAsistenciaDiaria as jest.Mock).mockResolvedValue('otorgado');
     (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
     (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
     (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
@@ -110,24 +103,22 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(getByText('350 XP')).toBeTruthy();
   });
 
-  it('el botón "¡Hoy entrené!" está en el widget y al tocarlo otorga +100 XP, pasa a "ya registrado" y actualiza el contador de XP al instante (sin recargar la pantalla)', async () => {
-    const { getByText } = render(<HomeScreen navigation={navigation} />);
-    const boton = await waitFor(() => getByText('¡Hoy entrené! (+100 XP)'));
+  it('el widget de asistencia es de SOLO LECTURA: sin check-in del Admin, no hay ninguna acción para autoreportarse', async () => {
+    const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Todavía no registraste tu entrada hoy')).toBeTruthy());
 
-    fireEvent.press(boton);
-
-    await waitFor(() => expect(otorgarXpAsistenciaDiaria).toHaveBeenCalledWith('user-1', false));
-    await waitFor(() => expect(getByText('Entrenamiento de hoy ya registrado')).toBeTruthy());
-    // Update optimista: 650 + 100 = 750 XP -> sigue en NIVEL 2, pero el
-    // progreso pasa de 150/500 a 250/500 en el mismo render, sin esperar a
-    // un refetch (fetchTotalXp real solo se llamó UNA vez, al montar).
-    await waitFor(() => expect(getByText('250/500')).toBeTruthy());
-    expect(getByText('250 XP')).toBeTruthy();
-    expect(fetchTotalXp).toHaveBeenCalledTimes(1);
+    // El viejo botón autoreportable ya no existe en ningún lado.
+    expect(queryByText('¡Hoy entrené! (+100 XP)')).toBeNull();
   });
 
-  it('el ícono "¿Cómo ganar XP?" abre el modal con las reglas', async () => {
-    const { getByText, getAllByLabelText } = render(<HomeScreen navigation={navigation} />);
+  it('si el Admin ya acreditó la asistencia de hoy, el widget la refleja en verde', async () => {
+    (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(true);
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Entrenamiento de hoy ya registrado')).toBeTruthy());
+  });
+
+  it('el ícono "¿Cómo ganar XP?" abre el modal con la única regla vigente (asistencia acreditada por el Admin)', async () => {
+    const { getByText, getAllByLabelText, queryByText } = render(<HomeScreen navigation={navigation} />);
     await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
 
     // Hay 2 en pantalla ahora (la tarjeta de perfil gamificada de arriba +
@@ -136,6 +127,11 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     fireEvent.press(getAllByLabelText('¿Cómo ganar XP?')[0]);
 
     await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
-    expect(getByText('Asistencia diaria / ¡Hoy entrené!')).toBeTruthy();
+    expect(getByText('Asistencia diaria')).toBeTruthy();
+    expect(getByText(/Acreditados presencialmente al realizar tu check-in en el gimnasio/)).toBeTruthy();
+    // Las reglas dadas de baja ya no aparecen.
+    expect(queryByText('Publicar en la Comunidad')).toBeNull();
+    expect(queryByText('Superar un Récord Personal (PR)')).toBeNull();
+    expect(queryByText('Completar una Meta Personal')).toBeNull();
   });
 });

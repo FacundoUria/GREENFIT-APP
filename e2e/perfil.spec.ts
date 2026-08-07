@@ -41,7 +41,9 @@ test.describe('PWA -- Mi Perfil', () => {
     await expect(page.getByTestId('stat-clases').last()).toHaveText('2');
   });
 
-  test('el ícono "¿Cómo ganar XP?" abre el modal con las 4 reglas', async ({ page }) => {
+  test('el ícono "¿Cómo ganar XP?" abre el modal con la única regla vigente (asistencia acreditada por el Admin)', async ({
+    page,
+  }) => {
     await loginComoSocio(page, { tables: tablasBase() });
     await irATab(page, 'Perfil');
     await expect(page.getByText('Mi Perfil')).toBeVisible();
@@ -53,10 +55,12 @@ test.describe('PWA -- Mi Perfil', () => {
     await page.getByLabel('¿Cómo ganar XP?').last().click();
 
     await expect(page.getByText('¿Cómo ganar XP?')).toBeVisible();
-    await expect(page.getByText('Asistencia diaria / ¡Hoy entrené!')).toBeVisible();
-    await expect(page.getByText('Publicar en la Comunidad')).toBeVisible();
-    await expect(page.getByText('Superar un Récord Personal (PR)')).toBeVisible();
-    await expect(page.getByText('Completar una Meta Personal')).toBeVisible();
+    await expect(page.getByText('Asistencia diaria', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Acreditados presencialmente al realizar tu check-in en el gimnasio/)).toBeVisible();
+    // Publicar/PR/Metas dejaron de otorgar XP -- ya no se listan acá.
+    await expect(page.getByText('Publicar en la Comunidad')).toHaveCount(0);
+    await expect(page.getByText('Superar un Récord Personal (PR)')).toHaveCount(0);
+    await expect(page.getByText('Completar una Meta Personal')).toHaveCount(0);
   });
 
   test('el botón sutil de Logout cierra la sesión y vuelve a Login', async ({ page }) => {
