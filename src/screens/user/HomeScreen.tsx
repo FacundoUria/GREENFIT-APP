@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -184,6 +184,36 @@ export default function HomeScreen({ navigation }: any) {
         .catch((err) => console.error('No se pudo calcular el contador de notificaciones:', err.message));
     }, [user])
   );
+
+  // Suscripción en vivo a user_credits -- cuando el Admin ajusta créditos o
+  // vencimiento desde el panel (Check-in Rápido, "Registrar Pago", el
+  // stepper de la tabla de Socios), esto refresca el balance ACÁ MISMO, al
+  // instante, sin que el socio tenga que salir de la pantalla y volver a
+  // entrar (el useFocusEffect de arriba ya cubre ESE caso, pero no el de
+  // "la pantalla ya está abierta y el Admin edita en paralelo"). Mismo
+  // patrón que useNotificationSubscription.ts: el evento de Realtime no
+  // valida RLS por sí solo, así que no se confía en el payload crudo -- se
+  // usa solo como disparador para volver a pedir el balance real vía
+  // `load()` (esa sí, autenticada y sujeta a RLS). `filter` acota el ruido
+  // a la fila de este usuario, es una optimización de red, no el límite de
+  // seguridad real (que sigue siendo la RLS del select en `load()`).
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`user-credits-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_credits', filter: `user_id=eq.${user.id}` },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, load]);
 
   async function handleSelectPack(pack: Pack) {
     if (!user || buyingPackId) return;

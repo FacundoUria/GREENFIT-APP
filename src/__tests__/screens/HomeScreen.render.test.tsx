@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // HomeScreen usa useFocusEffect (no useEffect simple) para el refresh al
 // volver de la WebView de pago -- sin un NavigationContainer real alrededor,
@@ -37,7 +37,24 @@ jest.mock('../../lib/creditsApi', () => ({
   fetchPacks: jest.fn().mockResolvedValue([]),
   syncMyMembership: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
+// on/subscribe encadenan (mockReturnThis-style) igual que el cliente real de
+// supabase-js -- capturados en variables de nombre `mock...` porque la
+// factory de jest.mock corre hoisteada y Jest solo permite referenciar acá
+// identificadores con ese prefijo.
+const mockChannelOn = jest.fn(function (this: unknown, ..._args: unknown[]) {
+  return this;
+});
+const mockChannelSubscribe = jest.fn(function (this: unknown, ..._args: unknown[]) {
+  return this;
+});
+jest.mock('../../lib/supabase', () => ({
+  supabase: {
+    from: jest.fn(),
+    rpc: jest.fn(),
+    channel: jest.fn(() => ({ on: mockChannelOn, subscribe: mockChannelSubscribe })),
+    removeChannel: jest.fn(),
+  },
+}));
 
 // fetchTotalXp/fetchAsistenciaHoyRegistrada/fetchClasesDelMes/
 // fetchMiembroDesde/fetchFechasAsistencia se mockean (tocan red -- makeChain
@@ -55,6 +72,7 @@ jest.mock('../../lib/xpApi', () => ({
 }));
 
 import { supabase } from '../../lib/supabase';
+import { fetchUserBalances } from '../../lib/creditsApi';
 import {
   fetchTotalXp,
   fetchAsistenciaHoyRegistrada,
@@ -133,5 +151,40 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(queryByText('Publicar en la Comunidad')).toBeNull();
     expect(queryByText('Superar un Récord Personal (PR)')).toBeNull();
     expect(queryByText('Completar una Meta Personal')).toBeNull();
+  });
+
+  // Bug crítico de sincronización Admin↔PWA (2026-08-07): un ajuste de
+  // créditos hecho desde el panel Admin (user_credits) solo se veía acá
+  // recién al salir de Inicio y volver a entrar (useFocusEffect). Esto
+  // prueba que, ADEMÁS, hay una suscripción en vivo -- si la pantalla ya
+  // está abierta cuando el Admin ajusta algo, el balance se refresca solo,
+  // sin que el socio tenga que navegar a ningún lado.
+  it('se suscribe en vivo a cambios de user_credits del propio socio y refresca el balance cuando llega un evento', async () => {
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+
+    expect(supabase.channel).toHaveBeenCalledWith('user-credits-user-1');
+    expect(mockChannelOn).toHaveBeenCalledWith(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'user_credits', filter: 'user_id=eq.user-1' },
+      expect.any(Function)
+    );
+    expect(mockChannelSubscribe).toHaveBeenCalled();
+
+    (fetchUserBalances as jest.Mock).mockClear();
+    const callbackRealtime = mockChannelOn.mock.calls[0][2] as (payload: unknown) => void;
+    await act(async () => {
+      callbackRealtime({});
+    });
+
+    await waitFor(() => expect(fetchUserBalances).toHaveBeenCalledTimes(1));
+  });
+
+  it('al desmontar la pantalla, se da de baja el canal de Realtime (no deja una suscripción huérfana)', async () => {
+    const { getByText, unmount } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+
+    unmount();
+    expect(supabase.removeChannel).toHaveBeenCalled();
   });
 });
