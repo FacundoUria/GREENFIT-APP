@@ -1,5 +1,11 @@
 {
-  "compilerOptions": {},
+  "compilerOptions": {
+    // tsc no conoce la resolución de Metro por plataforma (PaymentWebViewScreen
+    // vive como .native.tsx/.web.tsx, sin archivo base) -- esto le da un orden
+    // determinístico para el typecheck. No afecta en nada al bundle real de
+    // cada plataforma (eso lo sigue resolviendo Metro solo).
+    "moduleSuffixes": [".native", ".web", ""]
+  },
   "extends": "expo/tsconfig.base",
   "exclude": ["node_modules", "supabase/functions"]
 }
