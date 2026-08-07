@@ -1,9 +1,12 @@
 import { supabase } from './supabase';
 
+// packName/price salieron del contrato a propósito: el precio de una
+// transacción real de dinero NUNCA lo decide el cliente -- la Edge
+// Function lee el pack real de `packs` (Service Role) y arma la
+// preferencia con ESE precio, ignorando cualquier otra cosa que se le
+// mande. Ver supabase/functions/create-payment-preference/index.ts.
 export interface CreatePreferenceParams {
   packId: string;
-  packName: string;
-  price: number;
   userId: string;
 }
 

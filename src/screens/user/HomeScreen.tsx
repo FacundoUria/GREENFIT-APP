@@ -219,14 +219,13 @@ export default function HomeScreen({ navigation }: any) {
     if (!user || buyingPackId) return;
     setBuyingPackId(pack.id);
     try {
-      const preference = await createPaymentPreference({
-        packId: pack.id,
-        packName: pack.name,
-        price: pack.price,
-        userId: user.id,
-      });
+      const preference = await createPaymentPreference({ packId: pack.id, userId: user.id });
       setShowBuyModal(false);
-      navigation.navigate('PaymentWebView', { initPoint: preference.initPoint });
+      // packId/userId viajan también acá (no solo en el pedido a la Edge
+      // Function) -- PaymentWebViewScreen los necesita para poder generar
+      // una preferencia NUEVA si el socio toca "Reintentar" tras un pago
+      // rechazado, sin volver a esta pantalla ni reabrir el modal.
+      navigation.navigate('PaymentWebView', { initPoint: preference.initPoint, packId: pack.id, userId: user.id });
     } catch (err) {
       Alert.alert('No se pudo iniciar el pago', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
