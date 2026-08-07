@@ -153,3 +153,145 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     expect(page.url()).not.toContain('mercadopago');
   });
 });
+
+// Flujo de punta a punta pedido ("Prueba 1: Pack por Créditos" / "Prueba 2:
+// Membresía por Vencimiento"): Admin crea el pack -> PWA lo muestra
+// dinámicamente -> compra aprobada por Mercado Pago -> el socio ve el
+// crédito/vencimiento acreditado. Los pasos 1-2 (alta del pack en el Admin)
+// y el paso de "Actividad Reciente" viven en el OTRO repo (PAGINA SUPABASE,
+// ver e2e/planes-packs.spec.js y e2e/actividad-reciente-mp.spec.js ahí) --
+// acá se cubre el lado PWA completo: el pack recién creado se ve en "Elegí
+// tu pack" (ya cubierto arriba) Y, apenas la compra queda aprobada, el
+// socio ve el resultado real.
+//
+// "Simular la compra aprobada" NO puede ser un click en un botón de Mercado
+// Pago real desde un E2E (es un dominio externo, y la acreditación la hace
+// el webhook mp_process_payment -- server a server, entre Mercado Pago y
+// Supabase, sin ningún request del navegador de por medio que un mock de
+// REST pueda interceptar). Lo que SÍ es fiel a producción: sembrar el
+// mismo estado en `pagos_socio`/`user_credits` que ese webhook ya aprobado
+// deja escrito (ver mp_process_payment en
+// backend/supabase_migration_mercadopago_payments.sql) y verificar que la
+// PWA lo refleja tal cual -- en la práctica el webhook corre en
+// segundos, mucho antes de que el socio vuelva a mirar el Home.
+test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra aprobada -> crédito/vencimiento acreditado', () => {
+  test('Prueba 1 (Créditos): tras una compra aprobada de "Pack 4 clases CrossFit" ($15.000), el Home muestra 4 créditos de CrossFit sumados', async ({
+    page,
+  }) => {
+    const PACK_4_CROSSFIT = {
+      id: 'pack-4-crossfit',
+      name: 'Pack 4 clases CrossFit',
+      credits: 4,
+      duration_days: null,
+      price: 15000,
+      is_active: true,
+      discipline: DISCIPLINA_CROSSFIT,
+    };
+    // Estado que deja mp_process_payment tras aprobar este pack: fila en
+    // pagos_socio (estado='pagado', origen='mercado_pago') + user_credits
+    // con remaining_credits = 4 para CrossFit (coalesce(0, previo) + 4).
+    const BALANCE_POST_COMPRA = {
+      id: 'uc-crossfit-post-compra',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: 4,
+      expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+      discipline: DISCIPLINA_CROSSFIT,
+      pack: PACK_4_CROSSFIT,
+    };
+
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        packs: [PACK_4_CROSSFIT],
+        user_credits: [BALANCE_POST_COMPRA],
+        pagos_socio: [
+          {
+            id: 'pago-mp-4-crossfit',
+            user_id: SOCIO_DEMO.id,
+            paquete: 'Pack 4 clases CrossFit',
+            monto: 15000,
+            metodo_pago: 'mercado_pago',
+            estado: 'pagado',
+            origen: 'mercado_pago',
+            mercado_pago_payment_id: 'mp-e2e-4-crossfit',
+            created_at: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+
+    await expect(page.getByText('CrossFit')).toBeVisible();
+    await expect(page.getByText(/4.*clases restantes/)).toBeVisible();
+    await expect(page.getByText('Activo', { exact: true })).toBeVisible();
+
+    // El pack recién creado sigue disponible para una PRÓXIMA compra --
+    // nada hardcodeado se rompió por haber comprado uno.
+    await expect(page.getByText('Renovar')).toHaveCount(0); // con crédito activo, no hace falta renovar todavía
+  });
+
+  test('Prueba 2 (Vencimiento): tras una compra aprobada de "Pase 2 Meses Aparatos" ($70.000), el Home muestra el vencimiento extendido 60 días', async ({
+    page,
+  }) => {
+    const PASE_2_MESES = {
+      id: 'pack-2-meses-aparatos',
+      name: 'Pase 2 Meses Aparatos',
+      credits: null,
+      duration_days: 60,
+      price: 70000,
+      is_active: true,
+      discipline: DISCIPLINA_APARATOS,
+    };
+    // mp_process_payment extiende desde la fecha vigente previa (o desde
+    // hoy si ya estaba vencida) -- acá simula el caso "ya estaba vencida":
+    // greatest(vencimiento_previo_vencido, ahora) + 60 días = hoy + 60 días.
+    const HOY = new Date();
+    const VENCIMIENTO_ESPERADO = new Date(HOY.getTime() + 60 * 86_400_000);
+    const membresiaPostCompra = {
+      id: 'uc-aparatos-post-compra',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: null,
+      expires_at: VENCIMIENTO_ESPERADO.toISOString(),
+      created_at: HOY.toISOString(),
+      discipline: DISCIPLINA_APARATOS,
+      pack: PASE_2_MESES,
+    };
+
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        packs: [PASE_2_MESES],
+        user_credits: [membresiaPostCompra],
+        pagos_socio: [
+          {
+            id: 'pago-mp-2-meses-aparatos',
+            user_id: SOCIO_DEMO.id,
+            paquete: 'Pase 2 Meses Aparatos',
+            monto: 70000,
+            metodo_pago: 'mercado_pago',
+            estado: 'pagado',
+            origen: 'mercado_pago',
+            mercado_pago_payment_id: 'mp-e2e-2-meses-aparatos',
+            created_at: HOY.toISOString(),
+          },
+        ],
+      },
+    });
+
+    // Réplica EXACTA de formatLongDate() (src/lib/membershipStatus.ts) en vez
+    // de Intl/toLocaleDateString -- evita cualquier diferencia de huso
+    // horario entre el ISO string (UTC) sembrado en el fixture y cómo lo
+    // parsea la propia app (slice a YYYY-MM-DD + medianoche LOCAL).
+    const mesesEs = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+    ];
+    const fechaLocal = new Date(`${membresiaPostCompra.expires_at.slice(0, 10)}T00:00:00`);
+    const mes = mesesEs[fechaLocal.getMonth()];
+    const fechaEsperada = `${fechaLocal.getDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${fechaLocal.getFullYear()}`;
+
+    await expect(page.getByText('Aparatos / Musculación')).toBeVisible();
+    await expect(page.getByText(`Vence el ${fechaEsperada}`)).toBeVisible();
+    await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
+  });
+});
