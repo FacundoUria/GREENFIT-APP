@@ -147,5 +147,43 @@ begin
 end;
 $$;
 
--- Verificación opcional (correr aparte, service role -- bypasea RLS):
+-- ============================================================
+-- 3) BACKFILL -- bug real reportado ("No hay packs disponibles" en la PWA
+--    pese a ver packs en el Admin): el paso 1 de arriba agrega `creditos`
+--    con default '[]'::jsonb e `incluye_aparatos` con default false para
+--    TODAS las filas existentes -- pero nunca migra el dato real que esas
+--    filas viejas ya tenían en discipline_id/credits/duration_days. Un
+--    pack viejo queda entonces con creditos=[] e incluye_aparatos=false, y
+--    fetchPacks() (greenfit-app/src/lib/creditsApi.ts) lo descarta por
+--    "combo vacío" -- sigue viéndose en el Admin (la lista no filtra por
+--    eso) pero desaparece de "Elegí tu pack" en la PWA.
+--
+--    Idempotente: solo toca filas con creditos='[]' (las que un alta/
+--    edición por el formulario nuevo YA haya guardado bien quedan
+--    intactas), así que correr esto de nuevo no pisa nada.
+-- ============================================================
+update packs
+set creditos = jsonb_build_array(jsonb_build_object('discipline_id', discipline_id, 'credits', credits))
+where creditos = '[]'::jsonb
+  and discipline_id is not null
+  and credits is not null
+  and credits > 0;
+
+update packs
+set incluye_aparatos = true,
+    dias_vigencia = duration_days
+where creditos = '[]'::jsonb
+  and incluye_aparatos = false
+  and discipline_id is not null
+  and duration_days is not null
+  and duration_days > 0;
+
+-- Verificación (correr aparte, service role -- bypasea RLS): confirma que
+-- ya no quede ningún pack "vacío" (el motivo exacto de "No hay packs
+-- disponibles" en la PWA) -- después del backfill de arriba, esto debería
+-- devolver 0 filas.
+--   select id, name, discipline_id, credits, duration_days
+--   from packs
+--   where creditos = '[]'::jsonb and incluye_aparatos = false;
+--
 --   select id, name, price, incluye_aparatos, dias_vigencia, creditos, is_active from packs order by created_at desc limit 20;
