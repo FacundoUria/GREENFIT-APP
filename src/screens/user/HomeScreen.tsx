@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -20,6 +21,7 @@ import { Pack, UserCredit } from '../../types';
 import { fetchPacks, fetchUserBalances, syncMyMembership } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
+import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatCountdownEmpieza, formatDayLabel, getCountdown } from '../../lib/classTime';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
@@ -214,6 +216,23 @@ export default function HomeScreen({ navigation }: any) {
       supabase.removeChannel(channel);
     };
   }, [user, load]);
+
+  // Web/PWA: acá vuelve a cargar la app entera después de que Mercado Pago
+  // redirige el navegador de vuelta a la PWA (back_url = origin real de la
+  // PWA, ver resolveBackUrls en supabase/functions/_shared/mercadopago.ts)
+  // -- no hay WebView que intercepte la navegación como en nativo, así que
+  // el resultado se lee UNA vez de la URL con la que arrancó esta carga.
+  // Se limpia la URL enseguida para que un F5 posterior no vuelva a
+  // mostrar el mismo resultado, y se reabre PaymentWebViewScreen ya con
+  // `resultado` resuelto (sin generar una preferencia nueva ni mostrar
+  // ningún WebView).
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const resultado = resolvePaymentResultFromUrl(window.location.href);
+    if (!resultado) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    navigation.navigate('PaymentWebView', { webResultado: resultado });
+  }, [navigation]);
 
   async function handleSelectPack(pack: Pack) {
     if (!user || buyingPackId) return;

@@ -1,25 +1,10 @@
-import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
 import { WebView, WebViewNavigation } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { createPaymentPreference } from '../lib/paymentsApi';
-
-type ResultadoPago = 'approved' | 'pending' | 'failure' | null;
-
-// Marcadores que buscamos en cada URL para saber cómo terminó el checkout,
-// sin depender de que llegue un webhook de Mercado Pago antes de que el
-// socio vuelva a la app. Cubrimos tanto los back_urls custom-scheme que la
-// Edge Function configura (greenfit://payment-...) como los query params
-// que Mercado Pago agrega a sus propias páginas de resultado (status /
-// collection_status).
-const SUCCESS_MARKERS = ['greenfit://payment-success', 'status=approved', 'collection_status=approved'];
-const FAILURE_MARKERS = ['greenfit://payment-failure', 'status=rejected', 'collection_status=rejected'];
-const PENDING_MARKERS = ['greenfit://payment-pending', 'status=pending', 'collection_status=in_process'];
-
-function matchesAny(url: string, markers: string[]): boolean {
-  return markers.some((marker) => url.includes(marker));
-}
+import { ResultadoPago, resolvePaymentResultFromUrl } from '../lib/paymentResult';
 
 const RESULTADO_META: Record<
   Exclude<ResultadoPago, null>,
@@ -49,31 +34,24 @@ export default function PaymentWebViewScreen({ route, navigation }: any) {
   const initPointInicial: string | undefined = route.params?.initPoint;
   const packId: string | undefined = route.params?.packId;
   const userId: string | undefined = route.params?.userId;
+  // En Web, HomeScreen es quien detecta el resultado (a partir de la URL con
+  // la que la PWA volvió a cargar tras la redirección a Mercado Pago -- ver
+  // su propio useEffect) y lo manda ya resuelto acá. Esta pantalla arranca
+  // directo en la tarjeta de resultado, sin WebView ni redirección de nuevo.
+  const webResultadoInicial: ResultadoPago = route.params?.webResultado ?? null;
 
   const [initPoint, setInitPoint] = useState(initPointInicial);
-  const [resultado, setResultado] = useState<ResultadoPago>(null);
+  const [resultado, setResultado] = useState<ResultadoPago>(webResultadoInicial);
   const [reintentando, setReintentando] = useState(false);
-  const hasResolvedRef = useRef(false);
+  const hasResolvedRef = useRef(webResultadoInicial !== null);
 
   function resolveFromUrl(url: string): boolean {
     if (hasResolvedRef.current || !url) return false;
-
-    if (matchesAny(url, SUCCESS_MARKERS)) {
-      hasResolvedRef.current = true;
-      setResultado('approved');
-      return true;
-    }
-    if (matchesAny(url, FAILURE_MARKERS)) {
-      hasResolvedRef.current = true;
-      setResultado('failure');
-      return true;
-    }
-    if (matchesAny(url, PENDING_MARKERS)) {
-      hasResolvedRef.current = true;
-      setResultado('pending');
-      return true;
-    }
-    return false;
+    const detectado = resolvePaymentResultFromUrl(url);
+    if (!detectado) return false;
+    hasResolvedRef.current = true;
+    setResultado(detectado);
+    return true;
   }
 
   // El custom scheme (greenfit://...) nunca llega a "navegar" de verdad —
@@ -90,9 +68,26 @@ export default function PaymentWebViewScreen({ route, navigation }: any) {
     if (navState.url) resolveFromUrl(navState.url);
   }
 
+  // Web/PWA: react-native-webview no soporta ese entorno ("React Native
+  // WebView does not support this platform") -- en vez de un WebView
+  // embebido, se redirige la pestaña entera al Checkout Pro de Mercado
+  // Pago. El back_url que arma create-payment-preference para Web ya
+  // apunta al origin real de la PWA (resolveBackUrls en
+  // supabase/functions/_shared/mercadopago.ts), así que Mercado Pago vuelve
+  // a cargarla ahí -- HomeScreen es quien detecta el resultado en esa
+  // vuelta (ver su propio useEffect) y reabre esta pantalla ya con
+  // `resultado` resuelto (webResultadoInicial más arriba). Dispara de nuevo
+  // solo si initPoint cambió (ej. tras "Reintentar").
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !initPoint || resultado) return;
+    if (typeof window === 'undefined') return;
+    window.location.href = initPoint;
+  }, [initPoint, resultado]);
+
   // "Reintentar" genera una preferencia NUEVA (la vieja quedó asociada a un
   // pago rechazado, Mercado Pago no permite reusarla) y recarga el WebView
-  // sin volver a la lista de packs -- solo posible si vinimos de
+  // (nativo) o dispara una redirección nueva (Web, vía el useEffect de
+  // arriba) sin volver a la lista de packs -- solo posible si vinimos de
   // handleSelectPack con packId/userId; si no están disponibles (deep link
   // viejo, por ejemplo), el botón vuelve atrás como antes.
   async function handleReintentar() {
@@ -152,6 +147,18 @@ export default function PaymentWebViewScreen({ route, navigation }: any) {
     );
   }
 
+  if (Platform.OS === 'web') {
+    // La redirección la dispara el useEffect de arriba -- esto es solo lo
+    // que se ve durante el instante entre "se generó la preferencia" y
+    // "el navegador terminó de salir de esta pestaña".
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={colors.primary} size="large" />
+        <Text style={[styles.resultMessage, styles.webRedirectMessage]}>Redirigiendo a Mercado Pago...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
@@ -176,7 +183,8 @@ export default function PaymentWebViewScreen({ route, navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center' },
+  center: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  webRedirectMessage: { marginTop: 0 },
   closeButton: {
     alignSelf: 'flex-end',
     margin: 16,

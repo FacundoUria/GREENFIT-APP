@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // HomeScreen usa useFocusEffect (no useEffect simple) para el refresh al
@@ -186,5 +187,70 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
 
     unmount();
     expect(supabase.removeChannel).toHaveBeenCalled();
+  });
+});
+
+// Bug crítico (2026-08-07): "React Native WebView does not support this
+// platform" al volver de Mercado Pago en Web -- ahí no hay WebView que
+// intercepte la navegación como en nativo, así que HomeScreen es quien lee
+// el resultado directo de la URL con la que la PWA volvió a cargar (back_url
+// = origin real de la PWA, ver resolveBackUrls en el Edge Function).
+describe('HomeScreen -- Web/PWA: detecta la vuelta de Mercado Pago desde la URL', () => {
+  const originalWindow = (global as any).window;
+  const originalPlatformOS = Platform.OS;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
+    (fetchTotalXp as jest.Mock).mockResolvedValue(650);
+    (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(false);
+    (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
+    (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
+    (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    (global as any).window = originalWindow;
+    Platform.OS = originalPlatformOS;
+  });
+
+  it('con status=approved en la URL, navega a PaymentWebView con el resultado ya resuelto y limpia la URL', async () => {
+    Platform.OS = 'web';
+    const replaceState = jest.fn();
+    (global as any).window = {
+      location: { href: 'https://app.greenfit.test/?status=approved&payment_id=1', pathname: '/' },
+      history: { replaceState },
+    };
+
+    render(<HomeScreen navigation={navigation} />);
+
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith('PaymentWebView', { webResultado: 'approved' })
+    );
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/');
+  });
+
+  it('sin ningún marcador de resultado en la URL (navegación normal a Inicio), no navega a ningún lado', async () => {
+    Platform.OS = 'web';
+    (global as any).window = {
+      location: { href: 'https://app.greenfit.test/', pathname: '/' },
+      history: { replaceState: jest.fn() },
+    };
+
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
+  });
+
+  it('en nativo (Platform.OS !== web), ignora la URL aunque window exista (no debería, pero por las dudas)', async () => {
+    Platform.OS = 'ios';
+    (global as any).window = {
+      location: { href: 'https://app.greenfit.test/?status=approved', pathname: '/' },
+      history: { replaceState: jest.fn() },
+    };
+
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
   });
 });

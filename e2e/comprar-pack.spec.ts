@@ -86,4 +86,30 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     await page.getByText('Renovar').click();
     await expect(page.getByText('No hay packs disponibles todavía.')).toBeVisible();
   });
+
+  // Bug crítico (2026-08-07): "React Native WebView does not support this
+  // platform" al tocar un pack en Web -- react-native-webview no soporta ese
+  // entorno, así que ahí PaymentWebViewScreen redirige la pestaña entera
+  // (window.location.href) en vez de embeber un WebView. `mercadopago.com.ar`
+  // se intercepta para no navegar de verdad a internet -- lo que se prueba
+  // es que la redirección se dispara con la URL real de la preferencia, sin
+  // que aparezca ningún error de plataforma en el camino.
+  test('tocar un pack en Web redirige la pestaña entera al Checkout de Mercado Pago -- sin el crash de WebView', async ({
+    page,
+  }) => {
+    await page.route('https://www.mercadopago.com.ar/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>Checkout Mercado Pago (mock)</body></html>' })
+    );
+
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), user_credits: [BALANCE_VENCIDO], packs: [PACK_CROSSFIT] },
+    });
+
+    await page.getByText('Renovar').click();
+    await page.getByText('Pack 12 clases CrossFit').click();
+
+    await page.waitForURL(/mercadopago\.com\.ar/, { timeout: 15_000 });
+    await expect(page.getByText('Checkout Mercado Pago (mock)')).toBeVisible();
+    await expect(page.getByText('does not support this platform')).toHaveCount(0);
+  });
 });

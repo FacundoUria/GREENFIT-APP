@@ -29,14 +29,35 @@ export interface MpPreferenceRequest {
   notification_url: string;
 }
 
-// URLs de esquema custom que ya intercepta PaymentWebViewScreen.tsx (ver
-// SUCCESS_MARKERS/PENDING_MARKERS/FAILURE_MARKERS ahí) -- MP nunca llega a
-// "navegar" de verdad a estas, el WebView las corta antes.
+// URLs de esquema custom, para nativo (Expo Go / build instalada) -- ya las
+// intercepta PaymentWebViewScreen.tsx (ver SUCCESS_MARKERS/PENDING_MARKERS/
+// FAILURE_MARKERS en src/lib/paymentResult.ts) antes de que el WebView
+// intente "navegar" de verdad a estas.
 export const MP_BACK_URLS = {
   success: 'greenfit://payment-success',
   pending: 'greenfit://payment-pending',
   failure: 'greenfit://payment-failure',
 };
+
+// react-native-webview no soporta Web ("does not support this platform") --
+// ahí el checkout se abre con una redirección de página completa
+// (window.location.href, ver PaymentWebViewScreen.tsx), así que el back_url
+// tiene que ser una URL real a la que el navegador pueda volver: el mismo
+// origin desde el que se pidió la preferencia. Mercado Pago le agrega sus
+// propios query params (status/collection_status) al redirigir para
+// cualquier back_url, con lo cual no hace falta ninguna ruta especial --
+// HomeScreen los detecta apenas la PWA vuelve a cargar ahí (ver su propio
+// useEffect, mismos marcadores que usa PaymentWebViewScreen).
+// `originHeader` sale del header `Origin` del request a
+// create-payment-preference -- un fetch de navegador siempre lo manda; un
+// fetch nativo (React Native/Hermes) no, así que su ausencia es la señal de
+// que estamos en nativo y corresponde el custom scheme de arriba.
+export function resolveBackUrls(originHeader: string | null | undefined): typeof MP_BACK_URLS {
+  if (originHeader && /^https?:\/\//i.test(originHeader)) {
+    return { success: originHeader, pending: originHeader, failure: originHeader };
+  }
+  return MP_BACK_URLS;
+}
 
 // El precio/cantidad de créditos/días SIEMPRE salen del pack real leído de
 // la base (nunca de lo que mande el cliente) -- esto es lo único que se usa
@@ -47,8 +68,9 @@ export function buildPreferenceRequest(params: {
   pack: PackParaPreferencia;
   userId: string;
   notificationUrl: string;
+  backUrls?: { success: string; pending: string; failure: string };
 }): MpPreferenceRequest {
-  const { pack, userId, notificationUrl } = params;
+  const { pack, userId, notificationUrl, backUrls } = params;
   const externalReference: ExternalReference = {
     user_id: userId,
     pack_id: pack.id,
@@ -60,7 +82,7 @@ export function buildPreferenceRequest(params: {
   return {
     items: [{ title: pack.name, quantity: 1, unit_price: pack.price, currency_id: 'ARS' }],
     external_reference: JSON.stringify(externalReference),
-    back_urls: MP_BACK_URLS,
+    back_urls: backUrls ?? MP_BACK_URLS,
     auto_return: 'approved',
     notification_url: notificationUrl,
   };

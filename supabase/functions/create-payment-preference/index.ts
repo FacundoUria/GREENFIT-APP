@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { createAdminClient } from '../_shared/adminGuard.ts';
-import { buildPreferenceRequest, createMpPreference } from '../_shared/mercadopago.ts';
+import { buildPreferenceRequest, createMpPreference, resolveBackUrls } from '../_shared/mercadopago.ts';
 
 interface CreatePreferenceBody {
   packId: string;
@@ -79,6 +79,13 @@ serve(async (req) => {
       return jsonResponse({ error: 'Falta SUPABASE_URL.' }, 500);
     }
 
+    // Si el request viene de un navegador (Web/PWA), el back_url tiene que
+    // ser el origin real de la PWA -- react-native-webview no soporta Web,
+    // así que ahí el checkout se abre con una redirección de página
+    // completa en vez de un WebView embebido (ver resolveBackUrls y
+    // PaymentWebViewScreen.tsx).
+    const backUrls = resolveBackUrls(req.headers.get('origin'));
+
     const preferenceBody = buildPreferenceRequest({
       pack: {
         id: pack.id,
@@ -90,6 +97,7 @@ serve(async (req) => {
       },
       userId,
       notificationUrl: `${supabaseUrl}/functions/v1/mp-webhook`,
+      backUrls,
     });
 
     const { id, initPoint } = await createMpPreference(accessToken, preferenceBody);

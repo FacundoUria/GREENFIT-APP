@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // WebView es un componente nativo real -- se mockea por un stub inspeccionable
@@ -108,5 +109,65 @@ describe('PaymentWebViewScreen -- resultado del checkout de Mercado Pago', () =>
     simularNavegacion(getByTestId, 'https://mp.test/return?status=approved');
     fireEvent.press(getByText('Listo'));
     expect(navigation.goBack).toHaveBeenCalled();
+  });
+});
+
+// Bug crítico (2026-08-07): "React Native WebView does not support this
+// platform" -- en Web no se debe renderizar react-native-webview en
+// absoluto, la redirección al Checkout Pro es de página completa.
+describe('PaymentWebViewScreen -- Web/PWA (react-native-webview no soporta este entorno)', () => {
+  const originalWindow = (global as any).window;
+  const originalPlatformOS = Platform.OS;
+
+  beforeEach(() => jest.clearAllMocks());
+
+  afterEach(() => {
+    (global as any).window = originalWindow;
+    Platform.OS = originalPlatformOS;
+  });
+
+  it('con initPoint, NO renderiza el WebView y redirige la pestaña entera (window.location.href)', () => {
+    Platform.OS = 'web';
+    (global as any).window = { location: { href: '' } };
+
+    const { queryByTestId, getByText } = render(
+      <PaymentWebViewScreen route={{ params: { initPoint: 'https://mp.test/checkout' } }} navigation={navigation} />
+    );
+
+    expect(queryByTestId('mock-webview')).toBeNull();
+    expect((global as any).window.location.href).toBe('https://mp.test/checkout');
+    expect(getByText('Redirigiendo a Mercado Pago...')).toBeTruthy();
+  });
+
+  it('con webResultado ya resuelto (HomeScreen lo detectó al volver), muestra la tarjeta de resultado directo -- sin WebView ni redirección', () => {
+    Platform.OS = 'web';
+    (global as any).window = { location: { href: '' } };
+
+    const { queryByTestId, getByText } = render(
+      <PaymentWebViewScreen route={{ params: { webResultado: 'approved' } }} navigation={navigation} />
+    );
+
+    expect(queryByTestId('mock-webview')).toBeNull();
+    expect(getByText('¡Pago acreditado!')).toBeTruthy();
+    expect((global as any).window.location.href).toBe(''); // no redirigió a ningún lado
+  });
+
+  it('"Reintentar" en Web genera una preferencia nueva y redirige de nuevo -- sin recargar ningún WebView', async () => {
+    Platform.OS = 'web';
+    (global as any).window = { location: { href: '' } };
+    mockCreatePaymentPreference.mockResolvedValue({ initPoint: 'https://mp.test/checkout-nuevo', preferenceId: 'pref-2' });
+
+    const { getByText } = render(
+      <PaymentWebViewScreen
+        route={{ params: { webResultado: 'failure', packId: 'pack-1', userId: 'user-1' } }}
+        navigation={navigation}
+      />
+    );
+    expect(getByText('Reintentar')).toBeTruthy();
+
+    fireEvent.press(getByText('Reintentar'));
+
+    await waitFor(() => expect(mockCreatePaymentPreference).toHaveBeenCalledWith({ packId: 'pack-1', userId: 'user-1' }));
+    await waitFor(() => expect((global as any).window.location.href).toBe('https://mp.test/checkout-nuevo'));
   });
 });

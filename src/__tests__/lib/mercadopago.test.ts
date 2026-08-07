@@ -8,6 +8,7 @@ import {
   buildPreferenceRequest,
   parseExternalReference,
   extractPaymentId,
+  resolveBackUrls,
   MP_BACK_URLS,
 } from '../../../supabase/functions/_shared/mercadopago';
 
@@ -70,6 +71,45 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
     // función -- este test documenta esa garantía: si alguien agrega uno
     // por error en el futuro, este archivo es el lugar donde se nota.
     expect(buildPreferenceRequest.length).toBe(1); // un solo objeto de parámetros
+  });
+
+  it('con backUrls explícito (Web), lo usa en vez del custom scheme por defecto', () => {
+    const backUrls = { success: 'https://app.greenfit.test/', pending: 'https://app.greenfit.test/', failure: 'https://app.greenfit.test/' };
+    const req = buildPreferenceRequest({
+      pack: packCreditos,
+      userId: 'user-1',
+      notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
+      backUrls,
+    });
+    expect(req.back_urls).toEqual(backUrls);
+  });
+});
+
+describe('resolveBackUrls -- react-native-webview no soporta Web, ahí el back_url tiene que ser una URL real', () => {
+  it('con un Origin de navegador (http/https), usa ese origin como back_url para los 3 estados', () => {
+    expect(resolveBackUrls('https://app.greenfit.com.ar')).toEqual({
+      success: 'https://app.greenfit.com.ar',
+      pending: 'https://app.greenfit.com.ar',
+      failure: 'https://app.greenfit.com.ar',
+    });
+  });
+
+  it('con un Origin de localhost (desarrollo Web), también lo usa -- no depende de un dominio hardcodeado', () => {
+    expect(resolveBackUrls('http://localhost:8081')).toEqual({
+      success: 'http://localhost:8081',
+      pending: 'http://localhost:8081',
+      failure: 'http://localhost:8081',
+    });
+  });
+
+  it('sin Origin (fetch nativo -- React Native/Hermes no lo manda), usa el custom scheme de siempre', () => {
+    expect(resolveBackUrls(null)).toEqual(MP_BACK_URLS);
+    expect(resolveBackUrls(undefined)).toEqual(MP_BACK_URLS);
+  });
+
+  it('un Origin que no es http/https (valor inesperado) tampoco se usa -- fallback al custom scheme', () => {
+    expect(resolveBackUrls('null')).toEqual(MP_BACK_URLS);
+    expect(resolveBackUrls('')).toEqual(MP_BACK_URLS);
   });
 });
 
