@@ -63,9 +63,10 @@ serve(async (req) => {
     const { error: rpcError } = await admin.rpc('mp_process_payment', {
       p_user_id: reference.user_id,
       p_pack_id: reference.pack_id,
-      p_discipline_id: reference.discipline_id,
-      p_credits: reference.credits,
-      p_duration_days: reference.duration_days,
+      p_creditos: reference.creditos,
+      p_incluye_aparatos: reference.incluye_aparatos,
+      p_dias_vigencia: reference.dias_vigencia,
+      p_aparatos_discipline_id: reference.aparatos_discipline_id,
       p_amount: payment.transaction_amount,
       p_paquete: packRow?.name ?? 'Pack Mercado Pago',
       p_mp_payment_id: String(payment.id),

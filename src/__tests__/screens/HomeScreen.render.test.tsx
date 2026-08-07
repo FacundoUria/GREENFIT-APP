@@ -34,6 +34,11 @@ jest.mock('../../context/ConfiguracionContext', () => ({
 jest.mock('../../hooks/useTicker', () => ({ useTicker: () => {} }));
 jest.mock('../../lib/notificationsBadge', () => ({ fetchUnreadNotificationCount: jest.fn().mockResolvedValue(0) }));
 jest.mock('../../lib/creditsApi', () => ({
+  // buildPackSubtitle/creditosOriginalesPara son lógica pura (sin red) --
+  // se dejan reales en vez de mockearlas, mismo criterio que xpApi más
+  // abajo, para no dejar un import undefined que reviente recién el día
+  // que un test futuro sí puebla `packs`/balances.
+  ...jest.requireActual('../../lib/creditsApi'),
   fetchUserBalances: jest.fn().mockResolvedValue([]),
   fetchPacks: jest.fn().mockResolvedValue([]),
   syncMyMembership: jest.fn().mockResolvedValue(undefined),

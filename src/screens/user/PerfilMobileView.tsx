@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
-import { fetchUserBalances } from '../../lib/creditsApi';
+import { fetchUserBalances, creditosOriginalesPara } from '../../lib/creditsApi';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import {
   fetchTotalXp,
@@ -236,7 +236,10 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
                     ? b.expiresAt
                       ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
                       : 'Sin fecha de vencimiento cargada'
-                    : `${b.remainingCredits ?? 0}${b.pack?.credits ? ` de ${b.pack.credits}` : ''} clases restantes`}
+                    : `${b.remainingCredits ?? 0}${(() => {
+                        const original = creditosOriginalesPara(b.pack, b.discipline.id);
+                        return original ? ` de ${original}` : '';
+                      })()} clases restantes`}
                 </Text>
               </View>
               <StatusBadge status={status} />

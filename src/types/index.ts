@@ -19,12 +19,25 @@ export interface Discipline {
   kind: DisciplineKind;
 }
 
+// Créditos que acredita un pack para UNA disciplina puntual -- un pack
+// (combo) puede traer de 0 a N de estas.
+export interface CreditoDePack {
+  disciplineId: string;
+  disciplineName: string;
+  credits: number;
+}
+
+// Un pack ya no es "1 disciplina <-> 1 pack" -- ahora es un combo real:
+// de 0 a N disciplinas de créditos (`creditos`) + opcionalmente Aparatos
+// (`incluyeAparatos`, con `diasVigencia` configurable, NUNCA fijo).
+// Ej: "Combo 8+8" = creditos: [Boxeo 8, CrossFit 8], incluyeAparatos: false.
+// "Pase 2 Meses Aparatos" = creditos: [], incluyeAparatos: true, diasVigencia: 60.
 export interface Pack {
   id: string;
-  name: string; // "Pack 12 clases Boxeo" / "Mes libre Aparatos"
-  discipline: Discipline;
-  credits: number | null;      // null si la disciplina es 'membership'
-  durationDays: number | null; // null si la disciplina es 'credits'
+  name: string; // "Combo 8+8" / "Pase 2 Meses Aparatos" / "Aparatos + 12 créditos CrossFit"
+  creditos: CreditoDePack[];
+  incluyeAparatos: boolean;
+  diasVigencia: number | null; // solo aplica si incluyeAparatos es true
   price: number;
   isActive: boolean;
 }

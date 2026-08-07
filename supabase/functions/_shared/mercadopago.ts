@@ -4,21 +4,40 @@
 // con Jest en el resto del repo (Deno no corre en esa suite, pero estas
 // funciones son TS puro, sin imports de Deno, así que sí).
 
+// Un pack ahora puede ser un combo real de N disciplinas (ej. "8 créditos
+// Boxeo + 8 créditos CrossFit") -- `creditos` reemplaza al viejo par
+// discipline_id/credits (1 disciplina por pack). `incluyeAparatos` es un
+// switch independiente: extiende 30 días fijos la membresía de Aparatos
+// del socio sin importar qué otras disciplinas traiga el combo.
+export interface CreditoPorDisciplina {
+  disciplineId: string;
+  credits: number;
+}
+
 export interface PackParaPreferencia {
   id: string;
   name: string;
   price: number;
-  credits: number | null;
-  durationDays: number | null;
-  disciplineId: string;
+  creditos: CreditoPorDisciplina[];
+  incluyeAparatos: boolean;
+  // Cantidad EXACTA de días a extender Aparatos -- configurable por pack
+  // (30 = 1 mes, 60 = 2 meses, 90 = 3 meses, o cualquier valor que cargue
+  // Seba), nunca un número fijo hardcodeado. null/ignorado si
+  // incluyeAparatos es false.
+  diasVigencia: number | null;
 }
 
 export interface ExternalReference {
   user_id: string;
   pack_id: string;
-  discipline_id: string;
-  credits: number | null;
-  duration_days: number | null;
+  creditos: { discipline_id: string; credits: number }[];
+  incluye_aparatos: boolean;
+  dias_vigencia: number | null;
+  // La Edge Function ya resuelve esto contra `disciplines` (kind=
+  // 'membership') al crear la preferencia -- el webhook nunca tiene que
+  // adivinar cuál disciplina es "Aparatos" ni depender de un nombre
+  // hardcodeado. null si incluye_aparatos es false.
+  aparatos_discipline_id: string | null;
 }
 
 export interface MpPreferenceRequest {
@@ -71,14 +90,19 @@ export function buildPreferenceRequest(params: {
   notificationUrl: string;
   backUrls?: { success: string; pending: string; failure: string };
   payerEmail?: string | null;
+  // Id real de la disciplina "Aparatos" (kind='membership'), resuelto por
+  // la Edge Function contra `disciplines` -- solo se usa (y solo hace
+  // falta) si el pack incluye Aparatos.
+  aparatosDisciplineId?: string | null;
 }): MpPreferenceRequest {
-  const { pack, userId, notificationUrl, backUrls, payerEmail } = params;
+  const { pack, userId, notificationUrl, backUrls, payerEmail, aparatosDisciplineId } = params;
   const externalReference: ExternalReference = {
     user_id: userId,
     pack_id: pack.id,
-    discipline_id: pack.disciplineId,
-    credits: pack.credits,
-    duration_days: pack.durationDays,
+    creditos: pack.creditos.map((c) => ({ discipline_id: c.disciplineId, credits: c.credits })),
+    incluye_aparatos: pack.incluyeAparatos,
+    dias_vigencia: pack.incluyeAparatos ? pack.diasVigencia : null,
+    aparatos_discipline_id: pack.incluyeAparatos ? (aparatosDisciplineId ?? null) : null,
   };
 
   return {
@@ -102,15 +126,20 @@ export function parseExternalReference(raw: string | null | undefined): External
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (typeof parsed?.user_id !== 'string' || typeof parsed?.pack_id !== 'string' || typeof parsed?.discipline_id !== 'string') {
+    if (typeof parsed?.user_id !== 'string' || typeof parsed?.pack_id !== 'string' || !Array.isArray(parsed?.creditos)) {
       return null;
     }
+    const creditos = parsed.creditos.filter(
+      (c: unknown): c is { discipline_id: string; credits: number } =>
+        typeof (c as any)?.discipline_id === 'string' && typeof (c as any)?.credits === 'number' && (c as any).credits > 0
+    );
     return {
       user_id: parsed.user_id,
       pack_id: parsed.pack_id,
-      discipline_id: parsed.discipline_id,
-      credits: typeof parsed.credits === 'number' ? parsed.credits : null,
-      duration_days: typeof parsed.duration_days === 'number' ? parsed.duration_days : null,
+      creditos,
+      incluye_aparatos: parsed.incluye_aparatos === true,
+      dias_vigencia: typeof parsed.dias_vigencia === 'number' && parsed.dias_vigencia > 0 ? parsed.dias_vigencia : null,
+      aparatos_discipline_id: typeof parsed.aparatos_discipline_id === 'string' ? parsed.aparatos_discipline_id : null,
     };
   } catch {
     return null;

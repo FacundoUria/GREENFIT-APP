@@ -57,7 +57,7 @@ serve(async (req) => {
 
     const { data: pack, error: packError } = await admin
       .from('packs')
-      .select('id, name, price, credits, duration_days, discipline_id, is_active')
+      .select('id, name, price, is_active, incluye_aparatos, dias_vigencia, creditos')
       .eq('id', body.packId)
       .maybeSingle();
     if (packError) {
@@ -68,6 +68,27 @@ serve(async (req) => {
     }
     if (pack.is_active === false) {
       return jsonResponse({ error: 'Este pack ya no está disponible.' }, 400);
+    }
+
+    // Si el combo incluye Aparatos, se resuelve acá (Service Role, contra
+    // `disciplines`) cuál es su discipline_id real -- así el webhook nunca
+    // tiene que adivinarlo por nombre ni asumir que hay una sola disciplina
+    // kind='membership'.
+    let aparatosDisciplineId: string | null = null;
+    if (pack.incluye_aparatos) {
+      const { data: disciplinaAparatos, error: discError } = await admin
+        .from('disciplines')
+        .select('id')
+        .eq('kind', 'membership')
+        .limit(1)
+        .maybeSingle();
+      if (discError) {
+        return jsonResponse({ error: discError.message }, 400);
+      }
+      if (!disciplinaAparatos) {
+        return jsonResponse({ error: 'Este pack incluye Aparatos pero no existe ninguna disciplina de membresía configurada.' }, 400);
+      }
+      aparatosDisciplineId = disciplinaAparatos.id;
     }
 
     const accessToken = Deno.env.get('MP_ACCESS_TOKEN');
@@ -99,19 +120,26 @@ serve(async (req) => {
     // PaymentWebViewScreen.tsx).
     const backUrls = resolveBackUrls(req.headers.get('origin'));
 
+    const creditos: { disciplineId: string; credits: number }[] = Array.isArray(pack.creditos)
+      ? pack.creditos
+          .filter((c: any) => c && typeof c.discipline_id === 'string' && typeof c.credits === 'number' && c.credits > 0)
+          .map((c: any) => ({ disciplineId: c.discipline_id, credits: c.credits }))
+      : [];
+
     const preferenceBody = buildPreferenceRequest({
       pack: {
         id: pack.id,
         name: pack.name,
         price: pack.price,
-        credits: pack.credits,
-        durationDays: pack.duration_days,
-        disciplineId: pack.discipline_id,
+        creditos,
+        incluyeAparatos: pack.incluye_aparatos === true,
+        diasVigencia: pack.dias_vigencia ?? null,
       },
       userId,
       notificationUrl: `${supabaseUrl}/functions/v1/mp-webhook`,
       backUrls,
       payerEmail: user.email,
+      aparatosDisciplineId,
     });
 
     const preference = await createMpPreference(accessToken, preferenceBody);

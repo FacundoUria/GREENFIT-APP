@@ -10,21 +10,21 @@ import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS } from './support/
 const PACK_CROSSFIT = {
   id: 'pack-crossfit-12',
   name: 'Pack 12 clases CrossFit',
-  credits: 12,
-  duration_days: null,
   price: 30000,
   is_active: true,
-  discipline: DISCIPLINA_CROSSFIT,
+  incluye_aparatos: false,
+  dias_vigencia: null,
+  creditos: [{ discipline_id: DISCIPLINA_CROSSFIT.id, credits: 12 }],
 };
 
 const PACK_APARATOS = {
   id: 'pack-aparatos-mes',
   name: 'Mes libre Aparatos',
-  credits: null,
-  duration_days: 30,
   price: 21000,
   is_active: true,
-  discipline: DISCIPLINA_APARATOS,
+  incluye_aparatos: true,
+  dias_vigencia: 30,
+  creditos: [],
 };
 
 // El botón "Renovar" (que abre "Elegí tu pack") solo aparece si alguna
@@ -49,11 +49,11 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     await expect(page.getByText('Elegí tu pack')).toBeVisible();
 
     await expect(page.getByText('Pack 12 clases CrossFit')).toBeVisible();
-    await expect(page.getByText('CrossFit · 12 créditos')).toBeVisible();
+    await expect(page.getByText('12 créditos CrossFit')).toBeVisible();
     await expect(page.getByText('$ 30.000', { exact: false })).toBeVisible();
 
     await expect(page.getByText('Mes libre Aparatos')).toBeVisible();
-    await expect(page.getByText('Aparatos · 30 días')).toBeVisible();
+    await expect(page.getByText('Aparatos Pase Libre')).toBeVisible();
     await expect(page.getByText('$ 21.000', { exact: false })).toBeVisible();
   });
 
@@ -63,11 +63,11 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     const packNuevo = {
       id: 'pack-6-crossfit',
       name: 'Pack 6 clases CrossFit',
-      credits: 6,
-      duration_days: null,
       price: 10000,
       is_active: true,
-      discipline: DISCIPLINA_CROSSFIT,
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      creditos: [{ discipline_id: DISCIPLINA_CROSSFIT.id, credits: 6 }],
     };
     await loginComoSocio(page, {
       tables: { ...tablasBase(), user_credits: [BALANCE_VENCIDO], packs: [packNuevo] },
@@ -75,7 +75,7 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
 
     await page.getByText('Renovar').click();
     await expect(page.getByText('Pack 6 clases CrossFit')).toBeVisible();
-    await expect(page.getByText('CrossFit · 6 créditos')).toBeVisible();
+    await expect(page.getByText('6 créditos CrossFit')).toBeVisible();
   });
 
   test('sin ningún pack cargado, muestra el mensaje de "no hay packs" en vez de una lista vacía muda', async ({ page }) => {
@@ -181,11 +181,11 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     const PACK_4_CROSSFIT = {
       id: 'pack-4-crossfit',
       name: 'Pack 4 clases CrossFit',
-      credits: 4,
-      duration_days: null,
       price: 15000,
       is_active: true,
-      discipline: DISCIPLINA_CROSSFIT,
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      creditos: [{ discipline_id: DISCIPLINA_CROSSFIT.id, credits: 4 }],
     };
     // Estado que deja mp_process_payment tras aprobar este pack: fila en
     // pagos_socio (estado='pagado', origen='mercado_pago') + user_credits
@@ -236,11 +236,11 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     const PASE_2_MESES = {
       id: 'pack-2-meses-aparatos',
       name: 'Pase 2 Meses Aparatos',
-      credits: null,
-      duration_days: 60,
       price: 70000,
       is_active: true,
-      discipline: DISCIPLINA_APARATOS,
+      incluye_aparatos: true,
+      dias_vigencia: 60,
+      creditos: [],
     };
     // mp_process_payment extiende desde la fecha vigente previa (o desde
     // hoy si ya estaba vencida) -- acá simula el caso "ya estaba vencida":

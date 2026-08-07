@@ -30,6 +30,10 @@ jest.mock('../../context/ConfiguracionContext', () => ({
 }));
 
 jest.mock('../../lib/creditsApi', () => ({
+  // creditosOriginalesPara es lógica pura (sin red) -- se deja real en vez
+  // de mockearla, para no dejar un import undefined que reviente el día
+  // que un test futuro pruebe un balance kind='credits' con pack.
+  ...jest.requireActual('../../lib/creditsApi'),
   fetchUserBalances: jest.fn().mockResolvedValue([
     {
       id: 'bal-1',
@@ -38,7 +42,7 @@ jest.mock('../../lib/creditsApi', () => ({
       expiresAt: '2026-12-31',
       createdAt: '2026-01-01',
       discipline: { id: 'disc-1', name: 'Aparatos', kind: 'membership' },
-      pack: { id: 'pack-1', name: 'Pase Libre', credits: null, durationDays: 30, price: 1000, isActive: true, discipline: { id: 'disc-1', name: 'Aparatos', kind: 'membership' } },
+      pack: { id: 'pack-1', name: 'Pase Libre', creditos: [], incluyeAparatos: true, diasVigencia: 30, price: 1000, isActive: true },
     },
   ]),
 }));

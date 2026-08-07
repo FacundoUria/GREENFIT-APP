@@ -1,9 +1,12 @@
 import { supabase } from './supabase';
-import { Pack, UserCredit } from '../types';
+import { Pack, UserCredit, CreditoDePack } from '../types';
 
-// Un pack sin discipline_id (ej. cargado a mano por SQL sin completar ese
-// campo) no se puede asignar a nadie — se descarta acá en vez de romper
-// toda la lista para los packs que sí están bien cargados.
+// Un pack ahora es un combo: `creditos` (jsonb en la tabla) trae
+// [{discipline_id, credits}, ...] -- 0 a N disciplinas -- en vez del viejo
+// discipline_id/credits fijo de a uno. Dos queries en vez de un embed
+// (mismo criterio que PlanesPacksCard.jsx en el Admin): `creditos` solo
+// guarda el id, no el nombre, así que hace falta cruzar contra
+// `disciplines` acá para poder armar el subtítulo ("8 créditos Boxeo").
 //
 // `activeOnly` filtra los pases dados de baja (is_active = false) — se usa
 // en el modal de compra del socio; el panel de gestión del admin trae todos
@@ -11,32 +14,58 @@ import { Pack, UserCredit } from '../types';
 export async function fetchPacks(options?: { activeOnly?: boolean }): Promise<Pack[]> {
   let query = supabase
     .from('packs')
-    .select('id, name, credits, duration_days, price, is_active, discipline:disciplines(id, name, kind, is_active)')
+    .select('id, name, price, is_active, incluye_aparatos, dias_vigencia, creditos')
     .order('name');
   if (options?.activeOnly) {
     query = query.eq('is_active', true);
   }
-  const { data, error } = await query;
+  const [{ data, error }, { data: disciplinasData, error: discError }] = await Promise.all([
+    query,
+    supabase.from('disciplines').select('id, name, is_active'),
+  ]);
   if (error) throw new Error(error.message);
+  if (discError) throw new Error(discError.message);
+
+  const disciplinasPorId = new Map((disciplinasData ?? []).map((d) => [d.id, d]));
 
   const packs: Pack[] = [];
   for (const p of data ?? []) {
-    const discipline = Array.isArray(p.discipline) ? p.discipline[0] : p.discipline;
-    if (!discipline) continue;
-    // Una disciplina desactivada no debe ofrecerse para compra de créditos
-    // aunque el pack en sí siga marcado is_active=true.
-    if (options?.activeOnly && discipline.is_active === false) continue;
+    const creditosRaw = Array.isArray(p.creditos) ? (p.creditos as { discipline_id: string; credits: number }[]) : [];
+    const creditos: CreditoDePack[] = [];
+    for (const c of creditosRaw) {
+      const disciplina = disciplinasPorId.get(c.discipline_id);
+      if (!disciplina) continue;
+      // Una disciplina desactivada no debe ofrecerse para compra de
+      // créditos aunque el pack en sí siga marcado is_active=true.
+      if (options?.activeOnly && disciplina.is_active === false) continue;
+      if (!c.credits || c.credits <= 0) continue;
+      creditos.push({ disciplineId: c.discipline_id, disciplineName: disciplina.name, credits: c.credits });
+    }
+    const incluyeAparatos = p.incluye_aparatos === true;
+    // Sin ningún crédito válido y sin Aparatos, el pack quedó vacío (todas
+    // sus disciplinas se desactivaron) -- no tiene sentido ofrecerlo.
+    if (creditos.length === 0 && !incluyeAparatos) continue;
     packs.push({
       id: p.id,
       name: p.name,
-      credits: p.credits,
-      durationDays: p.duration_days,
+      creditos,
+      incluyeAparatos,
+      diasVigencia: p.dias_vigencia ?? null,
       price: p.price,
       isActive: p.is_active,
-      discipline: { id: discipline.id, name: discipline.name, kind: discipline.kind },
     });
   }
   return packs;
+}
+
+// "8 créditos CrossFit + 8 créditos Boxeo" / "Aparatos + 12 créditos
+// CrossFit" / "Aparatos Pase Libre" -- generado siempre a partir de lo que
+// trae el pack, nunca hardcodeado por nombre de pack.
+export function buildPackSubtitle(pack: Pack): string {
+  const partesCreditos = pack.creditos.map((c) => `${c.credits} créditos ${c.disciplineName}`);
+  if (pack.incluyeAparatos && partesCreditos.length === 0) return 'Aparatos Pase Libre';
+  if (pack.incluyeAparatos) return ['Aparatos', ...partesCreditos].join(' + ');
+  return partesCreditos.join(' + ');
 }
 
 // Autocuración: si el alta/edición de un socio en el panel admin nunca
@@ -64,14 +93,22 @@ export async function syncMyMembership(): Promise<{ vinculado: boolean; sincroni
 // El balance más reciente del socio para CADA disciplina en la que tenga
 // algo cargado (una fila por disciplina, no una sola global).
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
-  const { data, error } = await supabase
-    .from('user_credits')
-    .select(
-      'id, user_id, remaining_credits, expires_at, created_at, discipline:disciplines(id, name, kind), pack:packs(id, name, credits, duration_days, price, is_active)'
-    )
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+  const [{ data, error }, { data: disciplinasData, error: discError }] = await Promise.all([
+    supabase
+      .from('user_credits')
+      .select(
+        'id, user_id, remaining_credits, expires_at, created_at, discipline:disciplines(id, name, kind), pack:packs(id, name, price, is_active, incluye_aparatos, dias_vigencia, creditos)'
+      )
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false }),
+    // Un pack combo puede acreditar disciplinas distintas a la de ESTA fila
+    // de user_credits puntual -- para armar `pack.creditos` con nombres
+    // reales (no solo ids) hace falta el catálogo completo de disciplinas.
+    supabase.from('disciplines').select('id, name'),
+  ]);
   if (error) throw new Error(error.message);
+  if (discError) throw new Error(discError.message);
+  const disciplinasPorId = new Map((disciplinasData ?? []).map((d) => [d.id, d]));
 
   const latestByDiscipline = new Map<string, (typeof data)[number]>();
   for (const row of data ?? []) {
@@ -82,6 +119,13 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   return Array.from(latestByDiscipline.values()).map((row) => {
     const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
     const pack = Array.isArray(row.pack) ? row.pack[0] : row.pack;
+    const creditosRaw = Array.isArray(pack?.creditos) ? (pack!.creditos as { discipline_id: string; credits: number }[]) : [];
+    const creditos: CreditoDePack[] = creditosRaw
+      .map((c) => {
+        const d = disciplinasPorId.get(c.discipline_id);
+        return d ? { disciplineId: c.discipline_id, disciplineName: d.name, credits: c.credits } : null;
+      })
+      .filter((c): c is CreditoDePack => c !== null);
     return {
       id: row.id,
       userId: row.user_id,
@@ -96,13 +140,20 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
         ? {
             id: pack.id,
             name: pack.name,
-            credits: pack.credits,
-            durationDays: pack.duration_days,
+            creditos,
+            incluyeAparatos: pack.incluye_aparatos === true,
+            diasVigencia: pack.dias_vigencia ?? null,
             price: pack.price,
             isActive: pack.is_active,
-            discipline: { id: discipline.id, name: discipline.name, kind: discipline.kind },
           }
         : null,
     };
   });
+}
+
+// Cuántos créditos originales le correspondían a ESTA disciplina puntual
+// dentro del combo comprado -- para el "X de Y clases restantes" (Y = lo
+// que vino en el pack para esta disciplina, no el total del combo entero).
+export function creditosOriginalesPara(pack: Pack | null | undefined, disciplineId: string): number | null {
+  return pack?.creditos.find((c) => c.disciplineId === disciplineId)?.credits ?? null;
 }

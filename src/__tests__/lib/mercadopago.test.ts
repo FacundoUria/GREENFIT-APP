@@ -15,19 +15,19 @@ import {
   MP_BACK_URLS,
 } from '../../../supabase/functions/_shared/mercadopago';
 
-describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server-side del pack', () => {
-  const packCreditos = {
+describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server-side del pack (combos multi-disciplina)', () => {
+  const packUnaDisciplina = {
     id: 'pack-1',
     name: 'Pack 12 clases CrossFit',
     price: 30000,
-    credits: 12,
-    durationDays: null,
-    disciplineId: 'disc-crossfit',
+    creditos: [{ disciplineId: 'disc-crossfit', credits: 12 }],
+    incluyeAparatos: false,
+    diasVigencia: null,
   };
 
-  it('un pack de créditos arma el item con el precio/nombre reales y el external_reference correcto', () => {
+  it('un pack de una sola disciplina arma el item con el precio/nombre reales y el external_reference correcto', () => {
     const req = buildPreferenceRequest({
-      pack: packCreditos,
+      pack: packUnaDisciplina,
       userId: 'user-1',
       notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
     });
@@ -36,36 +36,96 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
     expect(JSON.parse(req.external_reference)).toEqual({
       user_id: 'user-1',
       pack_id: 'pack-1',
-      discipline_id: 'disc-crossfit',
-      credits: 12,
-      duration_days: null,
+      creditos: [{ discipline_id: 'disc-crossfit', credits: 12 }],
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      aparatos_discipline_id: null,
     });
     expect(req.back_urls).toEqual(MP_BACK_URLS);
     expect(req.auto_return).toBe('approved');
     expect(req.notification_url).toBe('https://proyecto.supabase.co/functions/v1/mp-webhook');
   });
 
-  it('un pack de membresía (Aparatos, duration_days) arma el external_reference con duration_days y credits null', () => {
-    const packMembresia = {
-      id: 'pack-aparatos',
-      name: 'Mes libre Aparatos',
-      price: 21000,
-      credits: null,
-      durationDays: 30,
-      disciplineId: 'disc-aparatos',
+  it('un combo real (Boxeo + CrossFit) arma el external_reference con TODAS las disciplinas', () => {
+    const combo = {
+      id: 'pack-combo-8-8',
+      name: 'Combo 8+8',
+      price: 55000,
+      creditos: [
+        { disciplineId: 'disc-boxeo', credits: 8 },
+        { disciplineId: 'disc-crossfit', credits: 8 },
+      ],
+      incluyeAparatos: false,
+      diasVigencia: null,
     };
     const req = buildPreferenceRequest({
-      pack: packMembresia,
+      pack: combo,
       userId: 'user-2',
       notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
     });
 
     expect(JSON.parse(req.external_reference)).toEqual({
       user_id: 'user-2',
-      pack_id: 'pack-aparatos',
-      discipline_id: 'disc-aparatos',
-      credits: null,
-      duration_days: 30,
+      pack_id: 'pack-combo-8-8',
+      creditos: [
+        { discipline_id: 'disc-boxeo', credits: 8 },
+        { discipline_id: 'disc-crossfit', credits: 8 },
+      ],
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      aparatos_discipline_id: null,
+    });
+  });
+
+  it('un pack que incluye Aparatos manda dias_vigencia y aparatos_discipline_id -- nunca un número fijo hardcodeado', () => {
+    const paseAparatos = {
+      id: 'pack-2-meses-aparatos',
+      name: 'Pase 2 Meses Aparatos',
+      price: 70000,
+      creditos: [],
+      incluyeAparatos: true,
+      diasVigencia: 60,
+    };
+    const req = buildPreferenceRequest({
+      pack: paseAparatos,
+      userId: 'user-3',
+      notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
+      aparatosDisciplineId: 'disc-aparatos',
+    });
+
+    expect(JSON.parse(req.external_reference)).toEqual({
+      user_id: 'user-3',
+      pack_id: 'pack-2-meses-aparatos',
+      creditos: [],
+      incluye_aparatos: true,
+      dias_vigencia: 60,
+      aparatos_discipline_id: 'disc-aparatos',
+    });
+  });
+
+  it('un combo con Aparatos + créditos manda las dos cosas a la vez', () => {
+    const comboConAparatos = {
+      id: 'pack-aparatos-crossfit',
+      name: 'Aparatos + 12 créditos CrossFit',
+      price: 90000,
+      creditos: [{ disciplineId: 'disc-crossfit', credits: 12 }],
+      incluyeAparatos: true,
+      diasVigencia: 30,
+    };
+    const req = buildPreferenceRequest({
+      pack: comboConAparatos,
+      userId: 'user-4',
+      notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
+      aparatosDisciplineId: 'disc-aparatos',
+    });
+
+    expect(JSON.parse(req.external_reference)).toEqual({
+      user_id: 'user-4',
+      pack_id: 'pack-aparatos-crossfit',
+      creditos: [{ discipline_id: 'disc-crossfit', credits: 12 }],
+      incluye_aparatos: true,
+      dias_vigencia: 30,
+      aparatos_discipline_id: 'disc-aparatos',
     });
   });
 
@@ -79,7 +139,7 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
   it('con backUrls explícito (Web), lo usa en vez del custom scheme por defecto', () => {
     const backUrls = { success: 'https://app.greenfit.test/', pending: 'https://app.greenfit.test/', failure: 'https://app.greenfit.test/' };
     const req = buildPreferenceRequest({
-      pack: packCreditos,
+      pack: packUnaDisciplina,
       userId: 'user-1',
       notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
       backUrls,
@@ -89,7 +149,7 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
 
   it('con payerEmail, arma el objeto payer -- requisito mínimo de una preferencia bien formada', () => {
     const req = buildPreferenceRequest({
-      pack: packCreditos,
+      pack: packUnaDisciplina,
       userId: 'user-1',
       notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
       payerEmail: 'socio@greenfit.test',
@@ -99,7 +159,7 @@ describe('buildPreferenceRequest -- arma la preferencia SIEMPRE con datos server
 
   it('sin payerEmail (usuario sin email cargado), no manda ningún payer en vez de uno vacío/inválido', () => {
     const req = buildPreferenceRequest({
-      pack: packCreditos,
+      pack: packUnaDisciplina,
       userId: 'user-1',
       notificationUrl: 'https://proyecto.supabase.co/functions/v1/mp-webhook',
     });
@@ -213,15 +273,63 @@ describe('resolveBackUrls -- react-native-webview no soporta Web, ahí el back_u
 });
 
 describe('parseExternalReference -- nunca confía ciegamente en el string que devuelve MP', () => {
-  it('parsea un external_reference válido', () => {
-    const raw = JSON.stringify({ user_id: 'u1', pack_id: 'p1', discipline_id: 'd1', credits: 6, duration_days: null });
+  it('parsea un external_reference de un combo real (2 disciplinas)', () => {
+    const raw = JSON.stringify({
+      user_id: 'u1',
+      pack_id: 'p1',
+      creditos: [
+        { discipline_id: 'd-boxeo', credits: 8 },
+        { discipline_id: 'd-crossfit', credits: 8 },
+      ],
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      aparatos_discipline_id: null,
+    });
     expect(parseExternalReference(raw)).toEqual({
       user_id: 'u1',
       pack_id: 'p1',
-      discipline_id: 'd1',
-      credits: 6,
-      duration_days: null,
+      creditos: [
+        { discipline_id: 'd-boxeo', credits: 8 },
+        { discipline_id: 'd-crossfit', credits: 8 },
+      ],
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      aparatos_discipline_id: null,
     });
+  });
+
+  it('parsea un pase de Aparatos puro (creditos vacío, incluye_aparatos true, dias_vigencia real)', () => {
+    const raw = JSON.stringify({
+      user_id: 'u1',
+      pack_id: 'p-aparatos',
+      creditos: [],
+      incluye_aparatos: true,
+      dias_vigencia: 60,
+      aparatos_discipline_id: 'd-aparatos',
+    });
+    expect(parseExternalReference(raw)).toEqual({
+      user_id: 'u1',
+      pack_id: 'p-aparatos',
+      creditos: [],
+      incluye_aparatos: true,
+      dias_vigencia: 60,
+      aparatos_discipline_id: 'd-aparatos',
+    });
+  });
+
+  it('filtra elementos de `creditos` corruptos/incompletos en vez de acreditar con datos inválidos', () => {
+    const raw = JSON.stringify({
+      user_id: 'u1',
+      pack_id: 'p1',
+      creditos: [
+        { discipline_id: 'd-boxeo', credits: 8 },
+        { discipline_id: 'd-crossfit' }, // sin credits -- se descarta
+        { credits: 5 }, // sin discipline_id -- se descarta
+        { discipline_id: 'd-kick', credits: 0 }, // 0 créditos -- se descarta
+      ],
+      incluye_aparatos: false,
+    });
+    expect(parseExternalReference(raw)?.creditos).toEqual([{ discipline_id: 'd-boxeo', credits: 8 }]);
   });
 
   it('null/vacío devuelve null sin romper', () => {
@@ -237,6 +345,8 @@ describe('parseExternalReference -- nunca confía ciegamente en el string que de
   it('JSON válido pero sin los campos obligatorios devuelve null (no acredita a nadie con datos incompletos)', () => {
     expect(parseExternalReference(JSON.stringify({ algo: 'random' }))).toBeNull();
     expect(parseExternalReference(JSON.stringify({ user_id: 'u1' }))).toBeNull();
+    // pack_id sin `creditos` (ni siquiera un array vacío) tampoco es válido.
+    expect(parseExternalReference(JSON.stringify({ user_id: 'u1', pack_id: 'p1' }))).toBeNull();
   });
 });
 

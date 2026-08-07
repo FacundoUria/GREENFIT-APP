@@ -18,7 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances, syncMyMembership } from '../../lib/creditsApi';
+import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, creditosOriginalesPara } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
@@ -397,9 +397,15 @@ export default function HomeScreen({ navigation }: any) {
                     ? b.expiresAt
                       ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
                       : 'Sin fecha de vencimiento cargada'
-                    : b.pack
-                      ? `${b.remainingCredits ?? 0} de ${b.pack.credits} clases restantes`
-                      : `${b.remainingCredits ?? 0} clases restantes`}
+                    : (() => {
+                        // El pack puede ser un combo -- lo que importa acá es
+                        // cuánto le tocaba a ESTA disciplina puntual, no el
+                        // total del combo entero.
+                        const original = creditosOriginalesPara(b.pack, b.discipline.id);
+                        return original
+                          ? `${b.remainingCredits ?? 0} de ${original} clases restantes`
+                          : `${b.remainingCredits ?? 0} clases restantes`;
+                      })()}
                 </Text>
               </View>
               <StatusBadge status={status} />
@@ -543,10 +549,7 @@ export default function HomeScreen({ navigation }: any) {
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.packRowName}>{p.name}</Text>
-                    <Text style={styles.packRowSub}>
-                      {p.discipline.name} ·{' '}
-                      {p.discipline.kind === 'membership' ? `${p.durationDays} días` : `${p.credits} créditos`}
-                    </Text>
+                    <Text style={styles.packRowSub}>{buildPackSubtitle(p)}</Text>
                   </View>
                   {buyingPackId === p.id ? (
                     <ActivityIndicator color={colors.primary} size="small" />
