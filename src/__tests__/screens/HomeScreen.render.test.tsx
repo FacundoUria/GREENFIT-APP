@@ -123,7 +123,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
 
   it('el widget de asistencia es de SOLO LECTURA: sin check-in del Admin, no hay ninguna acción para autoreportarse', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Todavía no registraste tu entrada hoy')).toBeTruthy());
+    await waitFor(() => expect(getByText('Esperando check-in en el gimnasio...')).toBeTruthy());
 
     // El viejo botón autoreportable ya no existe en ningún lado.
     expect(queryByText('¡Hoy entrené! (+100 XP)')).toBeNull();
@@ -132,7 +132,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   it('si el Admin ya acreditó la asistencia de hoy, el widget la refleja en verde', async () => {
     (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(true);
     const { getByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Entrenamiento de hoy ya registrado')).toBeTruthy());
+    await waitFor(() => expect(getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toBeTruthy());
   });
 
   it('el ícono "¿Cómo ganar XP?" abre el modal con la única regla vigente (asistencia acreditada por el Admin)', async () => {

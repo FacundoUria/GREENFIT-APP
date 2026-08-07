@@ -21,7 +21,7 @@ import { fetchPacks, fetchUserBalances, syncMyMembership } from '../../lib/credi
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { formatCurrency } from '../../lib/currency';
-import { formatClassTime, formatDayLabel, getCountdown } from '../../lib/classTime';
+import { formatClassTime, formatCountdownEmpieza, formatDayLabel, getCountdown } from '../../lib/classTime';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
@@ -438,7 +438,7 @@ export default function HomeScreen({ navigation }: any) {
               </Text>
               {nextBookingCountdown && !nextBookingCountdown.isPast && (
                 <Text style={[styles.bannerCountdown, nextBookingCountdown.isSoon && styles.bannerCountdownSoon]}>
-                  {nextBookingCountdown.label}
+                  {formatCountdownEmpieza(nextBookingCountdown)}
                 </Text>
               )}
             </View>

@@ -39,19 +39,16 @@ export default function AsistenciaHoyStatus({ userId }: AsistenciaHoyStatusProps
 
   if (isLoading) return null;
 
+  const texto = yaRegistrado ? '¡Seba registró tu asistencia! Sumaste +100 XP hoy' : 'Esperando check-in en el gimnasio...';
+
   return (
-    <View
-      style={[styles.status, yaRegistrado && styles.statusDone]}
-      accessibilityLabel={yaRegistrado ? 'Entrenamiento de hoy ya registrado' : 'Todavía no registraste tu entrada hoy'}
-    >
+    <View style={[styles.status, yaRegistrado && styles.statusDone]} accessibilityLabel={texto}>
       <Ionicons
         name={yaRegistrado ? 'checkmark-circle' : 'time-outline'}
         size={18}
         color={yaRegistrado ? colors.primary : colors.textSecondary}
       />
-      <Text style={[styles.text, yaRegistrado && styles.textDone]}>
-        {yaRegistrado ? 'Entrenamiento de hoy ya registrado' : 'Todavía no registraste tu entrada hoy'}
-      </Text>
+      <Text style={[styles.text, yaRegistrado && styles.textDone]}>{texto}</Text>
     </View>
   );
 }

@@ -46,3 +46,14 @@ export function getCountdown(startTime: string): Countdown {
   const diffDays = Math.round(diffHours / 24);
   return { label: `En ${diffDays} ${diffDays === 1 ? 'día' : 'días'}`, isSoon: false, isPast: false };
 }
+
+// Variante de getCountdown() para contextos donde conviene dejar explícito
+// que la clase todavía no arrancó (ej. el banner "Tu próxima clase" de
+// Home: "CrossFit · Hoy 19:00 hs" + "Empieza en 1 hora" abajo) -- mismo
+// cálculo, mismo `isSoon`/`isPast`, solo cambia el texto del label. No se
+// tocó getCountdown() en sí porque también lo usan las tarjetas de Agenda,
+// donde "En 3 horas" como remate corto de la fila ya funciona bien.
+export function formatCountdownEmpieza(countdown: Countdown): string {
+  if (countdown.isPast) return countdown.label;
+  return countdown.label.replace(/^Faltan /, 'Empieza en ').replace(/^En /, 'Empieza en ');
+}

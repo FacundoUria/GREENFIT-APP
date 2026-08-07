@@ -40,6 +40,23 @@ export const CLASE_HOY = {
   disciplines: { is_active: true },
 };
 
+// Franja horaria informativa de un pase libre (ej. Aparatos) -- checklist
+// punto 2: show_in_agenda=false la saca de la Agenda de RESERVAS de la PWA
+// (sigue mostrándose en la Landing, que filtra solo por is_active, columna
+// aparte).
+export const CLASE_APARATOS_HOY = {
+  id: 'class-aparatos-hoy',
+  title: 'Aparatos libre',
+  discipline_id: DISCIPLINA_APARATOS.id,
+  instructor: null,
+  location: null,
+  capacity: 30,
+  days_of_week: [HOY.getDay()],
+  start_time: '07:00:00',
+  end_time: '22:00:00',
+  disciplines: { is_active: true, show_in_agenda: false },
+};
+
 // Tipado como TablaFixtures (no inferido) a propósito: así un test puede
 // pushear una fila con campos extra (ej. discipline_id, ver xp-sync.spec.ts)
 // sin chocar contra el shape puntual de XP_EVENTS_BASE.

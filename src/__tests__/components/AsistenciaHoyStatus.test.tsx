@@ -17,25 +17,25 @@ describe('AsistenciaHoyStatus (solo lectura -- ya no hay autoreporte del socio)'
   it('muestra el estado neutro (no acreditado) cuando el Admin todavía no dio el check-in de hoy', async () => {
     mockedFetch.mockResolvedValue(false);
     const { getByText } = render(<AsistenciaHoyStatus userId="user-1" />);
-    await waitFor(() => expect(getByText('Todavía no registraste tu entrada hoy')).toBeTruthy());
+    await waitFor(() => expect(getByText('Esperando check-in en el gimnasio...')).toBeTruthy());
   });
 
   it('muestra el estado en verde cuando el Admin ya acreditó la asistencia de hoy', async () => {
     mockedFetch.mockResolvedValue(true);
     const { getByText } = render(<AsistenciaHoyStatus userId="user-1" />);
-    await waitFor(() => expect(getByText('Entrenamiento de hoy ya registrado')).toBeTruthy());
+    await waitFor(() => expect(getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toBeTruthy());
   });
 
   it('no tiene ninguna acción tocable -- tocar el estado no dispara ningún otorgamiento de XP', async () => {
     mockedFetch.mockResolvedValue(false);
     const { getByText, getByLabelText } = render(<AsistenciaHoyStatus userId="user-1" />);
-    await waitFor(() => expect(getByText('Todavía no registraste tu entrada hoy')).toBeTruthy());
+    await waitFor(() => expect(getByText('Esperando check-in en el gimnasio...')).toBeTruthy());
 
     // Es un <View>, no un <TouchableOpacity> -- fireEvent.press no debería
     // ni encontrar un handler que ejecutar. Confirmamos que fetch (la única
     // llamada real a la red) se llamó UNA sola vez (la carga inicial), sin
     // que "tocar" el elemento dispare una segunda petición.
-    fireEvent.press(getByLabelText('Todavía no registraste tu entrada hoy'));
+    fireEvent.press(getByLabelText('Esperando check-in en el gimnasio...'));
     expect(mockedFetch).toHaveBeenCalledTimes(1);
   });
 

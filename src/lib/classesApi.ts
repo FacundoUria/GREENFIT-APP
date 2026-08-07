@@ -12,7 +12,7 @@ export type ClassWithBookings = GymClass & {
 };
 
 const CLASS_COLUMNS =
-  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time, disciplines(is_active)';
+  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time, disciplines(is_active, show_in_agenda)';
 
 function mapClass(c: {
   id: string;
@@ -70,9 +70,14 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
 
   // Una clase de una disciplina desactivada deja de ofrecerse para NUEVAS
   // reservas -- no se borra ni se toca su historial, solo desaparece acá.
+  // `show_in_agenda === false` es distinto de is_active: la disciplina
+  // sigue activa/vendible (Aparatos, packs, etc.), simplemente sus franjas
+  // horarias son informativas (pase libre, sin turnos que reservar) y no
+  // deben listarse acá como "clases para reservar" (ver checklist punto 2 /
+  // supabase_migration_show_in_agenda.sql).
   const classesActivas = classes.filter((c) => {
     const disciplina = Array.isArray(c.disciplines) ? c.disciplines[0] : c.disciplines;
-    return disciplina?.is_active !== false;
+    return disciplina?.is_active !== false && disciplina?.show_in_agenda !== false;
   });
   if (classesActivas.length === 0) return [];
 
