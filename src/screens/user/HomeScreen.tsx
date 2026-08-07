@@ -30,7 +30,19 @@ import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 import HoyEntreneButton from '../../components/HoyEntreneButton';
 import XpProgressRing from '../../components/XpProgressRing';
 import XpInfoModal from '../../components/XpInfoModal';
-import { fetchTotalXp, calcularResumenXp, XP_POR_NIVEL } from '../../lib/xpApi';
+import AthleteProfileCard from '../../components/AthleteProfileCard';
+import GoogleReviewCard from '../../components/GoogleReviewCard';
+import GlobalAlertBanner from '../../components/GlobalAlertBanner';
+import {
+  fetchTotalXp,
+  calcularResumenXp,
+  fetchFechasAsistencia,
+  calcularRachaDias,
+  fetchClasesDelMes,
+  fetchMiembroDesde,
+  XP_POR_NIVEL,
+} from '../../lib/xpApi';
+import { useAvatarUpload } from '../../hooks/useAvatarUpload';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
@@ -94,7 +106,7 @@ async function fetchUpcomingBookings(userId: string): Promise<NextBooking[]> {
 
 export default function HomeScreen({ navigation }: any) {
   useTicker();
-  const { user } = useAuth();
+  const { user, updateAvatarUrl } = useAuth();
   const { configuracion } = useConfiguracion();
   const [balances, setBalances] = useState<UserCredit[]>([]);
   const [upcomingBookings, setUpcomingBookings] = useState<NextBooking[]>([]);
@@ -108,6 +120,13 @@ export default function HomeScreen({ navigation }: any) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [xpInfoVisible, setXpInfoVisible] = useState(false);
+  // Mismos 3 datos que ya mostraba la tarjeta de perfil gamificada en Mi
+  // Perfil (racha/miembro desde/clases del mes) -- ahora también arriba de
+  // todo acá, así que hacen falta también en el load() de esta pantalla.
+  const [racha, setRacha] = useState(0);
+  const [miembroDesde, setMiembroDesde] = useState<string | null>(null);
+  const [clasesDelMes, setClasesDelMes] = useState(0);
+  const { isUploadingAvatar, handleAvatarPress } = useAvatarUpload(user?.id, updateAvatarUrl);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -120,16 +139,23 @@ export default function HomeScreen({ navigation }: any) {
       // correr antes de que la reparación termine de insertar.
       await syncMyMembership();
 
-      const [balancesResult, bookingsResult, packsResult, xpResult] = await Promise.all([
-        fetchUserBalances(user.id),
-        fetchUpcomingBookings(user.id),
-        fetchPacks({ activeOnly: true }),
-        fetchTotalXp(user.id),
-      ]);
+      const [balancesResult, bookingsResult, packsResult, xpResult, clasesResult, desdeResult, fechasAsistencia] =
+        await Promise.all([
+          fetchUserBalances(user.id),
+          fetchUpcomingBookings(user.id),
+          fetchPacks({ activeOnly: true }),
+          fetchTotalXp(user.id),
+          fetchClasesDelMes(user.id),
+          fetchMiembroDesde(user.id),
+          fetchFechasAsistencia(user.id),
+        ]);
       setBalances(balancesResult);
       setUpcomingBookings(bookingsResult);
       setPacks(packsResult);
       setTotalXp(xpResult);
+      setClasesDelMes(clasesResult);
+      setMiembroDesde(desdeResult);
+      setRacha(calcularRachaDias(fechasAsistencia));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu información.');
     } finally {
@@ -249,6 +275,28 @@ export default function HomeScreen({ navigation }: any) {
       </View>
 
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {/* Tarjeta de perfil gamificada -- misma que ya vivía en Mi Perfil
+          (avatar, nivel, XP, mascota, racha/miembro desde/clases), ahora
+          también arriba de todo en Inicio. Mi Perfil se deja intacto (sigue
+          teniendo la suya): esto es una segunda vidriera del mismo dato
+          real, no un reemplazo. */}
+      {!!user && (
+        <View style={styles.athleteCardWrap}>
+          <AthleteProfileCard
+            name={user.name}
+            avatarUrl={user.avatarUrl}
+            nivel={resumenXp.nivel}
+            xpEnNivel={resumenXp.xpEnNivel}
+            racha={racha}
+            miembroDesde={miembroDesde}
+            clasesDelMes={clasesDelMes}
+            isUploadingAvatar={isUploadingAvatar}
+            onAvatarPress={handleAvatarPress}
+            onXpInfoPress={() => setXpInfoVisible(true)}
+          />
+        </View>
+      )}
 
       {/* Hero Card: credencial + estado del pase, todo en un solo lugar en
           vez de una tarjeta por disciplina repitiendo el mismo borde/padding. */}
@@ -397,6 +445,8 @@ export default function HomeScreen({ navigation }: any) {
         </View>
       )}
 
+      <GoogleReviewCard />
+
       <CancelBookingModal
         visible={showCancelModal}
         className={nextBooking?.title ?? ''}
@@ -471,6 +521,7 @@ export default function HomeScreen({ navigation }: any) {
       </Modal>
 
       <XpInfoModal visible={xpInfoVisible} onClose={() => setXpInfoVisible(false)} />
+      <GlobalAlertBanner activa={configuracion.alertaActiva} mensaje={configuracion.alertaMensaje} />
     </ScrollView>
   );
 }
@@ -506,6 +557,8 @@ const styles = StyleSheet.create({
   bellBadgeText: { color: colors.white, fontSize: 9.5, fontWeight: '800' },
   error: { color: colors.danger, marginBottom: 12 },
   text: { color: colors.textSecondary, lineHeight: 20 },
+
+  athleteCardWrap: { marginBottom: 16 },
 
   // Hero Card
   heroCard: {

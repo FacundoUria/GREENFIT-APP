@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -20,6 +21,8 @@ import {
   getTodayCompletions,
   markExerciseCompleted,
   unmarkExerciseCompleted,
+  getUserExerciseWeights,
+  saveExerciseWeight,
 } from '../../lib/routinesApi';
 import { formatDateOnly } from '../../lib/classesApi';
 import { Routine, RoutineExercise } from '../../types';
@@ -57,6 +60,40 @@ function GroupHeader({ grupo }: { grupo: string }) {
   );
 }
 
+// Carga real editable -- distinta de bloque.weightSuggestion (la sugerencia
+// fija que cargó el entrenador, igual para cualquier socio con esta
+// rutina). Estado local propio para no disparar un guardado en cada tecla:
+// solo persiste al perder el foco, y solo si realmente cambió algo.
+function CargaInput({ valor, onGuardar }: { valor: string; onGuardar: (nuevoValor: string) => void }) {
+  const [texto, setTexto] = useState(valor);
+
+  useEffect(() => {
+    setTexto(valor);
+  }, [valor]);
+
+  function handleBlur() {
+    const limpio = texto.trim();
+    if (limpio && limpio !== valor.trim()) onGuardar(limpio);
+    else if (!limpio) setTexto(valor); // no se guardan cargas vacías -- vuelve al último valor real
+  }
+
+  return (
+    <View style={styles.cargaChip}>
+      <Ionicons name="barbell-outline" size={13} color={colors.textSecondary} />
+      <TextInput
+        value={texto}
+        onChangeText={setTexto}
+        onBlur={handleBlur}
+        placeholder="Carga"
+        placeholderTextColor={colors.textSecondary}
+        style={styles.cargaInput}
+        accessibilityLabel="Carga (kg) usada en este ejercicio"
+      />
+      <Ionicons name="pencil-outline" size={11} color={colors.textSecondary} />
+    </View>
+  );
+}
+
 // Fila de checklist ancha: nombre + sub-línea con íconos a la izquierda,
 // checkbox táctil gigante (48x48 mín.) a la derecha. Al completarse, una
 // transición suave (Animated, no LayoutAnimation -- no-op en react-native-web,
@@ -65,12 +102,16 @@ function GroupHeader({ grupo }: { grupo: string }) {
 function ExerciseRow({
   bloque,
   completado,
+  peso,
   onToggle,
+  onGuardarPeso,
   onVerDemo,
 }: {
   bloque: RoutineExercise;
   completado: boolean;
+  peso: string;
   onToggle: () => void;
+  onGuardarPeso: (nuevoValor: string) => void;
   onVerDemo: (url: string) => void;
 }) {
   const anim = useRef(new Animated.Value(completado ? 1 : 0)).current;
@@ -87,9 +128,6 @@ function ExerciseRow({
   const nameOpacity = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] });
 
   const instrucciones = bloque.notes || bloque.exercise.description;
-  const cargaYDescanso = [bloque.weightSuggestion, bloque.restSeconds ? `${bloque.restSeconds}s descanso` : null].filter(
-    Boolean,
-  );
 
   return (
     <Animated.View style={[styles.exerciseRow, { borderColor }]}>
@@ -100,9 +138,11 @@ function ExerciseRow({
 
         <View style={styles.metaLine}>
           <MetaChip icon="repeat-outline" text={`${bloque.sets ?? '-'} × ${bloque.reps || '-'}`} />
-          {cargaYDescanso.map((texto) => (
-            <MetaChip key={texto} icon={texto === bloque.weightSuggestion ? 'barbell-outline' : 'time-outline'} text={texto!} />
-          ))}
+          {/* Carga editable -- recuerda la última que el socio cargó a mano
+              (persistente entre sesiones), no la sugerencia fija del
+              entrenador. Chip aparte de Descanso porque este SÍ se toca. */}
+          <CargaInput valor={peso} onGuardar={onGuardarPeso} />
+          {!!bloque.restSeconds && <MetaChip icon="time-outline" text={`${bloque.restSeconds}s descanso`} />}
         </View>
 
         {!!instrucciones && (
@@ -149,6 +189,11 @@ export default function UserRoutineScreen() {
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const [completados, setCompletados] = useState<Set<string>>(new Set());
   const [modalFinalVisible, setModalFinalVisible] = useState(false);
+  // routine_exercise_id -> última carga que el socio guardó ahí. Vacío
+  // (sin entrada) para cualquier ejercicio en el que todavía no cargó la
+  // suya -- en ese caso se muestra la sugerencia del entrenador como valor
+  // por defecto (ver `pesoDe` más abajo), sin que eso cuente como "guardado".
+  const [pesos, setPesos] = useState<Map<string, string>>(new Map());
 
   const todayStr = useMemo(() => formatDateOnly(new Date()), []);
 
@@ -156,12 +201,14 @@ export default function UserRoutineScreen() {
     if (!user) return;
     setError(null);
     try {
-      const [r, completions] = await Promise.all([
+      const [r, completions, pesosGuardados] = await Promise.all([
         getUserRoutine(user.id),
         getTodayCompletions(user.id, todayStr),
+        getUserExerciseWeights(user.id),
       ]);
       setRoutine(r);
       setCompletados(completions);
+      setPesos(pesosGuardados);
       setSelectedDayIdx((prev) => (r && prev < r.days.length ? prev : 0));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu rutina.');
@@ -224,6 +271,38 @@ export default function UserRoutineScreen() {
         return next;
       });
       Alert.alert('No se pudo guardar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+    }
+  }
+
+  // La carga que se muestra es la que el socio ya guardó ahí; si todavía no
+  // guardó ninguna, cae a la sugerencia del entrenador (weight_suggestion)
+  // como punto de partida -- nunca un campo vacío de la nada.
+  function pesoDe(bloque: RoutineExercise): string {
+    return pesos.get(bloque.id) ?? bloque.weightSuggestion ?? '';
+  }
+
+  async function handleGuardarPeso(routineExerciseId: string, nuevoValor: string) {
+    if (!user) return;
+    const anterior = pesos.get(routineExerciseId);
+
+    // Optimista, mismo criterio que el checklist: se ve al instante, se
+    // corrige sola si la escritura falla.
+    setPesos((prev) => {
+      const next = new Map(prev);
+      next.set(routineExerciseId, nuevoValor);
+      return next;
+    });
+
+    try {
+      await saveExerciseWeight(user.id, routineExerciseId, nuevoValor);
+    } catch (err) {
+      setPesos((prev) => {
+        const next = new Map(prev);
+        if (anterior === undefined) next.delete(routineExerciseId);
+        else next.set(routineExerciseId, anterior);
+        return next;
+      });
+      Alert.alert('No se pudo guardar la carga', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -326,7 +405,9 @@ export default function UserRoutineScreen() {
                     key={bloque.id}
                     bloque={bloque}
                     completado={completados.has(bloque.id)}
+                    peso={pesoDe(bloque)}
                     onToggle={() => handleToggle(bloque.id)}
+                    onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.id, nuevoValor)}
                     onVerDemo={setVideoUrl}
                   />
                 ))}
@@ -497,6 +578,29 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   metaChipText: { color: colors.textSecondary, fontSize: 12.5, fontWeight: '600' },
+
+  // Mismo look que metaChip, pero es un campo editable de verdad -- borde
+  // sutil + ícono de lápiz para que se note que se puede tocar y escribir,
+  // sin que la fila entera se vea como un formulario.
+  cargaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.background,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  cargaInput: {
+    color: colors.textPrimary,
+    fontSize: 12.5,
+    fontWeight: '600',
+    minWidth: 40,
+    maxWidth: 90,
+    paddingVertical: 2,
+  },
 
   instructionsBox: {
     flexDirection: 'row',

@@ -93,4 +93,56 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
     await expect(page.getByText('¡Buen entrenamiento! 💪')).toBeVisible();
     await expect(page.getByText('Llevás 1 de 2 ejercicios de hoy -- lo que sumaste ya cuenta.')).toBeVisible();
   });
+
+  test('la Carga arranca en la sugerencia del entrenador y editarla la guarda de verdad (no solo en memoria)', async ({
+    page,
+  }) => {
+    const tablas = {
+      ...tablasBase(),
+      routines: [ROUTINE],
+      routine_days: [DAY_1],
+      routine_completions: [],
+      routine_exercise_weights: [],
+    };
+    await loginComoSocio(page, { tables: tablas });
+
+    await irATab(page, 'Mi Rutina');
+
+    // Press de banca (weight_suggestion: '20kg') todavía no tiene una carga
+    // real guardada por el socio -- arranca mostrando la sugerencia.
+    const cargaPressBanca = page.getByLabel('Carga (kg) usada en este ejercicio').first();
+    await expect(cargaPressBanca).toHaveValue('20kg');
+
+    await cargaPressBanca.fill('25kg');
+    await cargaPressBanca.blur();
+
+    // Quedó guardado en el mock (routine_exercise_weights), no solo en
+    // memoria -- refleja lo que en producción persiste vía saveExerciseWeight.
+    await expect
+      .poll(() =>
+        tablas.routine_exercise_weights.some((w: any) => w.routine_exercise_id === 'e2e-re-1' && w.weight_used === '25kg')
+      )
+      .toBe(true);
+  });
+
+  test('si el socio ya había guardado una carga antes, la ve precargada en vez de la sugerencia del entrenador', async ({
+    page,
+  }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        routines: [ROUTINE],
+        routine_days: [DAY_1],
+        routine_completions: [],
+        // Ya cargó 25kg en una sesión anterior -- distinto de los 20kg que
+        // sugiere el entrenador (weight_suggestion de Press de banca).
+        routine_exercise_weights: [
+          { id: 'w-1', user_id: SOCIO_DEMO.id, routine_exercise_id: 'e2e-re-1', weight_used: '25kg' },
+        ],
+      },
+    });
+
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByLabel('Carga (kg) usada en este ejercicio').first()).toHaveValue('25kg');
+  });
 });

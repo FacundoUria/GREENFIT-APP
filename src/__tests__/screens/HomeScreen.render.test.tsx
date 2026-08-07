@@ -19,7 +19,16 @@ jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', avatarUrl: null } }),
 }));
 jest.mock('../../context/ConfiguracionContext', () => ({
-  useConfiguracion: () => ({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120, aliasCvu: null, titularCuenta: null } }),
+  useConfiguracion: () => ({
+    configuracion: {
+      diasTolerancia: 5,
+      limiteCancelacionMinutos: 120,
+      aliasCvu: null,
+      titularCuenta: null,
+      alertaActiva: false,
+      alertaMensaje: '',
+    },
+  }),
 }));
 jest.mock('../../hooks/useTicker', () => ({ useTicker: () => {} }));
 jest.mock('../../lib/notificationsBadge', () => ({ fetchUnreadNotificationCount: jest.fn().mockResolvedValue(0) }));
@@ -30,16 +39,22 @@ jest.mock('../../lib/creditsApi', () => ({
 }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
 
-// fetchTotalXp/checkXpDisponible/fetchAsistenciaHoyRegistrada/otorgarXpAsistenciaDiaria
-// se mockean (tocan red); calcularResumenXp/XP_POR_NIVEL quedan REALES (son
-// lógica pura, ya cubierta aparte en xpApi.test.ts) para no reinventar la
-// fórmula acá.
+// fetchTotalXp/checkXpDisponible/fetchAsistenciaHoyRegistrada/
+// otorgarXpAsistenciaDiaria/fetchClasesDelMes/fetchMiembroDesde/
+// fetchFechasAsistencia se mockean (tocan red -- makeChain de abajo no
+// implementa .single()/.maybeSingle(), así que la versión real de
+// fetchMiembroDesde rompería contra ese mock); calcularResumenXp/
+// calcularRachaDias/XP_POR_NIVEL quedan REALES (son lógica pura, ya
+// cubierta aparte en xpApi.test.ts) para no reinventar la fórmula acá.
 jest.mock('../../lib/xpApi', () => ({
   ...jest.requireActual('../../lib/xpApi'),
   fetchTotalXp: jest.fn(),
   checkXpDisponible: jest.fn(),
   fetchAsistenciaHoyRegistrada: jest.fn(),
   otorgarXpAsistenciaDiaria: jest.fn(),
+  fetchClasesDelMes: jest.fn(),
+  fetchMiembroDesde: jest.fn(),
+  fetchFechasAsistencia: jest.fn(),
 }));
 
 import { supabase } from '../../lib/supabase';
@@ -48,6 +63,9 @@ import {
   checkXpDisponible,
   fetchAsistenciaHoyRegistrada,
   otorgarXpAsistenciaDiaria,
+  fetchClasesDelMes,
+  fetchMiembroDesde,
+  fetchFechasAsistencia,
 } from '../../lib/xpApi';
 import HomeScreen from '../../screens/user/HomeScreen';
 
@@ -72,6 +90,9 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     (checkXpDisponible as jest.Mock).mockResolvedValue(true);
     (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(false);
     (otorgarXpAsistenciaDiaria as jest.Mock).mockResolvedValue('otorgado');
+    (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
+    (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
+    (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
   });
 
   it('NO renderiza la tarjeta "Mi Pase / Comprar" (removida -- esa gestión ahora vive en Perfil > Pagos y Facturas)', async () => {
@@ -106,10 +127,13 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   });
 
   it('el ícono "¿Cómo ganar XP?" abre el modal con las reglas', async () => {
-    const { getByText, getByLabelText } = render(<HomeScreen navigation={navigation} />);
+    const { getByText, getAllByLabelText } = render(<HomeScreen navigation={navigation} />);
     await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
 
-    fireEvent.press(getByLabelText('¿Cómo ganar XP?'));
+    // Hay 2 en pantalla ahora (la tarjeta de perfil gamificada de arriba +
+    // el widget de Progreso Diario) -- las dos abren el mismo modal
+    // (mismo estado xpInfoVisible), así que alcanza con tocar cualquiera.
+    fireEvent.press(getAllByLabelText('¿Cómo ganar XP?')[0]);
 
     await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
     expect(getByText('Asistencia diaria / ¡Hoy entrené!')).toBeTruthy();

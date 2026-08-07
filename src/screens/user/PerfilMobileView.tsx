@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Linking, Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
-import { supabase } from '../../lib/supabase';
 import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import {
@@ -15,10 +13,11 @@ import {
   fetchFechasAsistencia,
   calcularRachaDias,
   fetchClasesDelMes,
-  XP_POR_NIVEL,
+  fetchMiembroDesde,
 } from '../../lib/xpApi';
-import { checkAvatarDisponible, subirAvatarPerfil } from '../../lib/avatarApi';
-import Avatar, { getInitials } from '../../components/Avatar';
+import { useAvatarUpload } from '../../hooks/useAvatarUpload';
+import { getInitials } from '../../components/Avatar';
+import AthleteProfileCard from '../../components/AthleteProfileCard';
 import XpInfoModal from '../../components/XpInfoModal';
 import { UserCredit } from '../../types';
 
@@ -47,28 +46,6 @@ const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: 
   vencido: { label: 'Vencido', color: colors.danger, bg: 'rgba(224, 83, 83, 0.15)' },
 };
 
-// Ilustración de la mascota (Pitbull GreenFit) con alta presencia visual --
-// reemplaza al viejo watermark de esquina (perro.png a 96x96, opacity 0.1).
-// `assets/perfil-mascota.png` es un recorte PROPIO (ffmpeg) de UNA sola
-// pose (la de doble bíceps, 3er cuadrante de una grilla de 4 que el usuario
-// pasó con el fondo ya removido de verdad -- PNG con canal alfa real) --
-// solo la silueta, sin ningún glow/aura detrás: el fondo de esa zona es el
-// mismo colors.surface plano de toda la tarjeta, sin ninguna capa extra.
-const MASCOT_WIDTH = 190;
-
-function MascotHero() {
-  return (
-    <View style={styles.mascotWrap} pointerEvents="none">
-      <Image
-        source={require('../../../assets/perfil-mascota.png')}
-        style={[styles.mascotHero]}
-        resizeMode="cover"
-        accessibilityLabel="Mascota GreenFit"
-      />
-    </View>
-  );
-}
-
 function StatusBadge({ status }: { status: MembershipStatus }) {
   const meta = STATUS_META[status];
   return (
@@ -76,22 +53,6 @@ function StatusBadge({ status }: { status: MembershipStatus }) {
       <Text style={[styles.statusBadgeText, { color: meta.color }]}>{meta.label}</Text>
     </View>
   );
-}
-
-const MESES_ABREV = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-function formatMesAnio(dateStr: string): string {
-  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`);
-  return `${MESES_ABREV[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-// `created_at` de `profiles` no lo trae AuthContext (solo pide id/full_name/
-// dni/phone/role/active/avatar_url) -- se pide acá aparte, mismo criterio
-// que ya usa ProfileScreen.tsx para sus propios campos extra, en vez de
-// tocar la query de AuthContext.
-async function fetchMiembroDesde(userId: string): Promise<string | null> {
-  const { data, error } = await supabase.from('profiles').select('created_at').eq('id', userId).single();
-  if (error || !data?.created_at) return null;
-  return data.created_at as string;
 }
 
 export type PerfilAccesoDirecto =
@@ -153,7 +114,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
   const [comingSoonLabel, setComingSoonLabel] = useState<string | null>(null);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [xpInfoVisible, setXpInfoVisible] = useState(false);
-  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const { isUploadingAvatar, handleAvatarPress } = useAvatarUpload(user?.id, updateAvatarUrl);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -212,41 +173,6 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
     comingSoonTimer.current = setTimeout(() => setComingSoonLabel(null), 2400);
   }
 
-  // Tocar el avatar deja cambiar la foto de perfil -- sube a Storage
-  // (bucket 'avatars') y actualiza profiles.avatar_url; updateAvatarUrl()
-  // refleja el cambio al instante en memoria (AuthContext) sin esperar un
-  // refetch completo del perfil.
-  async function handleAvatarPress() {
-    if (!user || isUploadingAvatar) return;
-    const disponible = await checkAvatarDisponible();
-    if (!disponible) {
-      Alert.alert('Función no disponible', 'La foto de perfil todavía no está activada. Probá de nuevo más tarde.');
-      return;
-    }
-    const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permiso.granted) {
-      Alert.alert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder cambiar tu foto de perfil.');
-      return;
-    }
-    const resultado = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.7,
-      allowsEditing: true,
-      aspect: [1, 1],
-    });
-    if (resultado.canceled || !resultado.assets[0]) return;
-
-    setIsUploadingAvatar(true);
-    try {
-      const url = await subirAvatarPerfil(user.id, resultado.assets[0].uri);
-      updateAvatarUrl(url);
-    } catch (err) {
-      Alert.alert('No se pudo actualizar la foto', err instanceof Error ? err.message : 'Intentá de nuevo.');
-    } finally {
-      setIsUploadingAvatar(false);
-    }
-  }
-
   if (!user) return null;
 
   const resumenXp = calcularResumenXp(totalXp);
@@ -273,86 +199,19 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
 
       {!!error && <Text style={styles.error}>{error}</Text>}
 
-      {/* Header de atleta gamificado */}
-      <View style={styles.athleteCard}>
-        <View style={styles.athleteHeroRow}>
-          <View style={styles.athleteInfoCol}>
-            <View style={styles.athleteTopRow}>
-              <TouchableOpacity
-                onPress={handleAvatarPress}
-                disabled={isUploadingAvatar}
-                accessibilityLabel="Cambiar foto de perfil"
-                style={styles.avatarTouchable}
-              >
-                <Avatar uri={user.avatarUrl} name={user.name} size={60} />
-                <View style={styles.avatarCameraBadge}>
-                  {isUploadingAvatar ? (
-                    <ActivityIndicator size="small" color={colors.onPrimary} />
-                  ) : (
-                    <Ionicons name="camera" size={12} color={colors.onPrimary} />
-                  )}
-                </View>
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.athleteName} numberOfLines={1}>
-                  {user.name}
-                </Text>
-                <View style={styles.levelRow}>
-                  <View style={styles.levelBadge}>
-                    <Ionicons name="flash" size={11} color={colors.onPrimary} />
-                    <Text style={styles.levelBadgeText}>NIVEL {resumenXp.nivel}</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setXpInfoVisible(true)}
-                    hitSlop={8}
-                    accessibilityLabel="¿Cómo ganar XP?"
-                  >
-                    <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.xpBarWrap}>
-              <View style={styles.xpBarTrack}>
-                <View
-                  style={[styles.xpBarFill, { width: `${(resumenXp.xpEnNivel / XP_POR_NIVEL) * 100}%` }]}
-                />
-              </View>
-              <Text style={styles.xpBarText}>
-                {resumenXp.xpEnNivel} / {XP_POR_NIVEL} XP
-              </Text>
-            </View>
-          </View>
-
-          <MascotHero />
-        </View>
-
-        <View style={styles.statsRow}>
-          <View style={styles.statCol}>
-            <Ionicons name="flame" size={16} color={colors.warning} />
-            <Text style={styles.statValue} testID="stat-racha">
-              {racha}
-            </Text>
-            <Text style={styles.statLabel}>Racha</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statCol}>
-            <Ionicons name="calendar" size={16} color={colors.primary} />
-            <Text style={styles.statValue} testID="stat-miembro-desde">
-              {miembroDesde ? formatMesAnio(miembroDesde) : '--'}
-            </Text>
-            <Text style={styles.statLabel}>Miembro desde</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statCol}>
-            <Ionicons name="checkmark-done" size={16} color={colors.primary} />
-            <Text style={styles.statValue} testID="stat-clases">
-              {clasesDelMes}
-            </Text>
-            <Text style={styles.statLabel}>Clases (mes)</Text>
-          </View>
-        </View>
+      <View style={{ marginBottom: 18 }}>
+        <AthleteProfileCard
+          name={user.name}
+          avatarUrl={user.avatarUrl}
+          nivel={resumenXp.nivel}
+          xpEnNivel={resumenXp.xpEnNivel}
+          racha={racha}
+          miembroDesde={miembroDesde}
+          clasesDelMes={clasesDelMes}
+          isUploadingAvatar={isUploadingAvatar}
+          onAvatarPress={handleAvatarPress}
+          onXpInfoPress={() => setXpInfoVisible(true)}
+        />
       </View>
 
       {/* Plan actual */}
@@ -430,96 +289,6 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
   error: { color: colors.danger, marginBottom: 12 },
-
-  athleteCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    overflow: 'hidden',
-  },
-  // `position:relative` (explícito, sin minHeight forzado) -- el alto de
-  // esta fila lo define SOLO su contenido en flujo normal (athleteInfoCol);
-  // mascotWrap es absoluto, así que no participa del cálculo de alto de
-  // flexbox. Antes había un minHeight:210 fijo pensado para darle aire al
-  // Pitbull, pero como athleteInfoCol es más bajo que eso, dejaba un hueco
-  // vacío entre la barra de XP y la fila de stats -- se saca por completo.
-  athleteHeroRow: { position: 'relative', flexDirection: 'row', alignItems: 'flex-start' },
-  // paddingRight reserva el espacio del Pitbull (absoluto, sin ocupar hueco
-  // en el flujo) para que el nombre/nivel/barra de XP nunca queden debajo.
-  // zIndex explícito: el texto SIEMPRE queda en capa superior al Pitbull,
-  // aunque algún cambio futuro haga que se toquen los bordes.
-  athleteInfoCol: { flex: 1, minWidth: 0, paddingRight: MASCOT_WIDTH - 50, zIndex: 2 },
-  // bottom:0 (no top+bottom estirado) -- el borde inferior del torso queda
-  // pegado al final REAL de la fila (que ahora es tan alta como su
-  // contenido, no un minHeight artificial), justo antes de la línea
-  // divisoria de Racha/Miembro desde/Clases. Alto fijo generoso para que
-  // el Pitbull sobresalga por arriba (se recorta prolijo contra el
-  // overflow:hidden + borderRadius de athleteCard, no contra un hueco).
-  // bottom NEGATIVO a propósito: el final real de athleteHeroRow (bottom:0)
-  // no es la línea divisoria visible -- esa vive ~34px más abajo (el
-  // marginTop+paddingTop de statsRow), así que sin este offset quedaba un
-  // hueco entre la cintura del Pitbull y la línea. Empujarlo hacia abajo
-  // además ayuda a que la cabeza completa entre en la zona no recortada
-  // por el overflow:hidden de la tarjeta (antes quedaba más arriba, más
-  // cerca del borde de recorte).
-  mascotWrap: {
-    position: 'absolute',
-    bottom: -30,
-    right: 0,
-    width: MASCOT_WIDTH,
-    height: 175,
-  },
-  // cover (no contain): llena el contenedor de punta a punta -- prioriza
-  // "sin vacíos" por sobre mostrar la silueta completa, mismo criterio que
-  // la maqueta de referencia (el Pitbull sangra por los bordes del recorte).
-  mascotHero: { width: '100%', height: '100%' },
-  athleteTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatarTouchable: { position: 'relative' },
-  avatarCameraBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  athleteName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
-  levelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
-  levelBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    paddingVertical: 3,
-    paddingHorizontal: 9,
-  },
-  levelBadgeText: { color: colors.onPrimary, fontSize: 10.5, fontWeight: '800', letterSpacing: 0.4 },
-  xpBarWrap: { marginTop: 14, gap: 4 },
-  xpBarTrack: { height: 8, borderRadius: 4, backgroundColor: colors.background, overflow: 'hidden' },
-  xpBarFill: { height: 8, borderRadius: 4, backgroundColor: colors.primary },
-  xpBarText: { color: colors.textSecondary, fontSize: 10.5, fontWeight: '700', alignSelf: 'flex-end' },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 18,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: colors.surfaceAlt,
-  },
-  statCol: { flex: 1, alignItems: 'center', gap: 4 },
-  statDivider: { width: 1, height: 32, backgroundColor: colors.surfaceAlt },
-  statValue: { color: colors.textPrimary, fontSize: 14, fontWeight: '800' },
-  statLabel: { color: colors.textSecondary, fontSize: 10.5 },
 
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   sectionTitle: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },

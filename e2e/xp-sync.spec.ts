@@ -44,8 +44,11 @@ test('un check-in de Musculación otorgado desde el Admin se refleja en el XP de
 
   await irATab(page, 'Perfil');
   await expect(page.getByText('Mi Perfil')).toBeVisible();
-  await expect(page.getByText('NIVEL 1')).toBeVisible();
-  await expect(page.getByText('0 / 500 XP')).toBeVisible();
+  // `.last()`: Inicio (montado de fondo, con su propia tarjeta de perfil
+  // gamificada) ya mostró su propio "NIVEL 1"/"0 / 500 XP" al montar --
+  // Perfil se montó DESPUÉS, es la última copia en el árbol.
+  await expect(page.getByText('NIVEL 1').last()).toBeVisible();
+  await expect(page.getByText('0 / 500 XP').last()).toBeVisible();
 
   // Simula el INSERT que hace admin_otorgar_checkin_musculacion en el
   // Admin -- misma forma exacta (ver supabase_migration_xp_disciplina.sql):
@@ -68,6 +71,6 @@ test('un check-in de Musculación otorgado desde el Admin se refleja en el XP de
   await irATab(page, 'Inicio');
   await irATab(page, 'Perfil');
 
-  await expect(page.getByText('NIVEL 1')).toBeVisible();
-  await expect(page.getByText('100 / 500 XP')).toBeVisible();
+  await expect(page.getByText('NIVEL 1').last()).toBeVisible();
+  await expect(page.getByText('100 / 500 XP').last()).toBeVisible();
 });

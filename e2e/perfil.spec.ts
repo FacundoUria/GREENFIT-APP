@@ -17,22 +17,28 @@ test.describe('PWA -- Mi Perfil', () => {
     await expect(page.getByText('Mi Perfil')).toBeVisible();
 
     // Nivel real: 700 + 450 = 1150 XP -> NIVEL 3, 150/500 de progreso.
-    await expect(page.getByText('NIVEL 3')).toBeVisible();
-    await expect(page.getByText('150 / 500 XP')).toBeVisible();
+    // `.last()`: Inicio (montado de fondo) ahora tiene su PROPIA tarjeta de
+    // perfil gamificada con los mismos datos/testIDs -- Perfil se montó
+    // DESPUÉS (recién al navegar acá), así que es la última en el árbol.
+    await expect(page.getByText('NIVEL 3').last()).toBeVisible();
+    await expect(page.getByText('150 / 500 XP').last()).toBeVisible();
 
     // Avatar real (no el fallback de iniciales) -- sincronizado desde
     // profiles.avatar_url. React Native Web puede renderizar <Image> como
     // <img src> o como un <div> con background-image según la versión --
     // se busca la URL en cualquiera de las dos formas en vez de asumir una.
-    await expect(page.locator(`img[src*="avatar.jpg"], [style*="avatar.jpg"]`).first()).toBeVisible();
+    // `.last()` (no `.first()`): Inicio también renderiza el mismo avatar
+    // ahora (su propia tarjeta de perfil), pero montado de fondo/oculto --
+    // el de Perfil, el que está realmente visible, es el último en el DOM.
+    await expect(page.locator(`img[src*="avatar.jpg"], [style*="avatar.jpg"]`).last()).toBeVisible();
     // Y el fallback de iniciales ("FE") NO debe estar -- confirma que
     // realmente se está usando la foto, no cayendo al fallback por error.
     await expect(page.getByText('FE', { exact: true })).toHaveCount(0);
 
     // Racha (2 días consecutivos: hoy + ayer) y "Clases (mes)" (2 días
     // distintos con asistencia este mes) -- ya no un placeholder fijo.
-    await expect(page.getByTestId('stat-racha')).toHaveText('2');
-    await expect(page.getByTestId('stat-clases')).toHaveText('2');
+    await expect(page.getByTestId('stat-racha').last()).toHaveText('2');
+    await expect(page.getByTestId('stat-clases').last()).toHaveText('2');
   });
 
   test('el ícono "¿Cómo ganar XP?" abre el modal con las 4 reglas', async ({ page }) => {

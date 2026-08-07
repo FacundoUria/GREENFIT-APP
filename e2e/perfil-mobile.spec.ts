@@ -22,22 +22,27 @@ test.describe('PWA -- Mi Perfil (viewport mobile real)', () => {
     await irATab(page, 'Perfil');
     await expect(page.getByText('Mi Perfil')).toBeVisible();
 
-    // Nivel + barra de XP (700 + 450 = 1150 XP -> NIVEL 3, 150/500).
-    await expect(page.getByText('NIVEL 3')).toBeVisible();
-    await expect(page.getByText('150 / 500 XP')).toBeVisible();
+    // Nivel + barra de XP (700 + 450 = 1150 XP -> NIVEL 3, 150/500). `.last()`
+    // en todos estos: Inicio (montado de fondo) ahora tiene su PROPIA
+    // tarjeta de perfil gamificada con los mismos datos/testIDs -- Perfil se
+    // montó DESPUÉS (recién al navegar acá), así que es la última en el árbol.
+    await expect(page.getByText('NIVEL 3').last()).toBeVisible();
+    await expect(page.getByText('150 / 500 XP').last()).toBeVisible();
 
     // Stats reales (racha/clases del mes) -- visibles y sin recortarse
     // fuera de la pantalla en un viewport angosto de celular.
-    await expect(page.getByTestId('stat-racha')).toHaveText('2');
-    await expect(page.getByTestId('stat-clases')).toHaveText('2');
-    await expect(page.getByTestId('stat-racha')).toBeInViewport();
-    await expect(page.getByTestId('stat-clases')).toBeInViewport();
+    await expect(page.getByTestId('stat-racha').last()).toHaveText('2');
+    await expect(page.getByTestId('stat-clases').last()).toHaveText('2');
+    await expect(page.getByTestId('stat-racha').last()).toBeInViewport();
+    await expect(page.getByTestId('stat-clases').last()).toBeInViewport();
 
-    // Avatar real del socio.
-    await expect(page.locator(`img[src*="avatar.jpg"], [style*="avatar.jpg"]`).first()).toBeVisible();
+    // Avatar real del socio. `.last()`: Inicio (montado de fondo/oculto)
+    // también tiene su propio avatar ahora -- el de Perfil, el visible, es
+    // el último en el DOM.
+    await expect(page.locator(`img[src*="avatar.jpg"], [style*="avatar.jpg"]`).last()).toBeVisible();
 
     // Asset visual de la mascota (Pitbull) -- presente y realmente
     // visible (no un <img> roto ni oculto detrás de otro elemento).
-    await expect(page.getByLabel('Mascota GreenFit')).toBeVisible();
+    await expect(page.getByLabel('Mascota GreenFit').last()).toBeVisible();
   });
 });

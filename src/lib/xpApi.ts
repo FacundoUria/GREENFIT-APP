@@ -196,6 +196,16 @@ export async function fetchClasesDelMes(userId: string): Promise<number> {
   return count ?? 0;
 }
 
+// `created_at` de `profiles` (fecha de alta real) -- no lo trae AuthContext
+// (solo pide id/full_name/dni/phone/role/active/avatar_url), se pide acá
+// aparte. Usada por la tarjeta de perfil gamificada (AthleteProfileCard),
+// tanto desde Mi Perfil como desde Inicio.
+export async function fetchMiembroDesde(userId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('profiles').select('created_at').eq('id', userId).single();
+  if (error || !data?.created_at) return null;
+  return data.created_at as string;
+}
+
 export type ResultadoAsistenciaDiaria = 'otorgado' | 'ya_registrado_hoy';
 
 export async function otorgarXpAsistenciaDiaria(userId: string, modoDemo: boolean): Promise<ResultadoAsistenciaDiaria> {
