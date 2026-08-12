@@ -466,10 +466,11 @@ export default function ComunidadMobileView() {
                       <TouchableOpacity
                         style={[styles.reactionButton, post.reactedByMe && styles.reactionButtonActive]}
                         onPress={() => handleToggleReaction(post)}
+                        accessibilityLabel={post.reactedByMe ? 'Quitar reacción' : 'Reaccionar'}
                       >
                         <Text style={styles.reactionEmoji}>💪</Text>
                         <Text style={[styles.reactionText, post.reactedByMe && styles.reactionTextActive]}>
-                          ¡A tope!{post.reactionCount > 0 ? ` · ${post.reactionCount}` : ''}
+                          {post.reactionCount}
                         </Text>
                       </TouchableOpacity>
                       <TouchableOpacity style={styles.commentButton} onPress={() => toggleComentarios(post.id)}>

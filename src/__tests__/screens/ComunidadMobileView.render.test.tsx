@@ -1,6 +1,6 @@
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, within } from '@testing-library/react-native';
 
 // ComunidadMobileView usa useFocusEffect (no useEffect a secas) para
 // refrescar Feed/Ranking/Mensajes cada vez que el tab vuelve a foco -- ver
@@ -83,14 +83,32 @@ describe('ComunidadMobileView (Módulo 6 -- Feed, Mensajes/DM, Ranking)', () => 
     await waitFor(() => expect(getByText('Hoy rompí mi PR de Clean & Jerk 💪')).toBeTruthy());
   });
 
-  it('dar "¡A tope!" a un post suma el contador de reacciones', async () => {
-    const { getByText, getAllByText } = render(<ComunidadMobileView />);
+  // Rediseño del botón de reacción: se eliminó el texto fijo "¡A tope!" --
+  // ahora es solo el emoji del musculito + el contador numérico (ej. "💪 3"),
+  // como un botón de "Me gusta" limpio estándar.
+  it('el botón de reacción ya NO tiene el texto fijo "¡A tope!" -- solo el musculito y el contador', async () => {
+    const { getByText, queryByText, getAllByText } = render(<ComunidadMobileView />);
     await waitFor(() => expect(getByText(/Bienvenidos a la Comunidad GreenFit/)).toBeTruthy());
 
-    const reactionButtons = getAllByText(/¡A tope!/);
-    fireEvent.press(reactionButtons[0]);
+    expect(queryByText(/¡A tope!/)).toBeNull();
+    expect(getAllByText('💪').length).toBeGreaterThan(0);
+  });
 
-    await waitFor(() => expect(getByText('¡A tope! · 1')).toBeTruthy());
+  it('reaccionar a un post con el botón del musculito actualiza el contador', async () => {
+    const { getByText, getAllByLabelText } = render(<ComunidadMobileView />);
+    await waitFor(() => expect(getByText(/Bienvenidos a la Comunidad GreenFit/)).toBeTruthy());
+
+    const reactionButtons = getAllByLabelText('Reaccionar');
+    const boton = reactionButtons[0];
+    const contadorInicial = Number(within(boton).getByText(/^\d+$/).props.children);
+
+    fireEvent.press(boton);
+
+    await waitFor(() =>
+      expect(Number(within(boton).getByText(/^\d+$/).props.children)).toBe(contadorInicial + 1)
+    );
+    // El botón pasa a estado "reaccionado" -- ya ofrece quitar la reacción.
+    expect(boton.props.accessibilityLabel).toBe('Quitar reacción');
   });
 
   it('el tab Ranking muestra el conteo real propio + el aviso de datos de ejemplo', async () => {
