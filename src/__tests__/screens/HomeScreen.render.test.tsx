@@ -119,26 +119,72 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(queryByText('Comprar')).toBeNull();
   });
 
-  it('el widget circular muestra el nivel y el XP de progreso reales', async () => {
-    const { getByText } = render(<HomeScreen navigation={navigation} />);
+  // Rediseño minimalista (menos carga cognitiva): el widget circular es
+  // AHORA lo único que queda del bloque de Progreso Diario -- Nivel y XP de
+  // progreso siguen siendo reales, pero sin el texto explicativo "Te faltan
+  // X XP..." de al lado (removido a propósito) ni el estado de check-in de
+  // abajo (AsistenciaHoyStatus, ver el test más abajo).
+  it('el widget circular muestra el nivel y el XP de progreso reales, sin el texto explicativo de al lado', async () => {
+    const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
     await waitFor(() => expect(getByText('N2')).toBeTruthy());
     expect(getByText('150/500')).toBeTruthy();
-    expect(getByText(/Te faltan/)).toBeTruthy();
-    expect(getByText('350 XP')).toBeTruthy();
+    expect(queryByText(/Te faltan/)).toBeNull();
   });
 
-  it('el widget de asistencia es de SOLO LECTURA: sin check-in del Admin, no hay ninguna acción para autoreportarse', async () => {
+  // AsistenciaHoyStatus ("Esperando check-in...") se sacó de Inicio en el
+  // rediseño -- sigue existiendo y probado en su propio
+  // AsistenciaHoyStatus.test.tsx, esto solo confirma que ya NO vive acá.
+  it('ya NO muestra el estado de check-in de hoy ("Esperando check-in...") -- se sacó de Inicio en el rediseño', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Esperando check-in en el gimnasio...')).toBeTruthy());
-
-    // El viejo botón autoreportable ya no existe en ningún lado.
-    expect(queryByText('¡Hoy entrené! (+100 XP)')).toBeNull();
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    expect(queryByText('Esperando check-in en el gimnasio...')).toBeNull();
+    expect(queryByText(/Seba registró tu asistencia/)).toBeNull();
   });
 
-  it('si el Admin ya acreditó la asistencia de hoy, el widget la refleja en verde', async () => {
-    (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(true);
-    const { getByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toBeTruthy());
+  // Rediseño del CTA de reservas: sin ninguna reserva próxima, un botón
+  // grande de acción directa reemplaza al viejo bloque de texto gris
+  // "Todavía no tenés reservas".
+  it('sin reservas: muestra el botón grande "📅 Reservar próxima clase" (no el bloque de texto gris)', async () => {
+    const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('📅 Reservar próxima clase')).toBeTruthy());
+    expect(queryByText('Todavía no tenés reservas')).toBeNull();
+    expect(queryByText('Elegí tu próxima clase')).toBeNull();
+
+    fireEvent.press(getByText('📅 Reservar próxima clase'));
+    expect(navigation.navigate).toHaveBeenCalledWith('Reservas');
+  });
+
+  it('con una reserva próxima: la muestra como un ticket limpio (disciplina + día + hora), sin la etiqueta "Tu próxima clase" ni el countdown', async () => {
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    const mananaStr = manana.toISOString().slice(0, 10);
+
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            { class_id: 'clase-1', booking_date: mananaStr, classes: { title: 'CrossFit', start_time: '19:00:00' } },
+          ],
+          error: null,
+        });
+      }
+      return makeChain({ data: [], error: null });
+    });
+
+    const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText(/CrossFit/)).toBeTruthy());
+
+    expect(queryByText('Tu próxima clase')).toBeNull();
+    expect(queryByText('📅 Reservar próxima clase')).toBeNull();
+    expect(getByText('Cancelar')).toBeTruthy();
+  });
+
+  // La reseña de Google se mudó a Mi Perfil (es una acción secundaria) --
+  // Inicio queda reservado a lo operativo del día a día.
+  it('ya NO muestra la tarjeta de reseña de Google -- se mudó a Mi Perfil', async () => {
+    const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    expect(queryByText('¿Te gusta entrenar en GreenFit?')).toBeNull();
   });
 
   it('el ícono "¿Cómo ganar XP?" abre el modal con la única regla vigente (asistencia acreditada por el Admin)', async () => {

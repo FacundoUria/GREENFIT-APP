@@ -73,4 +73,25 @@ test.describe('PWA -- Mi Perfil', () => {
     await expect(page.getByPlaceholder('DNI')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('Ingresar', { exact: true })).toBeVisible();
   });
+
+  // "Dejanos tu reseña en Google" -- se mudó acá desde Inicio en el
+  // rediseño UX (acción secundaria, no algo operativo del día a día). Abre
+  // la ficha real de Maps en una pestaña nueva; se verifica la URL exacta
+  // que el .env trae por defecto.
+  test('la tarjeta de reseña de Google abre la ficha real de Maps en una pestaña nueva', async ({ page, context }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+    await irATab(page, 'Perfil');
+    await expect(page.getByText('Mi Perfil')).toBeVisible();
+
+    const [popup] = await Promise.all([
+      context.waitForEvent('page'),
+      page.getByLabel('Dejanos tu reseña en Google').click(),
+    ]);
+    await popup.waitForLoadState('domcontentloaded').catch(() => {
+      // La URL es externa de verdad (maps.google.com) -- en el sandbox de
+      // CI puede no resolver DNS; lo que importa acá es que SE INTENTÓ
+      // abrir la URL correcta, no que la página externa cargue completa.
+    });
+    expect(popup.url()).toContain('google.com/maps/place/GREEN+FIT');
+  });
 });

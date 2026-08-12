@@ -19,6 +19,7 @@ import { useAvatarUpload } from '../../hooks/useAvatarUpload';
 import { getInitials } from '../../components/Avatar';
 import AthleteProfileCard from '../../components/AthleteProfileCard';
 import XpInfoModal from '../../components/XpInfoModal';
+import GoogleReviewCard from '../../components/GoogleReviewCard';
 import { UserCredit } from '../../types';
 
 export { getInitials };
@@ -280,6 +281,11 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
           <Text style={styles.comingSoonText}>{comingSoonLabel}</Text>
         </View>
       )}
+
+      {/* Acción secundaria -- se mudó acá desde Inicio (rediseño UX: Inicio
+          quedó reservado a lo operativo del día a día). El propio componente
+          ya trae su marginTop, no hace falta envolverlo. */}
+      <GoogleReviewCard />
 
       <XpInfoModal visible={xpInfoVisible} onClose={() => setXpInfoVisible(false)} />
     </ScrollView>

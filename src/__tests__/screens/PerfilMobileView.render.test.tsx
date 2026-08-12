@@ -193,6 +193,15 @@ describe('PerfilMobileView (Módulo 3)', () => {
     expect(ImagePicker.launchImageLibraryAsync).not.toHaveBeenCalled();
   });
 
+  // La tarjeta de reseña de Google se mudó acá desde Inicio (rediseño UX:
+  // es una acción secundaria, Inicio queda reservado a lo operativo del día
+  // a día).
+  it('muestra la tarjeta de reseña de Google (se mudó acá desde Inicio)', async () => {
+    const { getByText, getByLabelText } = render(<PerfilMobileView />);
+    await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());
+    expect(getByLabelText('Dejanos tu reseña en Google')).toBeTruthy();
+  });
+
   it('el botón sutil de "Cerrar sesión" llama a logout()', async () => {
     const { getByText, getByLabelText } = render(<PerfilMobileView />);
     await waitFor(() => expect(getByText('NIVEL 3')).toBeTruthy());

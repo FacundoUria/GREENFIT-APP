@@ -15,29 +15,32 @@ test.describe('PWA -- Home / Dashboard', () => {
     await expect(page.getByText('Comprar')).toHaveCount(0);
   });
 
-  // Regla de oro: los +100 XP diarios SOLO los acredita el Admin (Check-in
-  // Rápido, o la asistencia confirmada de una clase reservada) -- el socio
-  // ya no tiene ningún botón para autoreportarse. El widget de "Progreso
-  // Diario" es de solo lectura, refleja lo que ya haya acreditado el Admin.
-  test('sin check-in del Admin hoy, el widget muestra el estado neutro (sin ninguna acción para autoreportarse)', async ({
+  // Rediseño UX de Inicio: el widget "Progreso Diario" se redujo al anillo
+  // solo (Nivel + XP centrados, ver XpProgressRing) -- el estado de
+  // check-in de hoy ("Esperando..."/"¡Seba registró tu asistencia!") ya NO
+  // vive acá (menos carga cognitiva). Ese widget sigue existiendo como
+  // componente propio y con su propia cobertura dedicada
+  // (AsistenciaHoyStatus.test.tsx), simplemente dejó de montarse en Home.
+  test('el widget "Progreso Diario" ya no muestra el estado de check-in de hoy (se sacó en el rediseño)', async ({
     page,
   }) => {
     await loginComoSocio(page, {
       tables: {
         ...tablasBase(),
-        // Sin fila de HOY a propósito -- el Admin todavía no dio el check-in.
+        // Sin fila de HOY -- si el widget de check-in siguiera montado acá,
+        // este sería justamente el escenario que dispara "Esperando...".
         xp_events: [
           { id: 'xp-ayer', user_id: SOCIO_DEMO.id, event_type: 'asistencia', xp_amount: 450, event_date: AYER_STR, reference_id: null },
         ],
       },
     });
 
-    await expect(page.getByText('Esperando check-in en el gimnasio...')).toBeVisible();
-    // El viejo botón autoreportable no existe en ningún lado de la pantalla.
+    await expect(page.getByText('Progreso Diario')).toBeVisible();
+    await expect(page.getByText('Esperando check-in en el gimnasio...')).toHaveCount(0);
     await expect(page.getByText('¡Hoy entrené!', { exact: false })).toHaveCount(0);
   });
 
-  test('si el Admin ya acreditó la asistencia de hoy, el widget la muestra en verde apenas se carga la pantalla', async ({
+  test('tampoco con asistencia de HOY ya acreditada -- ese aviso en verde se sacó de Inicio igual', async ({
     page,
   }) => {
     await loginComoSocio(page, {
@@ -49,7 +52,8 @@ test.describe('PWA -- Home / Dashboard', () => {
       },
     });
 
-    await expect(page.getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toBeVisible();
+    await expect(page.getByText('Progreso Diario')).toBeVisible();
+    await expect(page.getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toHaveCount(0);
   });
 
   test('el ícono de reglas de XP abre el modal con la única regla vigente', async ({ page }) => {
@@ -85,13 +89,12 @@ test.describe('PWA -- Home / Dashboard', () => {
     expect(saludoBox!.y).toBeLessThan(nivelBox!.y);
   });
 
-  // Checklist punto 3: "Próxima Reserva" dinamizada -- con una reserva real
-  // muestra disciplina, día/hora y tiempo restante; sin ninguna, el acceso
-  // directo a reservar. `start_time` bien entrada la noche (23:59) para que
-  // la cuenta regresiva dé siempre positiva sin importar a qué hora corra
-  // la suite -- no se afirma el valor exacto (horas/minutos), solo que
-  // arranca con "Empieza en" (la parte que cambió en esta ronda).
-  test('con una reserva activa, "Tu próxima clase" muestra disciplina, hora y tiempo restante reales', async ({
+  // Rediseño UX: con una reserva próxima, el CTA es un "ticket" limpio --
+  // disciplina + día/hora nada más, sin la etiqueta "Tu próxima clase" ni
+  // el countdown como texto aparte (eso se sacó para bajar carga
+  // cognitiva). `start_time` bien entrada la noche (23:59) para que la fila
+  // quede determinística sin importar a qué hora corra la suite.
+  test('con una reserva activa, muestra un ticket limpio (disciplina + día/hora) con botón de Cancelar', async ({
     page,
   }) => {
     await loginComoSocio(page, {
@@ -110,38 +113,39 @@ test.describe('PWA -- Home / Dashboard', () => {
       },
     });
 
-    await expect(page.getByText('Tu próxima clase')).toBeVisible();
     await expect(page.getByText('CrossFit · Hoy 23:59 hs')).toBeVisible();
-    await expect(page.getByText(/Empieza en \d+ (hora|horas|min)/)).toBeVisible();
-    await expect(page.getByText('Todavía no tenés reservas')).toHaveCount(0);
+    // React Native Web no renderiza este TouchableOpacity con role="button"
+    // en esta versión (mismo criterio que e2e/support/nav.ts) -- se busca
+    // por texto, no por rol.
+    await expect(page.getByText('Cancelar', { exact: true })).toBeVisible();
+    // Ni la vieja etiqueta/countdown ni el botón grande de "sin reservas"
+    // (son mutuamente excluyentes con tener una reserva activa).
+    await expect(page.getByText('Tu próxima clase', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/Empieza en/)).toHaveCount(0);
+    await expect(page.getByText('📅 Reservar próxima clase')).toHaveCount(0);
   });
 
-  test('sin ninguna reserva, muestra el acceso "Todavía no tenés reservas -- Elegí tu próxima clase"', async ({
+  test('sin ninguna reserva, muestra el botón grande "📅 Reservar próxima clase" que lleva a Mi Agenda', async ({
     page,
   }) => {
     await loginComoSocio(page, { tables: tablasBase() }); // tablasBase() ya arranca con bookings: []
 
-    await expect(page.getByText('Todavía no tenés reservas')).toBeVisible();
-    await expect(page.getByText('Elegí tu próxima clase')).toBeVisible();
-    // exact:true -- "Elegí tu próxima clase" contiene "tu próxima clase"
-    // como substring case-insensitive, que sin exact matchea también acá.
-    await expect(page.getByText('Tu próxima clase', { exact: true })).toHaveCount(0);
+    const botonReservar = page.getByText('📅 Reservar próxima clase', { exact: true });
+    await expect(botonReservar).toBeVisible();
+    // El viejo bloque de texto gris ya no existe.
+    await expect(page.getByText('Todavía no tenés reservas')).toHaveCount(0);
+
+    await botonReservar.click();
+    await expect(page.getByText('Mi Agenda', { exact: true })).toBeVisible();
   });
 
-  // "Dejanos tu reseña en Google" -- abre la ficha real de Maps en una
-  // pestaña nueva. Se verifica la URL exacta que el .env trae por defecto.
-  test('la tarjeta de reseña de Google abre la ficha real de Maps en una pestaña nueva', async ({ page, context }) => {
+  // La tarjeta de reseña de Google se mudó a Mi Perfil en el rediseño --
+  // Inicio queda reservado a lo operativo del día a día (ver perfil.spec.ts
+  // para la cobertura real del click -> Maps).
+  test('ya NO muestra la tarjeta de reseña de Google -- se mudó a Mi Perfil', async ({ page }) => {
     await loginComoSocio(page, { tables: tablasBase() });
 
-    const [popup] = await Promise.all([
-      context.waitForEvent('page'),
-      page.getByLabel('Dejanos tu reseña en Google').click(),
-    ]);
-    await popup.waitForLoadState('domcontentloaded').catch(() => {
-      // La URL es externa de verdad (maps.google.com) -- en el sandbox de
-      // CI puede no resolver DNS; lo que importa acá es que SE INTENTÓ
-      // abrir la URL correcta, no que la página externa cargue completa.
-    });
-    expect(popup.url()).toContain('google.com/maps/place/GREEN+FIT');
+    await expect(page.getByLabel('Dejanos tu reseña en Google')).toHaveCount(0);
+    await expect(page.getByText('¿Te gusta entrenar en GreenFit?')).toHaveCount(0);
   });
 });

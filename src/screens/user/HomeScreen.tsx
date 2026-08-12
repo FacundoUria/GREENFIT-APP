@@ -23,17 +23,15 @@ import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
-import { formatClassTime, formatCountdownEmpieza, formatDayLabel, getCountdown } from '../../lib/classTime';
+import { formatClassTime, formatDayLabel } from '../../lib/classTime';
 import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
-import AsistenciaHoyStatus from '../../components/AsistenciaHoyStatus';
 import XpProgressRing from '../../components/XpProgressRing';
 import XpInfoModal from '../../components/XpInfoModal';
 import AthleteProfileCard from '../../components/AthleteProfileCard';
-import GoogleReviewCard from '../../components/GoogleReviewCard';
 import GlobalAlertBanner from '../../components/GlobalAlertBanner';
 import {
   fetchTotalXp,
@@ -294,7 +292,6 @@ export default function HomeScreen({ navigation }: any) {
     }
   }
 
-  const nextBookingCountdown = nextBooking ? getCountdown(nextBooking.startTime) : null;
   const cancelLimitMs = configuracion.limiteCancelacionMinutos * 60 * 1000;
   const isWithinCancelLimit =
     !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < cancelLimitMs;
@@ -426,9 +423,13 @@ export default function HomeScreen({ navigation }: any) {
         )}
       </View>
 
-      {/* Widget "Progreso Diario & Check-In" -- reemplaza al botón suelto de
-          antes: ahora vive con el anillo de XP hacia el próximo nivel y el
-          acceso a las reglas, todo en un solo lugar del Dashboard. */}
+      {/* Widget "Progreso Diario" -- rediseño minimalista (menos carga
+          cognitiva): únicamente el anillo centrado, con el Nivel y los
+          puntos de XP ya resueltos DENTRO del propio dibujo (XpProgressRing
+          ya los muestra centrados, ver ese componente). Sin texto
+          explicativo ("Te faltan X XP...") ni el estado de check-in de
+          abajo -- el ícono de información sigue siendo la puerta a esa
+          explicación para quien la quiera, sin imponérsela a todos. */}
       {user && (
         <View style={styles.progressCard}>
           <View style={styles.progressHeaderRow}>
@@ -446,54 +447,33 @@ export default function HomeScreen({ navigation }: any) {
               xpEnNivel={resumenXp.xpEnNivel}
               xpParaNivel={XP_POR_NIVEL}
               nivel={resumenXp.nivel}
-              size={78}
-              strokeWidth={7}
+              size={96}
+              strokeWidth={9}
             />
-            <Text style={styles.progressHint}>
-              Te faltan <Text style={styles.progressHintStrong}>{resumenXp.xpParaSubir} XP</Text> para el próximo
-              nivel.
-            </Text>
           </View>
-          {/* Solo lectura -- el socio ya no autoreporta su asistencia, la
-              acredita el Admin (Check-in Rápido o clase confirmada). El
-              useFocusEffect de arriba ya vuelve a pedir el XP total al
-              volver a esta pantalla, así que este estado se pone al día
-              solo apenas el Admin lo acredita, sin ninguna acción acá. */}
-          <AsistenciaHoyStatus userId={user.id} />
         </View>
       )}
 
       {!isLoading &&
         (nextBooking ? (
+          // "Ticket" limpio: disciplina + día + hora nada más -- sin la
+          // etiqueta "Tu próxima clase" ni el countdown como texto aparte.
           <View style={styles.banner}>
             <View style={styles.bannerIcon}>
               <Ionicons name="calendar" size={20} color={colors.primary} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bannerLabel}>Tu próxima clase</Text>
-              <Text style={styles.bannerValue}>
-                {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
-              </Text>
-              {nextBookingCountdown && !nextBookingCountdown.isPast && (
-                <Text style={[styles.bannerCountdown, nextBookingCountdown.isSoon && styles.bannerCountdownSoon]}>
-                  {formatCountdownEmpieza(nextBookingCountdown)}
-                </Text>
-              )}
-            </View>
+            <Text style={styles.bannerValue}>
+              {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
+            </Text>
             <TouchableOpacity style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
               <Text style={styles.bannerCancelText}>Cancelar</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity style={styles.emptyBookingBanner} onPress={() => navigation.navigate('Reservas')}>
-            <View style={styles.bannerIcon}>
-              <Ionicons name="calendar-outline" size={20} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.bannerValue}>Todavía no tenés reservas</Text>
-              <Text style={styles.bannerLabel}>Elegí tu próxima clase</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+          // Botón grande de acción directa -- reemplaza al bloque de texto
+          // gris "Todavía no tenés reservas".
+          <TouchableOpacity style={styles.reserveButton} onPress={() => navigation.navigate('Reservas')}>
+            <Text style={styles.reserveButtonText}>📅 Reservar próxima clase</Text>
           </TouchableOpacity>
         ))}
 
@@ -509,8 +489,6 @@ export default function HomeScreen({ navigation }: any) {
           ))}
         </View>
       )}
-
-      <GoogleReviewCard />
 
       <CancelBookingModal
         visible={showCancelModal}
@@ -688,18 +666,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  emptyBookingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: colors.surface,
+  // CTA de acción directa cuando no hay ninguna reserva próxima -- grande y
+  // claro, reemplaza al viejo bloque de texto gris "Todavía no tenés reservas".
+  reserveButton: {
+    backgroundColor: colors.primary,
     borderRadius: 16,
-    padding: 16,
+    paddingVertical: 18,
     marginTop: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  reserveButtonText: { color: colors.onPrimary, fontSize: 16, fontWeight: '800' },
   bannerIcon: {
     width: 40,
     height: 40,
@@ -708,10 +685,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bannerLabel: { color: colors.textSecondary, fontSize: 12, marginBottom: 2 },
-  bannerValue: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
-  bannerCountdown: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
-  bannerCountdownSoon: { color: colors.primary, fontWeight: '700' },
+  bannerValue: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
   bannerCancel: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.danger },
   bannerCancelText: { color: colors.white, fontWeight: '700', fontSize: 12 },
   upcomingList: {
@@ -737,9 +711,10 @@ const styles = StyleSheet.create({
   },
   progressHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   progressTitle: { color: colors.textPrimary, fontSize: 14.5, fontWeight: '700' },
-  progressRingRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14, marginBottom: 4 },
-  progressHint: { flex: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
-  progressHintStrong: { color: colors.primary, fontWeight: '800' },
+  // Anillo centrado y solo -- sin texto explicativo al lado (rediseño
+  // minimalista: el Nivel y los puntos de XP ya se leen dentro del propio
+  // anillo, ver XpProgressRing).
+  progressRingRow: { alignItems: 'center', justifyContent: 'center', marginTop: 14, marginBottom: 2 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalSheet: {
