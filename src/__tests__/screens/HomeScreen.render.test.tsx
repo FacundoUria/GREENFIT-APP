@@ -119,6 +119,76 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(queryByText('Comprar')).toBeNull();
   });
 
+  // Bug real detectado: el único botón que abría "Elegí tu pack" era
+  // "Renovar", y ese SOLO se renderiza si hayVencido -- un socio nuevo (0
+  // packs) o uno con todo activo no tenía NINGÚN botón en toda la PWA para
+  // llegar a comprar. Estos 3 tests cubren los 3 estados posibles del Hero
+  // Card, confirmando que siempre hay EXACTAMENTE una forma de abrir el
+  // modal, con la etiqueta correcta para cada caso.
+  describe('acceso para comprar un pack (Hero Card) -- antes solo existía "Renovar", oculto salvo con algo vencido', () => {
+    it('sin ningún pack activo, muestra "Elegir mi pack" (no "Renovar") y abre "Elegí tu pack" al tocarlo', async () => {
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+
+      expect(queryByText('Renovar')).toBeNull();
+      const boton = getByText('Elegir mi pack');
+      fireEvent.press(boton);
+
+      await waitFor(() => expect(getByText('Elegí tu pack')).toBeTruthy());
+    });
+
+    it('con un pack activo y nada vencido, muestra "Agregar otro pack" (no "Renovar" ni "Elegir mi pack")', async () => {
+      // mockResolvedValueOnce (no mockResolvedValue) -- el default `[]` del
+      // factory de arriba vive para SIEMPRE si se pisa con la variante
+      // persistente, contaminando cualquier test que corra después de este
+      // en el mismo archivo (no hay un beforeEach que lo vuelva a poner en
+      // `[]`, a diferencia de fetchTotalXp y compañía).
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 5,
+          expiresAt: null,
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+        },
+      ]);
+
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      expect(queryByText('Renovar')).toBeNull();
+      expect(queryByText('Elegir mi pack')).toBeNull();
+      expect(getByText('Agregar otro pack')).toBeTruthy();
+    });
+
+    it('con algo vencido, sigue mostrando "Renovar" -- no el botón nuevo (comportamiento existente, sin tocar)', async () => {
+      // mockResolvedValueOnce (no mockResolvedValue) -- el default `[]` del
+      // factory de arriba vive para SIEMPRE si se pisa con la variante
+      // persistente, contaminando cualquier test que corra después de este
+      // en el mismo archivo (no hay un beforeEach que lo vuelva a poner en
+      // `[]`, a diferencia de fetchTotalXp y compañía).
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 0,
+          expiresAt: null,
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+        },
+      ]);
+
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('Renovar')).toBeTruthy());
+
+      expect(queryByText('Elegir mi pack')).toBeNull();
+      expect(queryByText('Agregar otro pack')).toBeNull();
+    });
+  });
+
   // Rediseño minimalista (menos carga cognitiva): el widget circular es
   // AHORA lo único que queda del bloque de Progreso Diario -- Nivel y XP de
   // progreso siguen siendo reales, pero sin el texto explicativo "Te faltan

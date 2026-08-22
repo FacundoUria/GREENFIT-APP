@@ -29,6 +29,8 @@ const PACK_APARATOS = {
 
 // El botón "Renovar" (que abre "Elegí tu pack") solo aparece si alguna
 // disciplina está vencida -- se fuerza con un balance de CrossFit en 0.
+// Sin nada vencido, el acceso es "Elegir mi pack"/"Agregar otro pack" (ver
+// el describe de arriba, "Acceso para comprar").
 const BALANCE_VENCIDO = {
   id: 'uc-vencido',
   user_id: SOCIO_DEMO.id,
@@ -38,6 +40,45 @@ const BALANCE_VENCIDO = {
   discipline: DISCIPLINA_CROSSFIT,
   pack: null,
 };
+
+// Bug real detectado (2026-08-22): el único botón que abría "Elegí tu
+// pack" era "Renovar", y ese solo aparece si hayVencido -- un socio nuevo
+// (0 packs) o uno con todo activo no tenía NINGÚN botón en toda la PWA
+// para llegar a comprar. Estos 2 tests cubren los accesos nuevos.
+test.describe('PWA -- Acceso para comprar (antes solo "Renovar", oculto salvo con algo vencido)', () => {
+  test('socio nuevo (0 packs activos): "Elegir mi pack" abre "Elegí tu pack" con el catálogo real', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), packs: [PACK_CROSSFIT, PACK_APARATOS] }, // user_credits: [] por defecto
+    });
+
+    await expect(page.getByText('Renovar')).toHaveCount(0);
+    await page.getByText('Elegir mi pack', { exact: true }).click();
+
+    await expect(page.getByText('Elegí tu pack')).toBeVisible();
+    await expect(page.getByText('Pack 12 clases CrossFit')).toBeVisible();
+  });
+
+  test('con un pack activo y nada vencido: "Agregar otro pack" abre el mismo modal (no "Renovar")', async ({ page }) => {
+    const BALANCE_ACTIVO = {
+      id: 'uc-activo',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: 5,
+      expires_at: null,
+      created_at: '2026-08-01T00:00:00.000Z',
+      discipline: DISCIPLINA_CROSSFIT,
+      pack: null,
+    };
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), user_credits: [BALANCE_ACTIVO], packs: [PACK_CROSSFIT, PACK_APARATOS] },
+    });
+
+    await expect(page.getByText('Renovar')).toHaveCount(0);
+    await page.getByText('Agregar otro pack', { exact: true }).click();
+
+    await expect(page.getByText('Elegí tu pack')).toBeVisible();
+    await expect(page.getByText('Mes libre Aparatos')).toBeVisible();
+  });
+});
 
 test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
   test('muestra los packs reales de `packs`, con precio/créditos/días exactos -- nada hardcodeado', async ({ page }) => {

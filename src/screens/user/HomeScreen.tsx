@@ -410,7 +410,7 @@ export default function HomeScreen({ navigation }: any) {
           ))
         )}
 
-        {hayVencido && (
+        {hayVencido ? (
           <View style={styles.heroVencidoActions}>
             <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
               <Text style={styles.renewButtonText}>Renovar</Text>
@@ -420,6 +420,21 @@ export default function HomeScreen({ navigation }: any) {
               <Text style={styles.contactButtonText}>Contactar</Text>
             </TouchableOpacity>
           </View>
+        ) : (
+          // Único punto de entrada real para comprar un pack cuando nada
+          // está vencido -- antes esto era invisible: "Renovar" (arriba)
+          // abre este mismo modal pero solo se renderiza con algo vencido,
+          // así que un socio nuevo (0 packs) o uno que ya tiene un pack
+          // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
+          // toda la PWA para llegar a "Elegí tu pack".
+          !isLoading && (
+            <TouchableOpacity style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+              <Text style={styles.addPackButtonText}>
+                {balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}
+              </Text>
+            </TouchableOpacity>
+          )
         )}
       </View>
 
@@ -643,6 +658,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   renewButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
+  // Variante "no urgente" de renewButton -- mismo lugar, mismo modal, pero
+  // con menos peso visual (borde en vez de relleno) porque acá nada está
+  // vencido todavía.
+  addPackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  addPackButtonText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   contactButton: {
     flex: 1,
     flexDirection: 'row',
