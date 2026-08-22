@@ -6,11 +6,17 @@ import { XP_POR_NIVEL } from '../lib/xpApi';
 
 // Modal "¿Cómo ganar XP?" -- extraído de PerfilMobileView (vivía inline
 // ahí) para que HomeScreen pueda abrir exactamente el mismo modal desde el
-// nuevo widget "Progreso Diario & Check-In". Regla única vigente: publicar
-// en la Comunidad, superar un PR y completar una Meta dejaron de otorgar
-// XP -- la ÚNICA fuente es la asistencia acreditada por el Admin (ver
-// backend/supabase_migration_xp_solo_asistencia.sql).
+// nuevo widget "Progreso Diario & Check-In". Publicar en la Comunidad,
+// superar un PR y completar una Meta siguen sin otorgar XP (ver
+// backend/supabase_migration_xp_solo_asistencia.sql) -- "Reservar una
+// clase" es una excepción puntual aprobada por Seba, con su propio
+// clawback si se cancela (ver supabase_migration_xp_reserva.sql).
 export const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
+  {
+    emoji: '📅',
+    label: 'Reservar una clase',
+    detalle: '+100 XP -- Se descuentan si cancelás la reserva.',
+  },
   {
     emoji: '🏋️',
     label: 'Asistencia diaria',

@@ -199,6 +199,9 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
     expect(getByText('Asistencia diaria')).toBeTruthy();
     expect(getByText(/Acreditados presencialmente al realizar tu check-in en el gimnasio/)).toBeTruthy();
+    // Reservar una clase también otorga XP (regla nueva, con clawback al cancelar).
+    expect(getByText('Reservar una clase')).toBeTruthy();
+    expect(getByText(/Se descuentan si cancelás la reserva/)).toBeTruthy();
     // Las reglas dadas de baja ya no aparecen.
     expect(queryByText('Publicar en la Comunidad')).toBeNull();
     expect(queryByText('Superar un Récord Personal (PR)')).toBeNull();

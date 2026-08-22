@@ -160,6 +160,9 @@ describe('PerfilMobileView (Módulo 3)', () => {
     await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
     expect(getByText('Asistencia diaria')).toBeTruthy();
     expect(getByText(/Acreditados presencialmente al realizar tu check-in en el gimnasio/)).toBeTruthy();
+    // Reservar una clase también otorga XP (regla nueva, con clawback al cancelar).
+    expect(getByText('Reservar una clase')).toBeTruthy();
+    expect(getByText(/Se descuentan si cancelás la reserva/)).toBeTruthy();
     // Publicar/PR/Metas dejaron de otorgar XP -- ya no se listan acá.
     expect(queryByText('Publicar en la Comunidad')).toBeNull();
     expect(queryByText('Superar un Récord Personal (PR)')).toBeNull();
