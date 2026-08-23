@@ -75,6 +75,8 @@ jest.mock('../../lib/xpApi', () => ({
   fetchClasesDelMes: jest.fn(),
   fetchMiembroDesde: jest.fn(),
   fetchFechasAsistencia: jest.fn(),
+  fetchEntrenamientosHoy: jest.fn(),
+  registrarHoyEntrene: jest.fn(),
 }));
 
 import { supabase } from '../../lib/supabase';
@@ -85,6 +87,8 @@ import {
   fetchClasesDelMes,
   fetchMiembroDesde,
   fetchFechasAsistencia,
+  fetchEntrenamientosHoy,
+  registrarHoyEntrene,
 } from '../../lib/xpApi';
 import HomeScreen from '../../screens/user/HomeScreen';
 
@@ -94,7 +98,9 @@ const navigation = { navigate: jest.fn() };
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'gte', 'order'].forEach((m) => {
+  // 'is' -- lo usa fetchEntrenamientosHoy (discipline_id is null) desde que
+  // HomeScreen empezó a llamarla en cada load().
+  ['select', 'eq', 'gte', 'order', 'is'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
@@ -110,6 +116,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
     (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
     (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
+    (fetchEntrenamientosHoy as jest.Mock).mockResolvedValue(0);
   });
 
   it('NO renderiza la tarjeta "Mi Pase / Comprar" (removida -- esa gestión ahora vive en Perfil > Pagos y Facturas)', async () => {
@@ -312,6 +319,91 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     unmount();
     expect(supabase.removeChannel).toHaveBeenCalled();
   });
+
+  // TAREA 2: reincorporación del autoreporte "Hoy Entrené" con tope diario
+  // real (disciplinas activas), conectado de punta a punta -- RPC real,
+  // balance de XP en pantalla actualizado al instante, estado del botón
+  // persistido.
+  describe('botón "Hoy Entrené" (autoreporte con tope = disciplinas activas)', () => {
+    it('sin ninguna disciplina activa (balances vacío, default), no muestra el botón', async () => {
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+      expect(queryByText('💪 Hoy Entrené')).toBeNull();
+    });
+
+    it('con 1 disciplina activa, muestra el botón; al tocarlo, actualiza el XP en pantalla AL INSTANTE (sin refetch)', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 5,
+          expiresAt: null,
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+        },
+      ]);
+      (registrarHoyEntrene as jest.Mock).mockResolvedValue({
+        otorgado: true,
+        xpOtorgado: 100,
+        entrenamientosHoy: 1,
+        entrenamientosMaximos: 1,
+      });
+
+      const { getByText } = render(<HomeScreen navigation={navigation} />);
+      // 650 XP (mock del beforeEach) -> nivel 2, 150/500.
+      await waitFor(() => expect(getByText('150/500')).toBeTruthy());
+
+      fireEvent.press(getByText('💪 Hoy Entrené'));
+
+      // 650 + 100 = 750 -> sigue nivel 2, 250/500 -- el ring se actualiza
+      // solo con la respuesta del RPC, sin volver a llamar fetchTotalXp.
+      await waitFor(() => expect(getByText('250/500')).toBeTruthy());
+      expect(getByText('Ya registraste todos tus entrenamientos de hoy')).toBeTruthy();
+      // fetchTotalXp: 1 vez en el load() inicial nomás -- el +100 de acá
+      // fue 100% optimista/local, no un refetch.
+      expect(fetchTotalXp).toHaveBeenCalledTimes(1);
+    });
+
+    it('con 2 disciplinas activas, el botón queda disponible para un segundo click después del primero', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 5,
+          expiresAt: null,
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+        },
+        {
+          id: 'bal-2',
+          userId: 'user-1',
+          remainingCredits: 3,
+          expiresAt: null,
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' },
+          pack: null,
+        },
+      ]);
+      (registrarHoyEntrene as jest.Mock).mockResolvedValue({
+        otorgado: true,
+        xpOtorgado: 100,
+        entrenamientosHoy: 1,
+        entrenamientosMaximos: 2,
+      });
+
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('💪 Hoy Entrené')).toBeTruthy());
+
+      fireEvent.press(getByText('💪 Hoy Entrené'));
+
+      await waitFor(() => expect(getByText('¡Bien! Te queda 1 entrenamiento disponible hoy')).toBeTruthy());
+      // Con 1 de 2 usados, el botón sigue habilitado para el segundo.
+      expect(getByText('💪 Hoy Entrené')).toBeTruthy();
+      expect(queryByText('Ya registraste todos tus entrenamientos de hoy')).toBeNull();
+    });
+  });
 });
 
 // Bug crítico (2026-08-07): "React Native WebView does not support this
@@ -331,6 +423,7 @@ describe('HomeScreen -- Web/PWA: detecta la vuelta de Mercado Pago desde la URL'
     (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
     (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
     (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
+    (fetchEntrenamientosHoy as jest.Mock).mockResolvedValue(0);
   });
 
   afterEach(() => {

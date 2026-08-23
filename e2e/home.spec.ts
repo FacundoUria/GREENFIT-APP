@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, AYER_STR, HOY_STR } from './support/fixtures';
+import { tablasBase, AYER_STR, HOY_STR, DISCIPLINA_CROSSFIT } from './support/fixtures';
 
 // Cubre el checklist de Home: widget "Progreso Diario" (anillo de XP +
 // "¡Hoy entrené!" + reglas), y la ausencia de la vieja tarjeta "Mi Pase".
@@ -147,5 +147,64 @@ test.describe('PWA -- Home / Dashboard', () => {
 
     await expect(page.getByLabel('Dejanos tu reseña en Google')).toHaveCount(0);
     await expect(page.getByText('¿Te gusta entrenar en GreenFit?')).toHaveCount(0);
+  });
+});
+
+// TAREA 2: reincorporación puntual del autoreporte de XP -- ya no era 1 fijo
+// por día como antes de supabase_migration_xp_solo_asistencia.sql, ahora es
+// 1 por cada disciplina ACTIVA, calculado y validado server-side (RPC
+// registrar_hoy_entrene). xp_events se deja vacío a propósito en estos
+// tests -- la fixture base (XP_EVENTS_BASE) tiene una fila de HOY sin
+// discipline_id que, para el mock, cuenta como "ya usado" (is.null trata
+// undefined como null), y contaminaría el conteo inicial del botón.
+test.describe('PWA -- Botón "Hoy Entrené" (autoreporte con tope = disciplinas activas)', () => {
+  test('con 1 disciplina activa, +100 XP en pantalla al instante y el botón queda agotado', async ({ page }) => {
+    let llamadasRpc = 0;
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        xp_events: [],
+        user_credits: [
+          {
+            id: 'uc-crossfit',
+            user_id: SOCIO_DEMO.id,
+            discipline: DISCIPLINA_CROSSFIT,
+            remaining_credits: 5,
+            expires_at: null,
+            created_at: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+      rpc: {
+        registrar_hoy_entrene: () => {
+          llamadasRpc += 1;
+          return { otorgado: true, xp_otorgado: 100, entrenamientos_hoy: 1, entrenamientos_maximos: 1 };
+        },
+      },
+    });
+
+    const boton = page.getByText('💪 Hoy Entrené', { exact: true });
+    await expect(boton).toBeVisible();
+    await boton.click();
+
+    await expect(page.getByText('¡Bien! Ya registraste todos tus entrenamientos de hoy')).toBeVisible();
+    // exact:true -- el feedback de arriba ("¡Bien! Ya registraste...")
+    // contiene este mismo texto como substring, sin exact matchearía los dos.
+    await expect(page.getByText('Ya registraste todos tus entrenamientos de hoy', { exact: true })).toBeVisible();
+    await expect(boton).toHaveCount(0);
+    expect(llamadasRpc).toBe(1);
+  });
+
+  test('sin ninguna disciplina activa, no muestra el botón', async ({ page }) => {
+    await loginComoSocio(page, { tables: { ...tablasBase(), xp_events: [] } });
+
+    await expect(page.getByText('💪 Hoy Entrené')).toHaveCount(0);
+  });
+
+  test('el modal "¿Cómo ganar XP?" incluye la regla de "Hoy Entrené"', async ({ page }) => {
+    await loginComoSocio(page, { tables: { ...tablasBase(), xp_events: [] } });
+
+    await page.getByLabel('¿Cómo ganar XP?').first().click();
+    await expect(page.getByText('Botón "Hoy Entrené"', { exact: true })).toBeVisible();
   });
 });

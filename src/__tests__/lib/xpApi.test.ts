@@ -1,5 +1,5 @@
 jest.mock('../../lib/supabase', () => ({
-  supabase: { from: jest.fn() },
+  supabase: { from: jest.fn(), rpc: jest.fn() },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -11,18 +11,22 @@ import {
   fetchFechasAsistencia,
   calcularRachaDias,
   fetchClasesDelMes,
+  fetchEntrenamientosHoy,
+  registrarHoyEntrene,
   XP_POR_NIVEL,
 } from '../../lib/xpApi';
 
 const mockedFrom = supabase.from as jest.Mock;
+const mockedRpc = supabase.rpc as jest.Mock;
 
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'insert', 'limit', 'gte', 'lte'].forEach((m) => {
+  ['select', 'eq', 'insert', 'limit', 'gte', 'lte', 'is'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.maybeSingle = jest.fn().mockResolvedValue(result);
+  chain.single = jest.fn().mockResolvedValue(result);
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
 }
@@ -163,5 +167,69 @@ describe('fetchClasesDelMes (fix del bug: antes mostraba el total histórico baj
       return makeChain({ data: null, error: null, count: 5 });
     });
     expect(await fetchClasesDelMes('user-1')).toBe(5);
+  });
+});
+
+// "Hoy Entrené" -- reincorporación puntual del autoreporte (con tope diario
+// real, ver PAGINA SUPABASE/supabase_migration_hoy_entrene.sql), NO un
+// regreso al autoreporte libre de antes.
+describe('fetchEntrenamientosHoy (de solo lectura -- para pintar el estado inicial del botón)', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('cuenta los autoreportes de HOY (event_type=asistencia, discipline_id null)', async () => {
+    mockedFrom.mockReturnValue(makeChain({ data: [{ id: 'xp-1' }, { id: 'xp-2' }], error: null }));
+    expect(await fetchEntrenamientosHoy('user-1')).toBe(2);
+  });
+
+  it('0 si todavía no usó el botón hoy', async () => {
+    mockedFrom.mockReturnValue(makeChain({ data: [], error: null }));
+    expect(await fetchEntrenamientosHoy('user-1')).toBe(0);
+  });
+
+  it('si xp_events todavía no existe, responde 0 en vez de romper', async () => {
+    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'no existe' } }));
+    expect(await fetchEntrenamientosHoy('user-1')).toBe(0);
+  });
+});
+
+describe('registrarHoyEntrene (único punto de escritura -- el RPC hace todo el enforcement real)', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('mapea la fila del RPC (snake_case) a camelCase', async () => {
+    mockedRpc.mockReturnValue({
+      single: jest.fn().mockResolvedValue({
+        data: { otorgado: true, xp_otorgado: 100, entrenamientos_hoy: 1, entrenamientos_maximos: 2 },
+        error: null,
+      }),
+    });
+
+    const resultado = await registrarHoyEntrene();
+
+    expect(mockedRpc).toHaveBeenCalledWith('registrar_hoy_entrene');
+    expect(resultado).toEqual({ otorgado: true, xpOtorgado: 100, entrenamientosHoy: 1, entrenamientosMaximos: 2 });
+  });
+
+  it('otorgado=false (llegó al tope) también se resuelve normal, sin XP', async () => {
+    mockedRpc.mockReturnValue({
+      single: jest.fn().mockResolvedValue({
+        data: { otorgado: false, xp_otorgado: 0, entrenamientos_hoy: 2, entrenamientos_maximos: 2 },
+        error: null,
+      }),
+    });
+
+    const resultado = await registrarHoyEntrene();
+    expect(resultado.otorgado).toBe(false);
+    expect(resultado.xpOtorgado).toBe(0);
+  });
+
+  it('un error del RPC (ej. sin disciplinas activas) se propaga como excepción con el mensaje real', async () => {
+    mockedRpc.mockReturnValue({
+      single: jest.fn().mockResolvedValue({
+        data: null,
+        error: { message: 'Todavía no tenés ninguna disciplina activa -- no hay ningún entrenamiento que registrar hoy.' },
+      }),
+    });
+
+    await expect(registrarHoyEntrene()).rejects.toThrow('Todavía no tenés ninguna disciplina activa');
   });
 });

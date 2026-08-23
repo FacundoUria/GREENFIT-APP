@@ -10,7 +10,11 @@ import { XP_POR_NIVEL } from '../lib/xpApi';
 // superar un PR y completar una Meta siguen sin otorgar XP (ver
 // backend/supabase_migration_xp_solo_asistencia.sql) -- "Reservar una
 // clase" es una excepción puntual aprobada por Seba, con su propio
-// clawback si se cancela (ver supabase_migration_xp_reserva.sql).
+// clawback si se cancela (ver supabase_migration_xp_reserva.sql), y "Hoy
+// Entrené" es la reincorporación puntual del autoreporte, con un tope
+// diario real (ver supabase_migration_hoy_entrene.sql), no autoreporte
+// libre como antes. TODA acción de esta lista da SIEMPRE 100 XP, sin
+// excepción.
 export const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
   {
     emoji: '📅',
@@ -21,6 +25,11 @@ export const REGLAS_XP: { emoji: string; label: string; detalle: string }[] = [
     emoji: '🏋️',
     label: 'Asistencia diaria',
     detalle: '+100 XP -- Acreditados presencialmente al realizar tu check-in en el gimnasio.',
+  },
+  {
+    emoji: '💪',
+    label: 'Botón "Hoy Entrené"',
+    detalle: '+100 XP -- Hasta 1 vez por cada disciplina activa que tengas, por día.',
   },
 ];
 

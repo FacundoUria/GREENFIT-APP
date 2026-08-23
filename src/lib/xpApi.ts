@@ -2,14 +2,19 @@ import { supabase } from './supabase';
 import { formatDateOnly } from './classesApi';
 
 // Sistema de XP/Niveles real (500 XP = 1 nivel) -- ver
-// backend/supabase_migration_xp.sql para el esquema base y
-// backend/supabase_migration_xp_solo_asistencia.sql para la regla vigente:
-// la ÚNICA forma de sumar XP es la asistencia acreditada por el Admin
-// (Check-in Rápido, o la asistencia confirmada de una clase reservada) --
-// ya no existe autoreporte del socio (ni por "¡Hoy entrené!", ni por
-// publicar en la Comunidad, ni por PR, ni por completar una Meta). Esa
-// migración todavía puede no estar corrida, así que fetchTotalXp() cae a
-// una estimación (ver más abajo) hasta que se despliegue.
+// backend/supabase_migration_xp.sql para el esquema base,
+// backend/supabase_migration_xp_solo_asistencia.sql para la regla que sacó
+// TODO autoreporte del socio (¡Hoy entrené!, publicar en la Comunidad, PR,
+// Meta) y PAGINA SUPABASE/supabase_migration_hoy_entrene.sql para la
+// reincorporación puntual y limitada de "Hoy Entrené" (con un límite
+// diario real -- tantos clics como disciplinas activas tenga, no
+// autoreporte libre). Las demás fuentes de autoreporte siguen sin existir.
+// Esa migración todavía puede no estar corrida, así que fetchTotalXp() cae
+// a una estimación (ver más abajo) hasta que se despliegue.
+//
+// TODA acción positiva de gamificación otorga SIEMPRE Y EXACTAMENTE 100 XP
+// -- reserva (+100), asistencia real (+100), Check-in Rápido de Musculación
+// (+100), y ahora "Hoy Entrené" (+100). Ninguna otorga un valor distinto.
 
 export const XP_POR_NIVEL = 500;
 
@@ -159,4 +164,58 @@ export async function fetchMiembroDesde(userId: string): Promise<string | null> 
   const { data, error } = await supabase.from('profiles').select('created_at').eq('id', userId).single();
   if (error || !data?.created_at) return null;
   return data.created_at as string;
+}
+
+// -- "Hoy Entrené" (autoreporte con límite diario = disciplinas activas) --
+// ver PAGINA SUPABASE/supabase_migration_hoy_entrene.sql para el detalle
+// completo del RPC y por qué hace falta (reemplazó al índice único viejo
+// de "1 por día" fijo, que no admitía un límite variable).
+
+// De solo lectura -- para pintar el estado inicial del botón (cuántos
+// autoreportes ya se usaron hoy) sin gastar ningún intento. El límite REAL
+// lo vuelve a calcular el RPC del lado servidor en cada click -- esto es
+// nada más para que la UI no arranque siempre en "0 usados" aunque el
+// socio ya haya tocado el botón antes hoy y haya recargado la pantalla.
+export async function fetchEntrenamientosHoy(userId: string): Promise<number> {
+  const hoy = formatDateOnly(new Date());
+  const { data, error } = await supabase
+    .from('xp_events')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('event_type', 'asistencia')
+    .is('discipline_id', null)
+    .eq('event_date', hoy);
+  if (error) {
+    if (isMissingRelationError(error)) return 0;
+    throw new Error(error.message);
+  }
+  return (data ?? []).length;
+}
+
+export interface ResultadoHoyEntrene {
+  otorgado: boolean;
+  xpOtorgado: number;
+  entrenamientosHoy: number;
+  entrenamientosMaximos: number;
+}
+
+// Único punto de escritura para "Hoy Entrené" -- todo el enforcement real
+// (cupo diario, disciplinas activas) vive en el RPC, server-side, nunca
+// confiando en lo que calculó el cliente. Puede tirar (sin ninguna
+// disciplina activa, sin sesión) -- el llamador decide cómo mostrarlo.
+export async function registrarHoyEntrene(): Promise<ResultadoHoyEntrene> {
+  const { data, error } = await supabase.rpc('registrar_hoy_entrene').single();
+  if (error) throw new Error(error.message);
+  const fila = data as {
+    otorgado: boolean;
+    xp_otorgado: number;
+    entrenamientos_hoy: number;
+    entrenamientos_maximos: number;
+  };
+  return {
+    otorgado: fila.otorgado,
+    xpOtorgado: fila.xp_otorgado,
+    entrenamientosHoy: fila.entrenamientos_hoy,
+    entrenamientosMaximos: fila.entrenamientos_maximos,
+  };
 }

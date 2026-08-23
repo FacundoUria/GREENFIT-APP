@@ -33,6 +33,7 @@ import XpProgressRing from '../../components/XpProgressRing';
 import XpInfoModal from '../../components/XpInfoModal';
 import AthleteProfileCard from '../../components/AthleteProfileCard';
 import GlobalAlertBanner from '../../components/GlobalAlertBanner';
+import HoyEntreneButton from '../../components/HoyEntreneButton';
 import {
   fetchTotalXp,
   calcularResumenXp,
@@ -40,6 +41,7 @@ import {
   calcularRachaDias,
   fetchClasesDelMes,
   fetchMiembroDesde,
+  fetchEntrenamientosHoy,
   XP_POR_NIVEL,
 } from '../../lib/xpApi';
 import { useAvatarUpload } from '../../hooks/useAvatarUpload';
@@ -126,6 +128,11 @@ export default function HomeScreen({ navigation }: any) {
   const [racha, setRacha] = useState(0);
   const [miembroDesde, setMiembroDesde] = useState<string | null>(null);
   const [clasesDelMes, setClasesDelMes] = useState(0);
+  // "Hoy Entrené" -- cuántos autoreportes ya usó hoy (estado inicial de
+  // solo lectura, ver fetchEntrenamientosHoy). El tope real (disciplinas
+  // activas) se deriva de `balances` más abajo, no hace falta guardarlo
+  // aparte.
+  const [entrenamientosHoy, setEntrenamientosHoy] = useState(0);
   const { isUploadingAvatar, handleAvatarPress } = useAvatarUpload(user?.id, updateAvatarUrl);
 
   const load = useCallback(async () => {
@@ -139,7 +146,7 @@ export default function HomeScreen({ navigation }: any) {
       // correr antes de que la reparación termine de insertar.
       await syncMyMembership();
 
-      const [balancesResult, bookingsResult, packsResult, xpResult, clasesResult, desdeResult, fechasAsistencia] =
+      const [balancesResult, bookingsResult, packsResult, xpResult, clasesResult, desdeResult, fechasAsistencia, entrenamientosHoyResult] =
         await Promise.all([
           fetchUserBalances(user.id),
           fetchUpcomingBookings(user.id),
@@ -148,6 +155,7 @@ export default function HomeScreen({ navigation }: any) {
           fetchClasesDelMes(user.id),
           fetchMiembroDesde(user.id),
           fetchFechasAsistencia(user.id),
+          fetchEntrenamientosHoy(user.id),
         ]);
       setBalances(balancesResult);
       setUpcomingBookings(bookingsResult);
@@ -156,6 +164,7 @@ export default function HomeScreen({ navigation }: any) {
       setClasesDelMes(clasesResult);
       setMiembroDesde(desdeResult);
       setRacha(calcularRachaDias(fechasAsistencia));
+      setEntrenamientosHoy(entrenamientosHoyResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu información.');
     } finally {
@@ -309,6 +318,21 @@ export default function HomeScreen({ navigation }: any) {
   });
   const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
   const resumenXp = calcularResumenXp(totalXp);
+  // Tope diario de "Hoy Entrené" -- mismo criterio "no vencido" que ya usa
+  // el resto de esta pantalla (activo O por_vencer cuentan, solo vencido
+  // queda afuera), calculado del mismo `balancesConEstado` que ya arma el
+  // Hero Card -- sin fetch aparte. El RPC recalcula esto mismo del lado
+  // servidor antes de otorgar nada, este número es solo para la UI.
+  const disciplinasActivas = balancesConEstado.filter((b) => b.status !== 'vencido').length;
+
+  // Balance en tiempo real: el RPC ya otorgó los 100 XP server-side, esto
+  // solo refleja el número en pantalla al instante sin esperar ningún
+  // refetch/realtime -- si otorgado=false (llegó al tope), xpGanado viene
+  // en 0 y el total no se mueve.
+  const handleHoyEntrenoRegistrado = (xpGanado: number, nuevoEntrenamientosHoy: number) => {
+    if (xpGanado > 0) setTotalXp((prev) => prev + xpGanado);
+    setEntrenamientosHoy(nuevoEntrenamientosHoy);
+  };
 
   return (
     <ScrollView
@@ -466,6 +490,13 @@ export default function HomeScreen({ navigation }: any) {
               strokeWidth={9}
             />
           </View>
+          {!isLoading && (
+            <HoyEntreneButton
+              disciplinasActivas={disciplinasActivas}
+              entrenamientosHoy={entrenamientosHoy}
+              onRegistrado={handleHoyEntrenoRegistrado}
+            />
+          )}
         </View>
       )}
 
