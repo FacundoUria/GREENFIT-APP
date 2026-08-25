@@ -16,67 +16,68 @@ interface AuthContextType {
   // Feed/Ranking de Comunidad vía el propio post/mensaje que se acaba de
   // crear, etc.) sin esperar a la próxima carga.
   updateAvatarUrl: (avatarUrl: string) => void;
-  // Se llama desde ProfileScreen justo después de guardar los datos de
-  // emergencia con éxito -- actualiza el flag en memoria al instante (sin
-  // esto, el banner de aviso seguiría mostrándose hasta la próxima apertura
-  // de la app, porque `user` en memoria seguiría con el flag viejo).
-  marcarDatosEmergenciaCompletos: () => void;
+  // Se llama desde ProfileScreen justo después de guardar "Mis datos" con
+  // éxito -- actualiza el flag en memoria al instante (sin esto, el banner
+  // de aviso/la redirección seguirían activos hasta la próxima apertura de
+  // la app, porque `user` en memoria seguiría con el flag viejo).
+  marcarPerfilCompleto: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// 42703 = undefined_column (Postgres) -- pasa si backend/supabase_migration_avatar.sql
-// (columna profiles.avatar_url) todavía no se corrió en este ambiente.
-function isMissingColumnError(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  if (error.code === '42703') return true;
-  return (error.message ?? '').toLowerCase().includes('column');
+// Campos obligatorios del perfil (pedido del cliente, reemplaza al set
+// anterior de "solo datos de emergencia"): Nombre y Apellido salen del
+// mismo full_name de siempre (ver ProfileScreen.tsx, que lo separa solo
+// para mostrarlo), DNI/Correo ya eran not-null en la tabla, Teléfono y
+// Teléfono de emergencia ya existían -- Domicilio es el único campo
+// realmente nuevo. Contacto de emergencia (nombre) y Ficha médica quedaron
+// afuera del set obligatorio a pedido explícito del cliente.
+function tienePerfilCompleto(data: {
+  full_name?: string | null;
+  dni?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  emergency_contact_phone?: string | null;
+  domicilio?: string | null;
+}): boolean {
+  return (
+    !!data.full_name?.trim() &&
+    !!data.dni?.trim() &&
+    !!data.email?.trim() &&
+    !!data.phone?.trim() &&
+    !!data.emergency_contact_phone?.trim() &&
+    !!data.domicilio?.trim()
+  );
+}
+
+// avatar_url y domicilio son las 2 columnas "más nuevas" de profiles (cada
+// una con su propia migración, corridas en momentos distintos) -- se piden
+// SUELTAS y con error tolerado en vez de en el select principal, para que
+// si UNA de las 2 todavía no existe en este ambiente no tire abajo la otra
+// ni, sobre todo, el login entero (que depende de fetchProfile).
+async function fetchColumnaOpcional(userId: string, columna: string): Promise<string | null> {
+  const { data, error } = await supabase.from('profiles').select(columna).eq('id', userId).single();
+  if (error || !data) return null;
+  return (data as any)[columna] ?? null;
 }
 
 // Trae el profile (rol incluido) de la tabla `profiles` para un usuario ya autenticado.
 // Sin esto tenemos sesión de Supabase pero no sabemos si es socio o admin.
-//
-// El login/bootstrap de TODA la app depende de que esto no rompa -- por eso
-// pide avatar_url con un fallback defensivo: si esa columna todavía no
-// existe (migración de avatar sin correr), reintenta sin ella en vez de
-// tirar abajo el login entero por un campo que es puramente decorativo.
-// Los 3 campos que el gimnasio exige por seguridad médica -- mismos 3 que
-// ya pedía "Mis Datos" (ProfileScreen.tsx), ninguna columna nueva.
-function tieneDatosEmergenciaCompletos(data: {
-  emergency_contact_name?: string | null;
-  emergency_contact_phone?: string | null;
-  medical_notes?: string | null;
-}): boolean {
-  return (
-    !!data.emergency_contact_name?.trim() &&
-    !!data.emergency_contact_phone?.trim() &&
-    !!data.medical_notes?.trim()
-  );
-}
-
 async function fetchProfile(userId: string): Promise<User & { active: boolean }> {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, dni, phone, role, active, avatar_url, emergency_contact_name, emergency_contact_phone, medical_notes')
+    .select('id, full_name, dni, phone, role, active, email, emergency_contact_name, emergency_contact_phone, medical_notes')
     .eq('id', userId)
     .single();
-
-  if (error && isMissingColumnError(error)) {
-    // Fallback SOLO por si avatar_url todavía no existe en este ambiente
-    // (migración de avatar sin correr) -- los 3 campos de emergencia son
-    // muy anteriores a esa migración (ya los pedía "Mis Datos" desde
-    // siempre), así que se piden igual acá para no perder
-    // datosEmergenciaCompletos en este camino.
-    ({ data, error } = await supabase
-      .from('profiles')
-      .select('id, full_name, dni, phone, role, active, emergency_contact_name, emergency_contact_phone, medical_notes')
-      .eq('id', userId)
-      .single());
-  }
 
   if (error || !data) {
     throw new Error('No se pudo cargar el perfil del usuario.');
   }
+
+  const [avatarUrl, domicilio] = await Promise.all([
+    fetchColumnaOpcional(userId, 'avatar_url'),
+    fetchColumnaOpcional(userId, 'domicilio'),
+  ]);
 
   return {
     id: data.id,
@@ -85,8 +86,8 @@ async function fetchProfile(userId: string): Promise<User & { active: boolean }>
     phone: data.phone,
     role: data.role,
     active: data.active ?? true,
-    avatarUrl: (data as any).avatar_url ?? null,
-    datosEmergenciaCompletos: tieneDatosEmergenciaCompletos(data as any),
+    avatarUrl,
+    perfilCompleto: tienePerfilCompleto({ ...(data as any), domicilio }),
   };
 }
 
@@ -162,13 +163,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser((prev) => (prev ? { ...prev, avatarUrl } : prev));
   }
 
-  function marcarDatosEmergenciaCompletos() {
-    setUser((prev) => (prev ? { ...prev, datosEmergenciaCompletos: true } : prev));
+  function marcarPerfilCompleto() {
+    setUser((prev) => (prev ? { ...prev, perfilCompleto: true } : prev));
   }
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, isBootstrapping, login, logout, updateAvatarUrl, marcarDatosEmergenciaCompletos }}
+      value={{ user, isLoading, isBootstrapping, login, logout, updateAvatarUrl, marcarPerfilCompleto }}
     >
       {children}
     </AuthContext.Provider>

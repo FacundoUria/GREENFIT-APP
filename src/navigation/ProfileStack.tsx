@@ -59,16 +59,29 @@ function ProfileHomeScreen({ navigation }: any) {
 
 export default function ProfileStack() {
   const { user } = useAuth();
-  // Mismo criterio que MainTabs.tsx: si vía el tab "Perfil" (redirigido por
-  // datos de emergencia incompletos), esta pila arranca directo en "Mis
-  // datos" en vez del listado -- una sola vez al montar, sin impedir que el
-  // socio navegue a cualquier otra pantalla después (botón de volver y
-  // resto de tabs quedan intactos, no hay ningún bloqueo).
-  const initialRouteName = !user?.datosEmergenciaCompletos ? 'MyData' : 'ProfileHome';
+  const bloqueado = !!user && !user.perfilCompleto;
+
+  // Mientras falten campos obligatorios de "Mis datos", esta pestaña
+  // (Perfil) SOLO expone esa pantalla -- ninguna otra ruta del perfil
+  // (listado, Historial, Progreso) existe en este árbol, así que es
+  // estructuralmente imposible navegar a ellas desde acá. Esto NO toca el
+  // resto de la app: MainTabs.tsx sigue dejando Inicio/Agenda/Mi Rutina/
+  // Comunidad completamente accesibles -- el bloqueo es exclusivo "de las
+  // otras opciones del perfil", como pidió el cliente.
+  if (bloqueado) {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, gestureEnabled: false }}>
+        <Stack.Screen
+          name="MyData"
+          component={ProfileScreen}
+          options={{ headerShown: true, title: 'Mis datos', headerBackVisible: false }}
+        />
+      </Stack.Navigator>
+    );
+  }
 
   return (
     <Stack.Navigator
-      initialRouteName={initialRouteName}
       screenOptions={{ headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }}
     >
       {/* Sin header nativo acá -- PerfilMobileView ya trae su propio título

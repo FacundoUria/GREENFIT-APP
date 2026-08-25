@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, CLASE_HOY, CLASE_APARATOS_HOY, DISCIPLINA_CROSSFIT } from './support/fixtures';
+import { tablasBase, CLASE_HOY, CLASE_APARATOS_HOY, DISCIPLINA_CROSSFIT, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
 
 // Cubre el checklist de Agenda: tarjetas de clases con el estilo renovado
@@ -69,5 +69,29 @@ test.describe('PWA -- Mi Agenda', () => {
     await expect(page.getByTestId('agenda-card-class-crossfit-hoy')).toBeVisible();
     await expect(page.getByTestId('agenda-card-class-aparatos-hoy')).toHaveCount(0);
     await expect(page.getByText('Aparatos libre')).toHaveCount(0);
+  });
+
+  // Pedido del cliente: ver cuánta gente está anotada en un turno antes de
+  // reservar. CLASE_HOY tiene capacity=12 (ver support/fixtures.ts); acá se
+  // cargan 3 reservas reales de OTROS socios para esa clase+fecha y se
+  // verifica que la tarjeta muestre "3/12 cupos" -- el mismo COUNT real que
+  // ejercitan los tests de bookedCount en classesApi.test.ts, acá de punta a
+  // punta contra la UI.
+  test('muestra la cantidad de inscriptos ("X/Y cupos") contando las reservas activas reales de esa clase', async ({
+    page,
+  }) => {
+    const reservasDeOtrosSocios = [
+      { id: 'bk-1', user_id: 'otro-socio-1', class_id: CLASE_HOY.id, booking_date: HOY_STR },
+      { id: 'bk-2', user_id: 'otro-socio-2', class_id: CLASE_HOY.id, booking_date: HOY_STR },
+      { id: 'bk-3', user_id: 'otro-socio-3', class_id: CLASE_HOY.id, booking_date: HOY_STR },
+    ];
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), classes: [CLASE_HOY], bookings: reservasDeOtrosSocios },
+    });
+
+    await irATab(page, 'Agenda');
+
+    const tarjetaClase = page.getByTestId('agenda-card-class-crossfit-hoy');
+    await expect(tarjetaClase.getByText('3/12 cupos')).toBeVisible();
   });
 });

@@ -9,14 +9,14 @@ export interface User {
   phone: string | null;
   role: Role;
   avatarUrl: string | null;
-  // true si tiene cargados los 3 datos obligatorios de emergencia
-  // (emergency_contact_name, emergency_contact_phone, medical_notes --
-  // columnas que ya existían en profiles) -- exigencia de seguridad médica
-  // del gimnasio. Mientras sea false, MainTabs/ProfileStack redirigen al
-  // socio a "Mis datos" UNA SOLA VEZ al entrar (sin bloquear ni ocultar el
-  // resto de la navegación -- ver MainTabs.tsx, ProfileStack.tsx y
-  // ProfileScreen.tsx).
-  datosEmergenciaCompletos: boolean;
+  // true si tiene cargados los 7 campos obligatorios del perfil (pedido del
+  // cliente): Nombre, Apellido (ambos salen de full_name), DNI, Correo,
+  // Teléfono, Teléfono de emergencia y Domicilio -- ver
+  // tienePerfilCompleto() en AuthContext.tsx. Mientras sea false,
+  // MainTabs.tsx redirige al socio al tab Perfil (una sola vez al entrar,
+  // sin tocar el resto de tabs) y ProfileStack.tsx expone SOLO "Mis datos"
+  // dentro de esa pestaña hasta que complete y guarde.
+  perfilCompleto: boolean;
 }
 
 export type DisciplineKind = 'credits' | 'membership';

@@ -32,14 +32,16 @@ export default function MainTabs() {
   // Web Push real (con la app cerrada) — pide permiso una sola vez al loguearse.
   useAutoRequestWebPush(user?.id);
 
-  // Redirección de "una sola vez al entrar" (exigencia de seguridad médica):
-  // si al socio le faltan datos de emergencia, el tab inicial es Perfil en
-  // vez de Inicio (ver ProfileStack.tsx, que a su vez arranca directo en
-  // "Mis datos"). `initialRouteName` solo se evalúa al MONTAR este
-  // Tab.Navigator (una vez por login, porque RootNavigator desmonta todo
-  // este árbol al cerrar sesión) -- después el socio puede tocar cualquier
-  // otro tab libremente, no queda atrapado ni se lo vuelve a redirigir.
-  const initialRouteName = !user?.datosEmergenciaCompletos ? 'Perfil' : 'Inicio';
+  // Redirección de "una sola vez al entrar" (perfil obligatorio incompleto):
+  // si al socio le faltan campos obligatorios de "Mis datos", el tab inicial
+  // es Perfil en vez de Inicio (ver ProfileStack.tsx, que a su vez arranca
+  // directo en "Mis datos" Y bloquea el resto de las pantallas DE ESA
+  // PESTAÑA). `initialRouteName` solo se evalúa al MONTAR este Tab.Navigator
+  // (una vez por login, porque RootNavigator desmonta todo este árbol al
+  // cerrar sesión) -- el resto de los tabs (Inicio, Agenda, Mi Rutina,
+  // Comunidad) NO se tocan acá, el socio puede navegar a cualquiera de
+  // ellos libremente en cualquier momento.
+  const initialRouteName = !user?.perfilCompleto ? 'Perfil' : 'Inicio';
 
   return (
     <Tab.Navigator

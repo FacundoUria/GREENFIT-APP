@@ -22,10 +22,23 @@ import InstallAppButton from '../../components/InstallAppButton';
 interface ProfileForm {
   fullName: string;
   dni: string;
+  email: string;
   phone: string;
+  domicilio: string;
   emergencyContactName: string;
   emergencyContactPhone: string;
   medicalNotes: string;
+}
+
+// Nombre/Apellido son un pedido explícito del cliente como campos
+// separados, pero `profiles` sigue guardando un único full_name (identidad
+// que carga/corrige el admin) -- se parte solo para MOSTRARLO acá, no hay
+// columnas nuevas de nombre/apellido ni se persiste nada distinto.
+function splitFullName(fullName: string): { nombre: string; apellido: string } {
+  const trimmed = fullName.trim();
+  const primerEspacio = trimmed.indexOf(' ');
+  if (primerEspacio === -1) return { nombre: trimmed, apellido: '' };
+  return { nombre: trimmed.slice(0, primerEspacio), apellido: trimmed.slice(primerEspacio + 1) };
 }
 
 function SectionCard({
@@ -48,37 +61,59 @@ function SectionCard({
   );
 }
 
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.fieldLabel}>{children}</Text>;
+}
+
 async function loadProfile(userId: string): Promise<ProfileForm> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
-    .select('full_name, dni, phone, emergency_contact_name, emergency_contact_phone, medical_notes')
+    .select('full_name, dni, email, phone, domicilio, emergency_contact_name, emergency_contact_phone, medical_notes')
     .eq('id', userId)
     .single();
+
+  // 42703 = undefined_column -- domicilio es la columna más nueva de todas
+  // (supabase_migration_domicilio_y_sync_telefono.sql), puede no existir
+  // todavía en este ambiente. Sin este fallback, un select que pide una
+  // columna que no existe falla COMPLETO (no devuelve el resto de campos
+  // parcialmente), así que "Mis datos" quedaría rota entera por una sola
+  // columna ausente -- se reintenta sin ella en vez de eso.
+  if (error?.code === '42703') {
+    ({ data, error } = await supabase
+      .from('profiles')
+      .select('full_name, dni, email, phone, emergency_contact_name, emergency_contact_phone, medical_notes')
+      .eq('id', userId)
+      .single());
+  }
+
   if (error || !data) throw new Error(error?.message ?? 'No se pudo cargar tu perfil.');
   return {
     fullName: data.full_name,
     dni: data.dni ?? '',
+    email: (data as any).email ?? '',
     phone: data.phone ?? '',
+    domicilio: (data as any).domicilio ?? '',
     emergencyContactName: data.emergency_contact_name ?? '',
     emergencyContactPhone: data.emergency_contact_phone ?? '',
     medicalNotes: data.medical_notes ?? '',
   };
 }
 
-// Foco exclusivo en los datos de la cuenta del socio. El nombre y el DNI
-// son de solo lectura (identidad del socio, la carga/corrige el admin desde
-// Gestión de socios); el resto lo edita el propio socio.
+// Foco exclusivo en los datos de la cuenta del socio. Nombre/Apellido, DNI y
+// Correo son de solo lectura (identidad del socio, la carga/corrige el
+// admin desde Gestión de socios); Teléfono, Domicilio y Contacto de
+// emergencia los edita el propio socio.
 //
-// Exigencia de seguridad médica del gimnasio: si faltan los datos de
-// emergencia, ProfileStack.tsx redirige acá UNA SOLA VEZ al entrar (sin
-// bloquear nada -- el socio puede navegar a cualquier otro tab cuando
-// quiera, ver MainTabs.tsx/ProfileStack.tsx). Acá solo mostramos un banner
-// informativo (`bloqueado`) mientras falten, y Contacto de emergencia/Ficha
-// médica quedan obligatorios para guardar SIEMPRE (no solo la primera vez),
-// para que una vez completos nunca se puedan volver a vaciar sin querer.
+// Perfil obligatorio (pedido del cliente): si faltan Nombre, Apellido, DNI,
+// Correo, Teléfono, Teléfono de emergencia o Domicilio, ProfileStack.tsx
+// redirige acá UNA SOLA VEZ al entrar a la pestaña Perfil Y bloquea el
+// resto de las pantallas DE ESA PESTAÑA (listado, Historial, Progreso) --
+// el resto de la app (Inicio, Agenda, Mi Rutina, Comunidad) sigue 100%
+// accesible, ver MainTabs.tsx/ProfileStack.tsx. Acá solo mostramos un
+// banner informativo (`bloqueado`) mientras falten.
 export default function ProfileScreen({ navigation }: any) {
-  const { user, logout, marcarDatosEmergenciaCompletos } = useAuth();
-  const bloqueado = !!user && !user.datosEmergenciaCompletos;
+  const { user, logout, marcarPerfilCompleto } = useAuth();
+  const bloqueado = !!user && !user.perfilCompleto;
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -115,17 +150,19 @@ export default function ProfileScreen({ navigation }: any) {
   async function handleSave() {
     if (!user || !form) return;
 
-    // Obligatorios SIEMPRE (no solo mientras está bloqueado) -- exigencia
-    // de seguridad médica del gimnasio: una vez cargados, no deben poder
-    // volver a quedar vacíos por accidente.
-    const emergencyContactName = form.emergencyContactName.trim();
+    // Obligatorios SIEMPRE (no solo mientras está bloqueado) -- una vez
+    // cargados, no deben poder volver a quedar vacíos por accidente. Nombre/
+    // Apellido/DNI/Correo no se validan acá porque son de solo lectura (si
+    // llegaran vacíos, no hay nada que el socio pueda hacer desde esta
+    // pantalla para corregirlos -- eso lo resuelve el admin). Contacto de
+    // emergencia (nombre) y Ficha médica quedaron afuera del set obligatorio
+    // a pedido explícito del cliente -- siguen siendo editables, solo que
+    // ya no bloquean el guardado si quedan vacíos.
+    const phone = form.phone.trim();
+    const domicilio = form.domicilio.trim();
     const emergencyContactPhone = form.emergencyContactPhone.trim();
-    const medicalNotes = form.medicalNotes.trim();
-    if (!emergencyContactName || !emergencyContactPhone || !medicalNotes) {
-      Alert.alert(
-        'Faltan datos obligatorios',
-        'Completá Contacto de emergencia (nombre y teléfono) y Ficha médica antes de guardar.'
-      );
+    if (!phone || !domicilio || !emergencyContactPhone) {
+      Alert.alert('Faltan datos obligatorios', 'Completá Teléfono, Domicilio y Teléfono de emergencia antes de guardar.');
       return;
     }
 
@@ -134,16 +171,29 @@ export default function ProfileScreen({ navigation }: any) {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          phone: form.phone.trim() || null,
-          emergency_contact_name: emergencyContactName,
+          phone,
+          domicilio,
+          emergency_contact_name: form.emergencyContactName.trim() || null,
           emergency_contact_phone: emergencyContactPhone,
-          medical_notes: medicalNotes,
+          medical_notes: form.medicalNotes.trim() || null,
         })
         .eq('id', user.id);
       if (updateError) throw new Error(updateError.message);
-      // Desbloquea RootNavigator al instante si hacía falta -- no-op
+
+      // Sincronización estricta con el panel Admin: `socios.telefono` (la
+      // ficha que lee el botón de WhatsApp del Admin) es una tabla
+      // SEPARADA de `profiles`, bridgeada por DNI -- sin este RPC el
+      // teléfono actualizado acá nunca le llegaría a esa grilla. Best-effort
+      // a propósito (no revienta el guardado si la migración todavía no
+      // corrió o la cuenta no está vinculada a ninguna ficha de socios).
+      const { error: syncError } = await supabase.rpc('sincronizar_telefono_a_socio');
+      if (syncError) {
+        console.warn('[GreenFit] No se pudo sincronizar el teléfono con el panel Admin:', syncError.message);
+      }
+
+      // Desbloquea la pestaña Perfil al instante si hacía falta -- no-op
       // inofensivo si ya estaba completo de antes.
-      marcarDatosEmergenciaCompletos();
+      marcarPerfilCompleto();
       Alert.alert('Guardado', 'Tus datos se actualizaron.');
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo guardar.');
@@ -162,29 +212,48 @@ export default function ProfileScreen({ navigation }: any) {
       {error && <Text style={styles.error}>{error}</Text>}
 
       {bloqueado && (
-        <View style={styles.bloqueoBanner} accessibilityLabel="Datos de emergencia obligatorios">
-          <Ionicons name="medkit" size={18} color={colors.warning} />
+        <View style={styles.bloqueoBanner} accessibilityLabel="Perfil incompleto">
+          <Ionicons name="alert-circle" size={18} color={colors.warning} />
           <Text style={styles.bloqueoBannerText}>
-            Por seguridad, el gimnasio exige tener cargados tus datos de emergencia antes de usar la app. Completá
-            Contacto de emergencia y Ficha médica y tocá "Guardar cambios" para continuar.
+            Por seguridad, el gimnasio exige tener completos tus datos antes de usar el resto de tu Perfil. Completá
+            Teléfono, Domicilio y Teléfono de emergencia y tocá "Guardar cambios" para continuar.
           </Text>
         </View>
       )}
 
       <SectionCard icon="person-outline" title="Mis datos">
-        <TextInput style={[styles.input, styles.inputDisabled]} value={form.fullName} editable={false} />
+        <FieldLabel>Nombre</FieldLabel>
+        <TextInput style={[styles.input, styles.inputDisabled]} value={splitFullName(form.fullName).nombre} editable={false} />
+        <FieldLabel>Apellido</FieldLabel>
+        <TextInput style={[styles.input, styles.inputDisabled]} value={splitFullName(form.fullName).apellido} editable={false} />
+        <FieldLabel>DNI</FieldLabel>
         <TextInput style={[styles.input, styles.inputDisabled]} value={form.dni} editable={false} />
+        <FieldLabel>Correo</FieldLabel>
+        <TextInput style={[styles.input, styles.inputDisabled]} value={form.email} editable={false} />
+        <Text style={styles.helperText}>
+          Nombre, Apellido, DNI y Correo los administra el gimnasio -- para corregirlos, contactá a recepción.
+        </Text>
+        <FieldLabel>Teléfono *</FieldLabel>
         <TextInput
-          style={[styles.input, styles.inputLast]}
+          style={styles.input}
           placeholder="Teléfono / WhatsApp"
           placeholderTextColor={colors.textSecondary}
           keyboardType="phone-pad"
           value={form.phone}
           onChangeText={(v) => setForm({ ...form, phone: v })}
         />
+        <FieldLabel>Domicilio *</FieldLabel>
+        <TextInput
+          style={[styles.input, styles.inputLast]}
+          placeholder="Calle, número, localidad"
+          placeholderTextColor={colors.textSecondary}
+          value={form.domicilio}
+          onChangeText={(v) => setForm({ ...form, domicilio: v })}
+        />
       </SectionCard>
 
       <SectionCard icon="alert-circle-outline" title="Contacto de emergencia">
+        <FieldLabel>Nombre del contacto</FieldLabel>
         <TextInput
           style={styles.input}
           placeholder="Nombre del contacto"
@@ -192,6 +261,7 @@ export default function ProfileScreen({ navigation }: any) {
           value={form.emergencyContactName}
           onChangeText={(v) => setForm({ ...form, emergencyContactName: v })}
         />
+        <FieldLabel>Teléfono de emergencia *</FieldLabel>
         <TextInput
           style={[styles.input, styles.inputLast]}
           placeholder="Teléfono del contacto"
@@ -261,12 +331,18 @@ export default function ProfileScreen({ navigation }: any) {
       <PushBlockedModal visible={showPushBlockedModal} onClose={() => setShowPushBlockedModal(false)} />
       <PushNeedsInstallModal visible={showInstallModal} onClose={() => setShowInstallModal(false)} />
 
-      <SectionCard icon="ellipsis-horizontal-circle-outline" title="Más opciones">
-        <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('History')}>
-          <Text style={styles.rowText}>Ver historial de clases</Text>
-          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
-      </SectionCard>
+      {/* "Ver historial de clases" navega a una ruta ("History") que solo
+          existe en el ProfileStack completo -- mientras `bloqueado` es
+          true, esa pila vive reducida a solo esta pantalla (ver
+          ProfileStack.tsx), esa ruta no está registrada ahí. */}
+      {!bloqueado && (
+        <SectionCard icon="ellipsis-horizontal-circle-outline" title="Más opciones">
+          <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('History')}>
+            <Text style={styles.rowText}>Ver historial de clases</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </SectionCard>
+      )}
 
       <TouchableOpacity style={styles.logout} onPress={logout}>
         <Ionicons name="log-out-outline" size={16} color={colors.danger} />
@@ -293,6 +369,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   bloqueoBannerText: { flex: 1, color: colors.textPrimary, fontSize: 12.5, lineHeight: 18, fontWeight: '600' },
+  fieldLabel: { color: colors.textSecondary, fontSize: 11.5, fontWeight: '700', marginBottom: 4, marginLeft: 2 },
+  helperText: { color: colors.textSecondary, fontSize: 11, lineHeight: 15, marginTop: -2, marginBottom: 14 },
   sectionCard: {
     backgroundColor: colors.surface,
     borderRadius: 16,

@@ -27,16 +27,16 @@ jest.mock('../../screens/user/ComunidadMobileView', () => mockStub('ComunidadStu
 jest.mock('../../hooks/useNotificationSubscription', () => ({ useNotificationSubscription: jest.fn() }));
 jest.mock('../../hooks/usePushPermission', () => ({ useAutoRequestWebPush: jest.fn() }));
 
-let mockUser: any = { id: 'user-1', datosEmergenciaCompletos: true };
+let mockUser: any = { id: 'user-1', perfilCompleto: true };
 jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ user: mockUser }),
 }));
 
 import MainTabs from '../../navigation/MainTabs';
 
-describe('MainTabs -- redirección inicial por datos de emergencia incompletos', () => {
-  it('socio con datos completos: arranca en Inicio (comportamiento de siempre)', async () => {
-    mockUser = { id: 'user-1', datosEmergenciaCompletos: true };
+describe('MainTabs -- redirección inicial por perfil incompleto', () => {
+  it('socio con perfil completo: arranca en Inicio (comportamiento de siempre)', async () => {
+    mockUser = { id: 'user-1', perfilCompleto: true };
     const { getByText, queryByText } = render(
       <NavigationContainer>
         <MainTabs />
@@ -46,8 +46,8 @@ describe('MainTabs -- redirección inicial por datos de emergencia incompletos',
     expect(queryByText('ProfileStackStub')).toBeNull();
   });
 
-  it('socio con datos de emergencia incompletos: arranca en Perfil (una sola vez al montar)', async () => {
-    mockUser = { id: 'user-1', datosEmergenciaCompletos: false };
+  it('socio con perfil incompleto: arranca en Perfil (una sola vez al montar)', async () => {
+    mockUser = { id: 'user-1', perfilCompleto: false };
     const { getByText, queryByText } = render(
       <NavigationContainer>
         <MainTabs />

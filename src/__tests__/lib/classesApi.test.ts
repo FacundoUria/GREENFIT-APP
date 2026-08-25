@@ -92,3 +92,79 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
     expect(resultado).toHaveLength(1);
   });
 });
+
+// Visibilidad de inscriptos (pedido del cliente): la Agenda de la PWA
+// muestra "X/Y cupos" por tarjeta (ver AgendaMobileView.tsx) -- ese X sale
+// de `bookedCount`, que acá se calcula contando filas de `bookings` por
+// class_id para la fecha puntual. Estos tests cubren que el conteo sea
+// exacto: sumado bien por clase, sin cruzarse entre clases distintas.
+describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, para el indicador "X/Y cupos")', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function claseDe(id: string, overrides = {}) {
+    return {
+      id,
+      title: 'CrossFit',
+      discipline_id: 'disc-crossfit',
+      instructor: null,
+      location: null,
+      capacity: 15,
+      days_of_week: [1],
+      start_time: '08:00:00',
+      end_time: '09:00:00',
+      disciplines: { is_active: true, show_in_agenda: true },
+      ...overrides,
+    };
+  }
+
+  it('suma correctamente varias reservas activas de la MISMA clase', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'bookings') {
+        return makeChain({
+          data: [{ class_id: 'clase-1' }, { class_id: 'clase-1' }, { class_id: 'clase-1' }],
+          error: null,
+        });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+
+    const [resultado] = await loadClassesForDate(LUNES);
+    expect(resultado.bookedCount).toBe(3);
+    expect(resultado.capacity).toBe(15);
+  });
+
+  it('cuenta cada clase por separado -- las reservas de una clase no contaminan el bookedCount de otra', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') {
+        return makeChain({
+          data: [claseDe('clase-1', { title: 'CrossFit A', start_time: '08:00:00' }), claseDe('clase-2', { title: 'CrossFit B', start_time: '18:00:00' })],
+          error: null,
+        });
+      }
+      if (tabla === 'bookings') {
+        return makeChain({
+          data: [{ class_id: 'clase-1' }, { class_id: 'clase-1' }, { class_id: 'clase-2' }],
+          error: null,
+        });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+
+    const resultado = await loadClassesForDate(LUNES);
+    const porId = new Map(resultado.map((c) => [c.id, c.bookedCount]));
+    expect(porId.get('clase-1')).toBe(2);
+    expect(porId.get('clase-2')).toBe(1);
+  });
+
+  it('sin ninguna reserva, bookedCount es 0 (no rompe ni deja undefined)', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'bookings') return makeChain({ data: [], error: null });
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+
+    const [resultado] = await loadClassesForDate(LUNES);
+    expect(resultado.bookedCount).toBe(0);
+  });
+});

@@ -2,12 +2,13 @@ import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { Alert } from 'react-native';
 
-// Formulario obligatorio de emergencia (exigencia de seguridad médica del
-// gimnasio) -- ver AuthContext.tsx / RootNavigator.tsx / DatosEmergenciaGate.tsx.
-// Esta pantalla ("Mis Datos") es la misma que RootNavigator monta a solas
-// cuando `user.datosEmergenciaCompletos` es false; estos tests cubren la
-// lógica de bloqueo/validación/desbloqueo que vive ACA (el gating de
-// navegación en sí -- qué stack se monta -- se cubre en el E2E).
+// Perfil obligatorio (pedido del cliente): Nombre, Apellido, DNI, Correo,
+// Teléfono, Teléfono de emergencia y Domicilio -- ver AuthContext.tsx /
+// MainTabs.tsx / ProfileStack.tsx. Esta pantalla ("Mis Datos") es la misma
+// que ProfileStack monta a solas (bloqueando el resto de las pantallas DE
+// LA PESTAÑA Perfil, no de la app entera) cuando `user.perfilCompleto` es
+// false. Estos tests cubren la validación/guardado/desbloqueo que vive ACÁ
+// -- el gating de navegación en sí (qué stack se monta) se cubre en el E2E.
 
 jest.mock('../../hooks/usePushPermission', () => ({
   usePushPermission: () => ({
@@ -21,7 +22,7 @@ jest.mock('../../hooks/usePushPermission', () => ({
 }));
 
 const mockLogout = jest.fn();
-const mockMarcarDatosEmergenciaCompletos = jest.fn();
+const mockMarcarPerfilCompleto = jest.fn();
 let mockUser: any = {
   id: 'user-1',
   name: 'Isa Giurato',
@@ -29,13 +30,13 @@ let mockUser: any = {
   phone: null,
   role: 'socio',
   avatarUrl: null,
-  datosEmergenciaCompletos: false,
+  perfilCompleto: false,
 };
 jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({
     user: mockUser,
     logout: mockLogout,
-    marcarDatosEmergenciaCompletos: mockMarcarDatosEmergenciaCompletos,
+    marcarPerfilCompleto: mockMarcarPerfilCompleto,
   }),
 }));
 
@@ -53,7 +54,9 @@ function makeChain(result: any) {
 const PERFIL_INCOMPLETO = {
   full_name: 'Isa Giurato',
   dni: '30111222',
+  email: 'isa@greenfit.test',
   phone: null,
+  domicilio: null,
   emergency_contact_name: null,
   emergency_contact_phone: null,
   medical_notes: null,
@@ -62,15 +65,19 @@ const PERFIL_INCOMPLETO = {
 const PERFIL_COMPLETO = {
   full_name: 'Isa Giurato',
   dni: '30111222',
+  email: 'isa@greenfit.test',
   phone: '1122334455',
+  domicilio: 'Av. Siempre Viva 742',
   emergency_contact_name: 'Juan Pérez',
   emergency_contact_phone: '1155667788',
   medical_notes: 'Sin condiciones preexistentes.',
 };
 
 let mockUpdateResult: any = { data: null, error: null };
+let mockRpcResult: any = { data: null, error: null };
 
-jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn() } }));
+const mockRpc = jest.fn((..._args: any[]) => Promise.resolve(mockRpcResult));
+jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: (...args: any[]) => mockRpc(...args) } }));
 
 import { supabase } from '../../lib/supabase';
 import ProfileScreen from '../../screens/user/ProfileScreen';
@@ -89,32 +96,48 @@ function configurarMocks(perfil: any) {
   });
 }
 
-describe('ProfileScreen ("Mis Datos") -- formulario obligatorio de emergencia', () => {
+describe('ProfileScreen ("Mis Datos") -- perfil obligatorio', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUpdateResult = { data: null, error: null };
+    mockRpcResult = { data: null, error: null };
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 
-  it('socio bloqueado (datos de emergencia incompletos): muestra el banner de aviso obligatorio', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('socio bloqueado (perfil incompleto): muestra el banner de aviso, Nombre/Apellido separados y Correo de solo lectura', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
-    const { getByLabelText, getByText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
-    await waitFor(() => expect(getByLabelText('Datos de emergencia obligatorios')).toBeTruthy());
-    expect(getByText(/el gimnasio exige tener cargados tus datos de emergencia/)).toBeTruthy();
+    const { getByLabelText, getByText, getByDisplayValue } = render(
+      <ProfileScreen navigation={{ navigate: jest.fn() }} />
+    );
+    await waitFor(() => expect(getByLabelText('Perfil incompleto')).toBeTruthy());
+    expect(getByText(/el gimnasio exige tener completos tus datos/)).toBeTruthy();
+    // full_name = "Isa Giurato" se separa en Nombre/Apellido solo para
+    // mostrarse -- no hay columnas nuevas de por medio.
+    expect(getByDisplayValue('Isa')).toBeTruthy();
+    expect(getByDisplayValue('Giurato')).toBeTruthy();
+    expect(getByDisplayValue('isa@greenfit.test')).toBeTruthy();
   });
 
-  it('socio ya completo: NO muestra el banner de bloqueo', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: true };
+  it('socio con perfil completo: NO muestra el banner de bloqueo', async () => {
+    mockUser = { ...mockUser, perfilCompleto: true };
     configurarMocks(PERFIL_COMPLETO);
     const { queryByLabelText, getByText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
-    expect(queryByLabelText('Datos de emergencia obligatorios')).toBeNull();
+    expect(queryByLabelText('Perfil incompleto')).toBeNull();
   });
 
-  it('"Más opciones" (historial de clases) SIEMPRE se muestra, incluso mientras faltan datos de emergencia -- no hay bloqueo de navegación', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('mientras el perfil está incompleto, "Más opciones" (historial de clases) no se muestra -- esa ruta no existe en la pila reducida de ProfileStack', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
+    const { queryByText, getByText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
+    expect(queryByText('Ver historial de clases')).toBeNull();
+  });
+
+  it('con perfil completo, "Más opciones" se muestra y navega a History', async () => {
+    mockUser = { ...mockUser, perfilCompleto: true };
+    configurarMocks(PERFIL_COMPLETO);
     const navigation = { navigate: jest.fn() };
     const { getByText } = render(<ProfileScreen navigation={navigation} />);
     await waitFor(() => expect(getByText('Ver historial de clases')).toBeTruthy());
@@ -122,8 +145,8 @@ describe('ProfileScreen ("Mis Datos") -- formulario obligatorio de emergencia', 
     expect(navigation.navigate).toHaveBeenCalledWith('History');
   });
 
-  it('guardar con Contacto de emergencia / Ficha médica vacíos: bloquea el guardado con un Alert, no llama a marcarDatosEmergenciaCompletos', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('guardar con Teléfono / Domicilio / Teléfono de emergencia vacíos: bloquea el guardado con un Alert, no llama a marcarPerfilCompleto', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
     const { getByText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
@@ -133,57 +156,73 @@ describe('ProfileScreen ("Mis Datos") -- formulario obligatorio de emergencia', 
     await waitFor(() =>
       expect(Alert.alert).toHaveBeenCalledWith(
         'Faltan datos obligatorios',
-        expect.stringContaining('Contacto de emergencia')
+        'Completá Teléfono, Domicilio y Teléfono de emergencia antes de guardar.'
       )
     );
-    expect(mockMarcarDatosEmergenciaCompletos).not.toHaveBeenCalled();
+    expect(mockMarcarPerfilCompleto).not.toHaveBeenCalled();
     // `from('profiles')` solo se llamó una vez (la carga inicial) -- la
     // validación cortó ANTES de intentar el `update` con datos vacíos.
     expect(mockedFrom).toHaveBeenCalledTimes(1);
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('completa los 3 campos obligatorios y guarda: persiste en `profiles` y desbloquea la navegación vía marcarDatosEmergenciaCompletos', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('Contacto de emergencia (nombre) y Ficha médica quedaron afuera del set obligatorio: completar solo Teléfono/Domicilio/Teléfono de emergencia alcanza para guardar', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
     const { getByText, getByPlaceholderText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
 
-    fireEvent.changeText(getByPlaceholderText('Nombre del contacto'), 'Juan Pérez');
+    fireEvent.changeText(getByPlaceholderText('Teléfono / WhatsApp'), '1122334455');
+    fireEvent.changeText(getByPlaceholderText('Calle, número, localidad'), 'Av. Siempre Viva 742');
     fireEvent.changeText(getByPlaceholderText('Teléfono del contacto'), '1155667788');
-    fireEvent.changeText(
-      getByPlaceholderText('Lesiones, condiciones físicas u otras observaciones...'),
-      'Sin condiciones preexistentes.'
-    );
 
     fireEvent.press(getByText('Guardar cambios'));
 
-    await waitFor(() => expect(mockMarcarDatosEmergenciaCompletos).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockMarcarPerfilCompleto).toHaveBeenCalledTimes(1));
     expect(Alert.alert).toHaveBeenCalledWith('Guardado', 'Tus datos se actualizaron.');
     expect(Alert.alert).not.toHaveBeenCalledWith('Faltan datos obligatorios', expect.anything());
+    // Sincronización estricta con el panel Admin -- ver
+    // supabase_migration_domicilio_y_sync_telefono.sql.
+    expect(mockRpc).toHaveBeenCalledWith('sincronizar_telefono_a_socio');
   });
 
-  it('si falla el guardado en el backend, NO desbloquea la navegación (marcarDatosEmergenciaCompletos no se llama)', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('si el RPC de sincronización con el Admin falla (ej. migración no corrida todavía), el guardado igual se completa -- best-effort', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
+    configurarMocks(PERFIL_INCOMPLETO);
+    mockRpcResult = { data: null, error: { message: 'function not found in schema cache' } };
+    const { getByText, getByPlaceholderText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
+
+    fireEvent.changeText(getByPlaceholderText('Teléfono / WhatsApp'), '1122334455');
+    fireEvent.changeText(getByPlaceholderText('Calle, número, localidad'), 'Av. Siempre Viva 742');
+    fireEvent.changeText(getByPlaceholderText('Teléfono del contacto'), '1155667788');
+
+    fireEvent.press(getByText('Guardar cambios'));
+
+    await waitFor(() => expect(mockMarcarPerfilCompleto).toHaveBeenCalledTimes(1));
+    expect(Alert.alert).toHaveBeenCalledWith('Guardado', 'Tus datos se actualizaron.');
+  });
+
+  it('si falla el guardado en el backend, NO desbloquea la pestaña (marcarPerfilCompleto no se llama)', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
     mockUpdateResult = { data: null, error: { message: 'Network error' } };
     const { getByText, getByPlaceholderText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());
 
-    fireEvent.changeText(getByPlaceholderText('Nombre del contacto'), 'Juan Pérez');
+    fireEvent.changeText(getByPlaceholderText('Teléfono / WhatsApp'), '1122334455');
+    fireEvent.changeText(getByPlaceholderText('Calle, número, localidad'), 'Av. Siempre Viva 742');
     fireEvent.changeText(getByPlaceholderText('Teléfono del contacto'), '1155667788');
-    fireEvent.changeText(
-      getByPlaceholderText('Lesiones, condiciones físicas u otras observaciones...'),
-      'Sin condiciones preexistentes.'
-    );
 
     fireEvent.press(getByText('Guardar cambios'));
 
     await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('Error', 'Network error'));
-    expect(mockMarcarDatosEmergenciaCompletos).not.toHaveBeenCalled();
+    expect(mockMarcarPerfilCompleto).not.toHaveBeenCalled();
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('el botón "Cerrar sesión" queda siempre visible y funcional, incluso bloqueado (salir no es "usar la app")', async () => {
-    mockUser = { ...mockUser, datosEmergenciaCompletos: false };
+  it('el botón "Cerrar sesión" queda siempre visible y funcional, incluso con el perfil incompleto (salir no es "usar la app")', async () => {
+    mockUser = { ...mockUser, perfilCompleto: false };
     configurarMocks(PERFIL_INCOMPLETO);
     const { getByText } = render(<ProfileScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(getByText('Guardar cambios')).toBeTruthy());

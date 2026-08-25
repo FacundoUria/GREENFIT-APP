@@ -26,10 +26,15 @@ export interface MockSocio {
   role: 'socio' | 'admin';
   avatarUrl?: string | null;
   createdAt?: string;
-  // Datos de emergencia (exigencia de seguridad médica -- ver
-  // DatosEmergenciaGate.tsx). Por defecto YA completos para no romper el
-  // resto de la suite E2E, a la que no le interesa este gate; un spec que
-  // sí quiera probar el bloqueo los pisa explícitamente a null.
+  // Teléfono/domicilio -- por defecto YA completos (junto con emergencia
+  // abajo) para que el perfil quede "completo" y no dispare la redirección
+  // obligatoria a "Mis datos" en el resto de la suite, a la que no le
+  // interesa ese gate. Un spec que sí quiera probar el perfil incompleto
+  // los pisa explícitamente a null (ver perfil-obligatorio.spec.ts).
+  phone?: string | null;
+  domicilio?: string | null;
+  // Datos de emergencia (perfil obligatorio -- ver ProfileStack.tsx). Mismo
+  // criterio que arriba: completos por defecto.
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
   medicalNotes?: string | null;
@@ -63,14 +68,18 @@ function mockProfileRow(user: MockSocio) {
     id: user.id,
     full_name: user.fullName,
     dni: user.dni,
-    phone: null,
+    email: user.email,
+    // Perfil obligatorio (Nombre/Apellido/DNI/Correo/Teléfono/Teléfono de
+    // emergencia/Domicilio, ver AuthContext.tsx tienePerfilCompleto) --
+    // todos completos por defecto (`undefined` en el fixture cae acá) para
+    // no romper el resto de la suite E2E, a la que no le interesa este
+    // gate; un spec que sí quiera probar el perfil incompleto pisa el campo
+    // que le interesa explícitamente a null.
+    phone: user.phone !== undefined ? user.phone : '1122334455',
+    domicilio: user.domicilio !== undefined ? user.domicilio : 'Domicilio E2E 123',
     role: user.role,
     active: true,
     avatar_url: user.avatarUrl ?? null,
-    // Datos de emergencia -- por defecto YA completos (`undefined` en el
-    // fixture cae acá) para no romper el resto de la suite E2E, a la que no
-    // le interesa este gate; un spec que sí quiera probar el aviso los pisa
-    // explícitamente a null (ver emergencia-obligatoria.spec.ts).
     emergency_contact_name: user.emergencyContactName !== undefined ? user.emergencyContactName : 'Contacto E2E',
     emergency_contact_phone: user.emergencyContactPhone !== undefined ? user.emergencyContactPhone : '1100000000',
     medical_notes: user.medicalNotes !== undefined ? user.medicalNotes : 'Sin observaciones (E2E).',
