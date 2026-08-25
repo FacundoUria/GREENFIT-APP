@@ -26,6 +26,13 @@ export interface MockSocio {
   role: 'socio' | 'admin';
   avatarUrl?: string | null;
   createdAt?: string;
+  // Datos de emergencia (exigencia de seguridad médica -- ver
+  // DatosEmergenciaGate.tsx). Por defecto YA completos para no romper el
+  // resto de la suite E2E, a la que no le interesa este gate; un spec que
+  // sí quiera probar el bloqueo los pisa explícitamente a null.
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  medicalNotes?: string | null;
 }
 
 export type TablaFixtures = Record<string, any[]>;
@@ -60,6 +67,13 @@ function mockProfileRow(user: MockSocio) {
     role: user.role,
     active: true,
     avatar_url: user.avatarUrl ?? null,
+    // Datos de emergencia -- por defecto YA completos (`undefined` en el
+    // fixture cae acá) para no romper el resto de la suite E2E, a la que no
+    // le interesa este gate; un spec que sí quiera probar el aviso los pisa
+    // explícitamente a null (ver emergencia-obligatoria.spec.ts).
+    emergency_contact_name: user.emergencyContactName !== undefined ? user.emergencyContactName : 'Contacto E2E',
+    emergency_contact_phone: user.emergencyContactPhone !== undefined ? user.emergencyContactPhone : '1100000000',
+    medical_notes: user.medicalNotes !== undefined ? user.medicalNotes : 'Sin observaciones (E2E).',
     created_at: user.createdAt ?? '2025-01-15T00:00:00.000Z',
   };
 }
@@ -200,6 +214,23 @@ export async function mockSupabase(page: Page, options: MockSupabaseOptions) {
               for (const fila of nuevas) filas.push({ id: `e2e-${table}-${filas.length + 1}`, ...fila });
             } catch {
               // sin body parseable -- no hay nada que agregar al fixture.
+            }
+          }
+          // Un PATCH real persiste -- sin esto, un `.from(x).update(...)`
+          // seguido de un re-fetch en el MISMO test (ej. ProfileScreen
+          // vuelve a pedir `profiles` porque cambió `user` en AuthContext)
+          // pisaba el guardado con los datos viejos del fixture, algo que
+          // NUNCA pasaría contra la Supabase real. Aplica los mismos
+          // filtros que ya usa el GET (?columna=eq.valor) para saber a qué
+          // filas les pega el UPDATE, y mergea el payload adentro (misma
+          // referencia de objeto que vive en `tables[table]`).
+          if (method === 'PATCH') {
+            try {
+              const payload = request.postDataJSON();
+              const objetivo = aplicarFiltros(filas, reqUrl.searchParams);
+              for (const fila of objetivo) Object.assign(fila, payload);
+            } catch {
+              // sin body parseable -- no hay nada que mergear.
             }
           }
           await responderJson(route, 201, filas);

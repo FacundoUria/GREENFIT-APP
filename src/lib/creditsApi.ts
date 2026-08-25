@@ -90,10 +90,30 @@ export async function syncMyMembership(): Promise<{ vinculado: boolean; sincroni
   return resultado;
 }
 
+// Set de discipline_id que están en `socios.plan` AHORA MISMO, según el
+// panel Admin -- fuente única de verdad, ver supabase_migration_single_source_of_truth.sql.
+// `null` significa "no filtrar" (socio sin ficha admin vinculada todavía,
+// o la migración de este RPC todavía no se corrió en este ambiente --
+// mismo criterio "fail open" que ya usa syncMyMembership para lo mismo).
+async function fetchDisciplinasDelPlanActual(): Promise<Set<string> | null> {
+  const { data, error } = await supabase.rpc('disciplinas_del_plan_actual').single();
+  if (error) return null;
+  const fila = data as { vinculado: boolean; discipline_ids: string[] | null } | null;
+  if (!fila || !fila.vinculado) return null;
+  return new Set(fila.discipline_ids ?? []);
+}
+
 // El balance más reciente del socio para CADA disciplina en la que tenga
-// algo cargado (una fila por disciplina, no una sola global).
+// algo cargado (una fila por disciplina, no una sola global) -- filtrado a
+// las disciplinas que el panel Admin tiene tildadas HOY para este socio.
+// `user_credits` es un ledger append-only (nunca se borra una fila): si el
+// admin destildó una disciplina, su fila vieja sigue existiendo para la
+// auditoría, pero acá deja de ser VISIBLE apenas se saca del plan -- sin
+// esto, un socio seguía viendo para siempre disciplinas que el admin ya
+// le había sacado (bug real reportado: "figuran activos Boxeo, Kickboxing
+// y CrossFit" en la PWA cuando el Admin solo tenía tildado Boxeo).
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
-  const [{ data, error }, { data: disciplinasData, error: discError }] = await Promise.all([
+  const [{ data, error }, { data: disciplinasData, error: discError }, disciplinasDelPlan] = await Promise.all([
     supabase
       .from('user_credits')
       .select(
@@ -105,6 +125,7 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
     // de user_credits puntual -- para armar `pack.creditos` con nombres
     // reales (no solo ids) hace falta el catálogo completo de disciplinas.
     supabase.from('disciplines').select('id, name'),
+    fetchDisciplinasDelPlanActual(),
   ]);
   if (error) throw new Error(error.message);
   if (discError) throw new Error(discError.message);
@@ -113,6 +134,7 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   const latestByDiscipline = new Map<string, (typeof data)[number]>();
   for (const row of data ?? []) {
     const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
+    if (disciplinasDelPlan && !disciplinasDelPlan.has(discipline.id)) continue;
     if (!latestByDiscipline.has(discipline.id)) latestByDiscipline.set(discipline.id, row);
   }
 

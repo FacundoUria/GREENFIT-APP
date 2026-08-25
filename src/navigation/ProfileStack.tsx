@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
+import { useAuth } from '../context/AuthContext';
 import ProfileScreen from '../screens/user/ProfileScreen';
 import HistoryScreen from '../screens/user/HistoryScreen';
 import ProgresoMobileView from '../screens/user/ProgresoMobileView';
@@ -57,8 +58,17 @@ function ProfileHomeScreen({ navigation }: any) {
 }
 
 export default function ProfileStack() {
+  const { user } = useAuth();
+  // Mismo criterio que MainTabs.tsx: si vía el tab "Perfil" (redirigido por
+  // datos de emergencia incompletos), esta pila arranca directo en "Mis
+  // datos" en vez del listado -- una sola vez al montar, sin impedir que el
+  // socio navegue a cualquier otra pantalla después (botón de volver y
+  // resto de tabs quedan intactos, no hay ningún bloqueo).
+  const initialRouteName = !user?.datosEmergenciaCompletos ? 'MyData' : 'ProfileHome';
+
   return (
     <Stack.Navigator
+      initialRouteName={initialRouteName}
       screenOptions={{ headerStyle: { backgroundColor: colors.surface }, headerTintColor: colors.textPrimary }}
     >
       {/* Sin header nativo acá -- PerfilMobileView ya trae su propio título

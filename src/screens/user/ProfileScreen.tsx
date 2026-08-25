@@ -68,8 +68,17 @@ async function loadProfile(userId: string): Promise<ProfileForm> {
 // Foco exclusivo en los datos de la cuenta del socio. El nombre y el DNI
 // son de solo lectura (identidad del socio, la carga/corrige el admin desde
 // Gestión de socios); el resto lo edita el propio socio.
+//
+// Exigencia de seguridad médica del gimnasio: si faltan los datos de
+// emergencia, ProfileStack.tsx redirige acá UNA SOLA VEZ al entrar (sin
+// bloquear nada -- el socio puede navegar a cualquier otro tab cuando
+// quiera, ver MainTabs.tsx/ProfileStack.tsx). Acá solo mostramos un banner
+// informativo (`bloqueado`) mientras falten, y Contacto de emergencia/Ficha
+// médica quedan obligatorios para guardar SIEMPRE (no solo la primera vez),
+// para que una vez completos nunca se puedan volver a vaciar sin querer.
 export default function ProfileScreen({ navigation }: any) {
-  const { user, logout } = useAuth();
+  const { user, logout, marcarDatosEmergenciaCompletos } = useAuth();
+  const bloqueado = !!user && !user.datosEmergenciaCompletos;
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -105,18 +114,36 @@ export default function ProfileScreen({ navigation }: any) {
 
   async function handleSave() {
     if (!user || !form) return;
+
+    // Obligatorios SIEMPRE (no solo mientras está bloqueado) -- exigencia
+    // de seguridad médica del gimnasio: una vez cargados, no deben poder
+    // volver a quedar vacíos por accidente.
+    const emergencyContactName = form.emergencyContactName.trim();
+    const emergencyContactPhone = form.emergencyContactPhone.trim();
+    const medicalNotes = form.medicalNotes.trim();
+    if (!emergencyContactName || !emergencyContactPhone || !medicalNotes) {
+      Alert.alert(
+        'Faltan datos obligatorios',
+        'Completá Contacto de emergencia (nombre y teléfono) y Ficha médica antes de guardar.'
+      );
+      return;
+    }
+
     setIsSaving(true);
     try {
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           phone: form.phone.trim() || null,
-          emergency_contact_name: form.emergencyContactName.trim() || null,
-          emergency_contact_phone: form.emergencyContactPhone.trim() || null,
-          medical_notes: form.medicalNotes.trim() || null,
+          emergency_contact_name: emergencyContactName,
+          emergency_contact_phone: emergencyContactPhone,
+          medical_notes: medicalNotes,
         })
         .eq('id', user.id);
       if (updateError) throw new Error(updateError.message);
+      // Desbloquea RootNavigator al instante si hacía falta -- no-op
+      // inofensivo si ya estaba completo de antes.
+      marcarDatosEmergenciaCompletos();
       Alert.alert('Guardado', 'Tus datos se actualizaron.');
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo guardar.');
@@ -133,6 +160,16 @@ export default function ProfileScreen({ navigation }: any) {
     <>
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {bloqueado && (
+        <View style={styles.bloqueoBanner} accessibilityLabel="Datos de emergencia obligatorios">
+          <Ionicons name="medkit" size={18} color={colors.warning} />
+          <Text style={styles.bloqueoBannerText}>
+            Por seguridad, el gimnasio exige tener cargados tus datos de emergencia antes de usar la app. Completá
+            Contacto de emergencia y Ficha médica y tocá "Guardar cambios" para continuar.
+          </Text>
+        </View>
+      )}
 
       <SectionCard icon="person-outline" title="Mis datos">
         <TextInput style={[styles.input, styles.inputDisabled]} value={form.fullName} editable={false} />
@@ -244,6 +281,18 @@ export default function ProfileScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   error: { color: colors.danger, marginBottom: 12 },
+  bloqueoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(224, 185, 83, 0.12)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    padding: 14,
+    marginBottom: 16,
+  },
+  bloqueoBannerText: { flex: 1, color: colors.textPrimary, fontSize: 12.5, lineHeight: 18, fontWeight: '600' },
   sectionCard: {
     backgroundColor: colors.surface,
     borderRadius: 16,

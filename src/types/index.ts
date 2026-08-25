@@ -9,6 +9,14 @@ export interface User {
   phone: string | null;
   role: Role;
   avatarUrl: string | null;
+  // true si tiene cargados los 3 datos obligatorios de emergencia
+  // (emergency_contact_name, emergency_contact_phone, medical_notes --
+  // columnas que ya existían en profiles) -- exigencia de seguridad médica
+  // del gimnasio. Mientras sea false, MainTabs/ProfileStack redirigen al
+  // socio a "Mis datos" UNA SOLA VEZ al entrar (sin bloquear ni ocultar el
+  // resto de la navegación -- ver MainTabs.tsx, ProfileStack.tsx y
+  // ProfileScreen.tsx).
+  datosEmergenciaCompletos: boolean;
 }
 
 export type DisciplineKind = 'credits' | 'membership';

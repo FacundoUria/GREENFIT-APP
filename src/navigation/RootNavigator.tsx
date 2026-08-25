@@ -8,6 +8,11 @@ import { colors } from '../theme/colors';
 
 // Esta es la pieza central del control de acceso por rol:
 // no hay "if role === admin" desperdigado por la app, todo pasa por acá.
+//
+// La exigencia de datos de emergencia (seguridad médica) NO vive acá --
+// no bloquea ni atrapa al socio en ninguna pantalla. Es una redirección
+// simple de "una sola vez al entrar" hacia Mis Datos, con el menú inferior
+// y el botón de volver siempre habilitados (ver MainTabs.tsx / ProfileStack.tsx).
 export default function RootNavigator() {
   const { user, isBootstrapping } = useAuth();
 
