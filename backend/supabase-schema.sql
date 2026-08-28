@@ -85,7 +85,11 @@ create table packs (
 create table user_credits (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references profiles(id) on delete cascade,
-  pack_id uuid not null references packs(id),
+  -- Nullable (ver supabase_migration_pack_id_nullable.sql, repo PAGINA
+  -- SUPABASE): un ajuste manual de créditos hecho por el admin desde
+  -- Socios.jsx (fuera de la compra de un pack puntual) no tiene ningún
+  -- pack_id real que ofrecer.
+  pack_id uuid references packs(id),
   discipline_id uuid not null references disciplines(id),
   remaining_credits int,
   expires_at timestamptz,
