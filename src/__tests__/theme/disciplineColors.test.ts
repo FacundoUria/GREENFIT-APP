@@ -5,9 +5,9 @@ describe('getDisciplineStyle', () => {
     expect(getDisciplineStyle('CrossFit').color).toBe('#22D3EE');
   });
 
-  it('mapea Boxeo y Kickboxing al mismo rojo neón', () => {
+  it('mapea Boxeo y Kickstrike al mismo rojo neón', () => {
     expect(getDisciplineStyle('Boxeo').color).toBe('#FF3B5C');
-    expect(getDisciplineStyle('Kickboxing').color).toBe('#FF3B5C');
+    expect(getDisciplineStyle('Kickstrike').color).toBe('#FF3B5C');
   });
 
   it('no distingue mayúsculas/tildes ("cross fit" no matchea pero "CROSSFIT" sí)', () => {

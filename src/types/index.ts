@@ -23,7 +23,7 @@ export type DisciplineKind = 'credits' | 'membership';
 
 export interface Discipline {
   id: string;
-  name: string; // Boxeo, Kickboxing, CrossFit, Aparatos
+  name: string; // Boxeo, Kickstrike, CrossFit, Aparatos
   kind: DisciplineKind;
 }
 
@@ -80,7 +80,7 @@ export interface CreditTransaction {
 // repite (0=Dom...6=Sáb, mismo criterio que Date.getDay()).
 export interface GymClass {
   id: string;
-  title: string; // Boxeo, Kickboxing, CrossFit
+  title: string; // Boxeo, Kickstrike, CrossFit
   disciplineId: string;
   instructor: string | null;
   location: string | null;

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 export interface Configuracion {
   precioCrossfit: number;
   precioBoxeo: number;
-  precioKickboxing: number;
+  precioKickstrike: number;
   precioAparatos: number;
   diasTolerancia: number;
   limiteCancelacionMinutos: number;
@@ -17,7 +17,7 @@ export interface Configuracion {
 const CONFIGURACION_POR_DEFECTO: Configuracion = {
   precioCrossfit: 0,
   precioBoxeo: 0,
-  precioKickboxing: 0,
+  precioKickstrike: 0,
   precioAparatos: 0,
   diasTolerancia: 5,
   limiteCancelacionMinutos: 120,
@@ -53,7 +53,7 @@ export function ConfiguracionProvider({ children }: { children: React.ReactNode 
       supabase
         .from('configuracion')
         .select(
-          'precio_crossfit, precio_boxeo, precio_kickboxing, precio_aparatos, dias_tolerancia, limite_cancelacion_minutos, alias_cvu, titular_cuenta'
+          'precio_crossfit, precio_boxeo, precio_kickstrike, precio_aparatos, dias_tolerancia, limite_cancelacion_minutos, alias_cvu, titular_cuenta'
         )
         .eq('id', 1)
         .maybeSingle()
@@ -66,7 +66,7 @@ export function ConfiguracionProvider({ children }: { children: React.ReactNode 
               ...prev,
               precioCrossfit: data.precio_crossfit ?? 0,
               precioBoxeo: data.precio_boxeo ?? 0,
-              precioKickboxing: data.precio_kickboxing ?? 0,
+              precioKickstrike: data.precio_kickstrike ?? 0,
               precioAparatos: data.precio_aparatos ?? 0,
               diasTolerancia: data.dias_tolerancia ?? 5,
               limiteCancelacionMinutos: data.limite_cancelacion_minutos ?? 120,

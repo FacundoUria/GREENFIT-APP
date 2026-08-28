@@ -35,7 +35,7 @@ export function getExpiryStatus(expiresAt: string | null, diasTolerancia = 0): M
   return 'activo';
 }
 
-// Para packs de créditos (CrossFit/Boxeo/Kickboxing) -- acá no hay fecha de
+// Para packs de créditos (CrossFit/Boxeo/Kickstrike) -- acá no hay fecha de
 // vencimiento por sí, el balance en 0 ES el "vencido" (sin clases para usar).
 export function getCreditsStatus(remainingCredits: number | null): MembershipStatus {
   return (remainingCredits ?? 0) > 0 ? 'activo' : 'vencido'

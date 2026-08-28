@@ -10,11 +10,15 @@ export interface DisciplineStyle {
 // Supabase, no un enum) -- las claves van normalizadas sin tildes/mayúsculas.
 // Si en algún box lo escriben distinto ("Kick Strike" vs "kickstrike") el
 // match parcial de getDisciplineStyle() igual lo agarra.
+//
+// "Kickboxing" se eliminó por completo (pedido del cliente, ver
+// supabase_migration_rename_kickstrike.sql en PAGINA SUPABASE) -- la
+// disciplina se llama única y exclusivamente "Kickstrike" en todo el
+// ecosistema, no queda ninguna clave legacy acá.
 const DISCIPLINE_STYLES: Record<string, DisciplineStyle> = {
   crossfit: { color: '#22D3EE', icon: 'flash' }, // ciano/azul
   gap: { color: '#E040FB', icon: 'body' }, // magenta
   boxeo: { color: '#FF3B5C', icon: 'fitness' }, // rojo neón
-  kickboxing: { color: '#FF3B5C', icon: 'fitness' },
   kickstrike: { color: '#FF3B5C', icon: 'fitness' },
   funcional: { color: colors.primary, icon: 'barbell' }, // verde GreenFit
   musculacion: { color: colors.primary, icon: 'barbell' },

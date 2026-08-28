@@ -52,13 +52,13 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- ── DISCIPLINES ─────────────────────────────────────────────
--- Boxeo, Kickboxing, CrossFit son 'credits' (consumen créditos por clase
+-- Boxeo, Kickstrike, CrossFit son 'credits' (consumen créditos por clase
 -- reservada). Aparatos es 'membership': el socio paga un mes libre, no
 -- reserva turno ni gasta créditos — solo tiene una vigencia (expires_at
 -- en user_credits) que el admin puede ver.
 create table disciplines (
   id uuid primary key default uuid_generate_v4(),
-  name text not null unique,        -- Boxeo, Kickboxing, CrossFit, Aparatos
+  name text not null unique,        -- Boxeo, Kickstrike, CrossFit, Aparatos
   kind text not null default 'credits' check (kind in ('credits', 'membership')),
   created_at timestamptz default now()
 );
@@ -124,7 +124,7 @@ create index idx_credit_transactions_user on credit_transactions(user_id, create
 -- que Date.getDay() en JS, para no tener que traducir en el cliente).
 create table classes (
   id uuid primary key default uuid_generate_v4(),
-  title text not null,              -- Boxeo, Kickboxing, CrossFit
+  title text not null,              -- Boxeo, Kickstrike, CrossFit
   discipline_id uuid not null references disciplines(id),
   instructor text,
   location text,
@@ -266,7 +266,7 @@ begin
   end if;
 
   -- El balance de créditos es por disciplina: reservar Boxeo descuenta del
-  -- pack de Boxeo, no del de Kickboxing aunque el socio tenga los dos.
+  -- pack de Boxeo, no del de Kickstrike aunque el socio tenga los dos.
   select id, remaining_credits into v_credit_id, v_remaining
   from user_credits
   where user_id = v_user_id and discipline_id = v_discipline_id

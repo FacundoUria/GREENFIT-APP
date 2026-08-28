@@ -49,7 +49,7 @@ select v.title, d.id, v.capacity, '{0,1,2,3,4,5,6}', v.start_time, v.end_time
 from (
   values
     ('Boxeo', 10, time '18:00', time '19:00'),
-    ('Kickboxing', 12, time '19:00', time '20:00'),
+    ('Kickstrike', 12, time '19:00', time '20:00'),
     ('CrossFit', 8, time '20:00', time '21:00')
 ) as v(title, capacity, start_time, end_time)
 join disciplines d on d.name = v.title

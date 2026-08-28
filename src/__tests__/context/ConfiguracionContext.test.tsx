@@ -39,7 +39,7 @@ function filaConfiguracion(overrides: Record<string, unknown> = {}) {
   return {
     precio_crossfit: 0,
     precio_boxeo: 0,
-    precio_kickboxing: 0,
+    precio_kickstrike: 0,
     precio_aparatos: 0,
     dias_tolerancia: 5,
     limite_cancelacion_minutos: 120,

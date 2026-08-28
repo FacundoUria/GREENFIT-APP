@@ -5,14 +5,14 @@ import { irATab } from './support/nav';
 
 // Bug crítico reportado (socia "Isa Giurato"): el panel Admin decía que el
 // socio tenía SOLO Boxeo (6 créditos), pero la PWA mostraba Boxeo +
-// Kickboxing + CrossFit como activos -- porque user_credits es un ledger
+// Kickstrike + CrossFit como activos -- porque user_credits es un ledger
 // append-only (nunca se borra una fila) y nada invalidaba las disciplinas
 // que el admin ya había destildado del plan. Fix: el plan ACTUAL de
 // `socios` (RPC disciplinas_del_plan_actual, security definer) es la única
 // fuente de verdad -- fetchUserBalances() descarta cualquier balance que no
 // esté en ese set, sin importar qué filas viejas tenga el ledger.
 const DISCIPLINA_BOXEO = { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' };
-const DISCIPLINA_KICKBOXING = { id: 'disc-kickboxing', name: 'Kickboxing', kind: 'credits' };
+const DISCIPLINA_KICKSTRIKE = { id: 'disc-kickstrike', name: 'Kickstrike', kind: 'credits' };
 const DISCIPLINA_CROSSFIT = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' };
 
 function creditoRow(id: string, discipline: typeof DISCIPLINA_BOXEO, remaining: number) {
@@ -28,16 +28,16 @@ function creditoRow(id: string, discipline: typeof DISCIPLINA_BOXEO, remaining: 
 }
 
 // El ledger tiene las 3 disciplinas -- exactamente el estado real reportado
-// (Boxeo 6, Kickboxing 9, CrossFit 7), simulando que en algún momento el
+// (Boxeo 6, Kickstrike 9, CrossFit 7), simulando que en algún momento el
 // socio tuvo las tres y el admin después las destildó salvo Boxeo.
 const LEDGER_ISA = [
   creditoRow('uc-boxeo', DISCIPLINA_BOXEO, 6),
-  creditoRow('uc-kickboxing', DISCIPLINA_KICKBOXING, 9),
+  creditoRow('uc-kickstrike', DISCIPLINA_KICKSTRIKE, 9),
   creditoRow('uc-crossfit', DISCIPLINA_CROSSFIT, 7),
 ];
 
 test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el ledger de créditos)', () => {
-  test('caso real: el Admin solo tiene tildado Boxeo -> Inicio y Mi Perfil muestran SOLO Boxeo, no Kickboxing ni CrossFit', async ({
+  test('caso real: el Admin solo tiene tildado Boxeo -> Inicio y Mi Perfil muestran SOLO Boxeo, no Kickstrike ni CrossFit', async ({
     page,
   }) => {
     await loginComoSocio(page, {
@@ -48,7 +48,7 @@ test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el
     });
 
     await expect(page.getByText('Boxeo', { exact: true })).toBeVisible();
-    await expect(page.getByText('Kickboxing', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Kickstrike', { exact: true })).toHaveCount(0);
     await expect(page.getByText('CrossFit', { exact: true })).toHaveCount(0);
 
     await irATab(page, 'Perfil');
@@ -57,7 +57,7 @@ test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el
     // muestra "Boxeo" en su propia Hero Card; Perfil se montó DESPUÉS, así
     // que es el último en el árbol (mismo criterio que perfil.spec.ts).
     await expect(page.getByText('Boxeo', { exact: true }).last()).toBeVisible();
-    await expect(page.getByText('Kickboxing', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Kickstrike', { exact: true })).toHaveCount(0);
     await expect(page.getByText('CrossFit', { exact: true })).toHaveCount(0);
   });
 
@@ -73,7 +73,7 @@ test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el
 
     await expect(page.getByText('Todavía no tenés ningún pack activo.')).toBeVisible();
     await expect(page.getByText('Boxeo', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('Kickboxing', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Kickstrike', { exact: true })).toHaveCount(0);
     await expect(page.getByText('CrossFit', { exact: true })).toHaveCount(0);
   });
 
@@ -88,7 +88,7 @@ test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el
     });
 
     await expect(page.getByText('Boxeo', { exact: true })).toBeVisible();
-    await expect(page.getByText('Kickboxing', { exact: true })).toBeVisible();
+    await expect(page.getByText('Kickstrike', { exact: true })).toBeVisible();
     await expect(page.getByText('CrossFit', { exact: true })).toBeVisible();
   });
 
@@ -100,7 +100,7 @@ test.describe('PWA -- Single Source of Truth (el plan actual del Admin filtra el
     await loginComoSocio(page, { tables: { ...tablasBase(), user_credits: LEDGER_ISA } });
 
     await expect(page.getByText('Boxeo', { exact: true })).toBeVisible();
-    await expect(page.getByText('Kickboxing', { exact: true })).toBeVisible();
+    await expect(page.getByText('Kickstrike', { exact: true })).toBeVisible();
     await expect(page.getByText('CrossFit', { exact: true })).toBeVisible();
   });
 });

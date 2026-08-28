@@ -116,7 +116,7 @@ describe('fetchPacks -- combos multi-disciplina', () => {
 });
 
 // Bug crítico reportado (Isa Giurato): el panel Admin decía "solo Boxeo (6
-// créditos)" pero la PWA mostraba Boxeo + Kickboxing + CrossFit -- porque
+// créditos)" pero la PWA mostraba Boxeo + Kickstrike + CrossFit -- porque
 // user_credits es un ledger append-only (nunca se borra una fila) y nada
 // invalidaba las disciplinas que el admin ya había destildado. Fix: el
 // plan ACTUAL de `socios` (vía el nuevo RPC disciplinas_del_plan_actual)
@@ -129,9 +129,9 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
     id: 'uc-boxeo', user_id: 'user-1', remaining_credits: 6, expires_at: null, created_at: '2026-08-10T00:00:00.000Z',
     discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }, pack: null,
   };
-  const FILA_KICKBOXING = {
+  const FILA_KICKSTRIKE = {
     id: 'uc-kick', user_id: 'user-1', remaining_credits: 9, expires_at: null, created_at: '2026-07-01T00:00:00.000Z',
-    discipline: { id: 'disc-kick', name: 'Kickboxing', kind: 'credits' }, pack: null,
+    discipline: { id: 'disc-kick', name: 'Kickstrike', kind: 'credits' }, pack: null,
   };
   const FILA_CROSSFIT = {
     id: 'uc-crossfit', user_id: 'user-1', remaining_credits: 7, expires_at: null, created_at: '2026-06-01T00:00:00.000Z',
@@ -146,8 +146,8 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
     });
   }
 
-  it('caso Isa Giurato: plan actual = solo Boxeo -> la PWA descarta Kickboxing y CrossFit aunque el ledger los tenga', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKBOXING, FILA_CROSSFIT]);
+  it('caso Isa Giurato: plan actual = solo Boxeo -> la PWA descarta Kickstrike y CrossFit aunque el ledger los tenga', async () => {
+    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
     mockRpc.mockReturnValue({
       single: jest.fn().mockResolvedValue({ data: { vinculado: true, discipline_ids: ['disc-boxeo'] }, error: null }),
     });
@@ -160,7 +160,7 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
   });
 
   it('plan actual vacío (admin destildó todo) -> la PWA no muestra NADA, pese a tener 3 filas en el ledger', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKBOXING, FILA_CROSSFIT]);
+    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
     mockRpc.mockReturnValue({
       single: jest.fn().mockResolvedValue({ data: { vinculado: true, discipline_ids: [] }, error: null }),
     });
@@ -169,7 +169,7 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
   });
 
   it('no vinculado (sin ficha en socios todavía) -> no filtra nada, muestra todo (fail open, mismo criterio que syncMyMembership)', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKBOXING, FILA_CROSSFIT]);
+    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
     mockRpc.mockReturnValue({
       single: jest.fn().mockResolvedValue({ data: { vinculado: false, discipline_ids: null }, error: null }),
     });
@@ -178,7 +178,7 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
   });
 
   it('el RPC todavía no está desplegado (PGRST202) -> no filtra nada, mismo fail-open', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKBOXING]);
+    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE]);
     mockRpc.mockReturnValue({
       single: jest.fn().mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } }),
     });
@@ -232,6 +232,6 @@ describe('creditosOriginalesPara', () => {
   });
 
   it('una disciplina que no está en el combo devuelve null', () => {
-    expect(creditosOriginalesPara(pack, 'd-kickboxing')).toBeNull();
+    expect(creditosOriginalesPara(pack, 'd-kickstrike')).toBeNull();
   });
 });

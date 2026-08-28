@@ -110,7 +110,7 @@ async function fetchDisciplinasDelPlanActual(): Promise<Set<string> | null> {
 // admin destildó una disciplina, su fila vieja sigue existiendo para la
 // auditoría, pero acá deja de ser VISIBLE apenas se saca del plan -- sin
 // esto, un socio seguía viendo para siempre disciplinas que el admin ya
-// le había sacado (bug real reportado: "figuran activos Boxeo, Kickboxing
+// le había sacado (bug real reportado: "figuran activos Boxeo, Kickstrike
 // y CrossFit" en la PWA cuando el Admin solo tenía tildado Boxeo).
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   const [{ data, error }, { data: disciplinasData, error: discError }, disciplinasDelPlan] = await Promise.all([
