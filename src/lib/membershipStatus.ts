@@ -16,7 +16,7 @@ export function formatLongDate(dateStr: string): string {
   return `${date.getDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${date.getFullYear()}`;
 }
 
-// Para membresías con vencimiento (Aparatos/Musculación, Pase Libre).
+// Para membresías con vencimiento (Aparatos, Pase Libre).
 // `diasTolerancia` es el mismo valor que "Días de tolerancia de pago" en
 // Configuración: mientras el socio esté dentro de esa ventana, el admin no
 // lo trata como vencido (queda "en tolerancia"), así que la PWA tampoco debe

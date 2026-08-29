@@ -411,7 +411,7 @@ export default function HomeScreen({ navigation }: any) {
             <View key={b.id} style={styles.heroPlanRow}>
               <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={styles.heroPlanName}>
-                  {isMembership ? 'Aparatos / Musculación' : b.discipline.name}
+                  {isMembership ? 'Aparatos' : b.discipline.name}
                 </Text>
                 <Text style={styles.heroPlanDetail}>
                   {isMembership

@@ -13,7 +13,7 @@ import { formatDateOnly } from './classesApi';
 // a una estimación (ver más abajo) hasta que se despliegue.
 //
 // TODA acción positiva de gamificación otorga SIEMPRE Y EXACTAMENTE 100 XP
-// -- reserva (+100), asistencia real (+100), Check-in Rápido de Musculación
+// -- reserva (+100), asistencia real (+100), Check-in Rápido de Aparatos
 // (+100), y ahora "Hoy Entrené" (+100). Ninguna otorga un valor distinto.
 
 export const XP_POR_NIVEL = 500;

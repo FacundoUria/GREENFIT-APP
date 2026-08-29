@@ -230,7 +230,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
             <View key={b.id} style={styles.planRow}>
               <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={styles.planName} numberOfLines={1}>
-                  {b.pack?.name ?? (isMembership ? 'Aparatos / Musculación' : b.discipline.name)}
+                  {b.pack?.name ?? (isMembership ? 'Aparatos' : b.discipline.name)}
                 </Text>
                 <Text style={styles.planDetail}>
                   {isMembership

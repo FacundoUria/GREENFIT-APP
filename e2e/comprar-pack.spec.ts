@@ -331,7 +331,7 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     const mes = mesesEs[fechaLocal.getMonth()];
     const fechaEsperada = `${fechaLocal.getDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${fechaLocal.getFullYear()}`;
 
-    await expect(page.getByText('Aparatos / Musculación')).toBeVisible();
+    await expect(page.getByText('Aparatos')).toBeVisible();
     await expect(page.getByText(`Vence el ${fechaEsperada}`)).toBeVisible();
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
   });

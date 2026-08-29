@@ -34,7 +34,7 @@ import { irATab } from './support/nav';
 // mutando la fixture en memoria, como haría un INSERT real), y se vuelve a
 // Perfil sin recargar la página -- igual que un socio que ya tiene la app
 // abierta cuando Seba le hace el Check-in Rápido en el mostrador.
-test('un check-in de Musculación otorgado desde el Admin se refleja en el XP de la PWA al volver a Perfil', async ({
+test('un check-in de Aparatos otorgado desde el Admin se refleja en el XP de la PWA al volver a Perfil', async ({
   page,
 }) => {
   const tablas = tablasBase();
@@ -53,7 +53,7 @@ test('un check-in de Musculación otorgado desde el Admin se refleja en el XP de
   // Simula el INSERT que hace admin_otorgar_checkin_musculacion en el
   // Admin -- misma forma exacta (ver supabase_migration_xp_disciplina.sql):
   // 'asistencia', +100, discipline_id de la disciplina 'membership'
-  // (Aparatos/Musculación), sin reference_id. `tablas` es la MISMA
+  // (Aparatos), sin reference_id. `tablas` es la MISMA
   // referencia que mockSupabase sigue leyendo en cada request -- mutarla acá
   // emula un INSERT real llegando por afuera de esta sesión de la PWA.
   tablas.xp_events.push({

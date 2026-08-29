@@ -127,7 +127,7 @@ async function fetchAuthorInfoMap(ids: string[]): Promise<Map<string, AuthorInfo
 
 // Clases con asistencia real de ESTE socio en el mes en curso, SOLO en
 // disciplinas grupales (kind='credits') -- mismo criterio que el ranking:
-// Musculación/Aparatos son pase libre, no reservan clases puntuales, así
+// Aparatos son pase libre, no reservan clases puntuales, así
 // que no suman acá. Se usa para el callout "Vos: X clases" del tab Ranking
 // cuando hay un filtro de disciplina activo (distinto de xpApi.fetchClasesDelMes,
 // que suma TODAS las disciplinas).

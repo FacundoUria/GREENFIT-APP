@@ -79,7 +79,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
 
     // Las 3 disciplinas visibles -- ninguna se "pierde" ni se omite por
     // tener más de una fila en user_credits.
-    await expect(page.getByText('Aparatos / Musculación')).toBeVisible();
+    await expect(page.getByText('Aparatos')).toBeVisible();
     await expect(page.getByText('Boxeo')).toBeVisible();
     await expect(page.getByText('CrossFit')).toBeVisible();
 
@@ -133,7 +133,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
       tables: { ...tablasBase(), user_credits: [membresiaRow('uc-aparatos', EN_10_DIAS)] },
     });
 
-    await expect(page.getByText('Aparatos / Musculación')).toBeVisible();
+    await expect(page.getByText('Aparatos')).toBeVisible();
     await expect(page.getByText('Activo', { exact: true })).toBeVisible();
     await expect(page.getByText(/Vence el/)).toBeVisible();
   });
@@ -145,7 +145,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
       tables: { ...tablasBase(), user_credits: [membresiaRow('uc-aparatos', HACE_15_DIAS)] },
     });
 
-    await expect(page.getByText('Aparatos / Musculación')).toBeVisible();
+    await expect(page.getByText('Aparatos')).toBeVisible();
     await expect(page.getByText('Vencido', { exact: true })).toBeVisible();
     await expect(page.getByText(/Venció el/)).toBeVisible();
   });
@@ -167,7 +167,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
     });
 
     await irATab(page, 'Perfil');
-    await expect(page.getByText('Aparatos / Musculación').last()).toBeVisible();
+    await expect(page.getByText('Aparatos').last()).toBeVisible();
     await expect(page.getByText('Boxeo').last()).toBeVisible();
     await expect(page.getByText('CrossFit').last()).toBeVisible();
     await expect(page.getByText(/6 de \d+ clases restantes|6.*clases restantes/).last()).toBeVisible();
