@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
@@ -20,9 +19,20 @@ import { fetchClosedDays, ClosedDay } from '../../lib/closedDaysApi';
 import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatClassTime, getCountdown } from '../../lib/classTime';
 import { useTicker } from '../../hooks/useTicker';
+import { withTimeout } from '../../lib/withTimeout';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import DaySelector from '../../components/DaySelector';
 import ReservaConfirmadaModal from '../../components/ReservaConfirmadaModal';
+import BookingConfirmModal from '../../components/BookingConfirmModal';
+import MessageModal, { MessageModalContent } from '../../components/MessageModal';
+
+// Timeout de red para reservar/cancelar: el cliente de Supabase no tiene
+// uno por defecto -- si la conexión se cuelga a mitad de la request (wifi
+// del gimnasio), la promesa quedaba pendiente para siempre y el spinner de
+// la tarjeta nunca se cerraba (bug real reportado: "se queda pensando y
+// nunca concreta la inscripción"). Ver withTimeout.ts.
+const RPC_TIMEOUT_MS = 20_000;
+const RPC_TIMEOUT_MESSAGE = 'Esto está tardando demasiado. Revisá tu conexión e intentá de nuevo.';
 
 type AgendaClass = BaseClassWithBookings & { isBooked: boolean };
 
@@ -83,6 +93,12 @@ export default function AgendaMobileView() {
   const [cancelTarget, setCancelTarget] = useState<AgendaClass | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState<AgendaClass | null>(null);
+  // Paso de confirmación antes de reservar (evita el one-tap accidental) +
+  // reemplazo de Alert.alert (no-op en Web, ver crossPlatformAlert.ts) para
+  // los mensajes de error/resultado de reservar y cancelar.
+  const [confirmTarget, setConfirmTarget] = useState<AgendaClass | null>(null);
+  const [isBooking, setIsBooking] = useState(false);
+  const [messageModal, setMessageModal] = useState<MessageModalContent | null>(null);
 
   const selectedDateStr = formatDateOnly(selectedDate);
   const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
@@ -131,40 +147,62 @@ export default function AgendaMobileView() {
     return { eyebrow, title };
   }, [selectedDate]);
 
-  async function handlePress(item: AgendaClass) {
+  // Ya NO dispara la reserva -- solo valida y, si todo está en orden, abre
+  // el modal de confirmación (BookingConfirmModal). El RPC real vive en
+  // confirmBooking(), disparado recién cuando el socio toca "Confirmar".
+  function handlePress(item: AgendaClass) {
     if (item.isBooked) {
       setCancelTarget(item);
       return;
     }
     if (closedToday) {
-      Alert.alert(
-        'Gimnasio cerrado',
-        `El gimnasio permanece cerrado este día${closedToday.motivo ? ` (${closedToday.motivo})` : ''}.`
-      );
+      setMessageModal({
+        title: 'Gimnasio cerrado',
+        message: `El gimnasio permanece cerrado este día${closedToday.motivo ? ` (${closedToday.motivo})` : ''}.`,
+        tone: 'info',
+      });
       return;
     }
     if (item.bookedCount >= item.capacity) {
-      Alert.alert('Sin cupo', 'Esta clase ya no tiene lugares disponibles.');
+      setMessageModal({ title: 'Sin cupo', message: 'Esta clase ya no tiene lugares disponibles.', tone: 'error' });
       return;
     }
     if ((creditsByDiscipline.get(item.disciplineId) ?? 0) <= 0) {
-      Alert.alert('Sin créditos', `No te quedan créditos de ${item.title} para reservar.`);
+      setMessageModal({
+        title: 'Sin créditos',
+        message: `No te quedan créditos de ${item.title} para reservar.`,
+        tone: 'error',
+      });
       return;
     }
+    setConfirmTarget(item);
+  }
 
+  async function confirmBooking() {
+    if (!confirmTarget) return;
+    const item = confirmTarget;
     setPendingId(item.id);
+    setIsBooking(true);
     try {
-      const { error: rpcError } = await supabase.rpc('book_class', {
-        p_class_id: item.id,
-        p_booking_date: item.occurrenceDate,
-      });
+      const { error: rpcError } = await withTimeout(
+        supabase.rpc('book_class', { p_class_id: item.id, p_booking_date: item.occurrenceDate }),
+        RPC_TIMEOUT_MS,
+        RPC_TIMEOUT_MESSAGE
+      );
       if (rpcError) throw new Error(rpcError.message);
+      setConfirmTarget(null);
       await load();
       setConfirmedBooking(item);
     } catch (err) {
-      Alert.alert('No se pudo reservar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      setConfirmTarget(null);
+      setMessageModal({
+        title: 'No se pudo reservar',
+        message: err instanceof Error ? err.message : 'Intentá de nuevo.',
+        tone: 'error',
+      });
     } finally {
       setPendingId(null);
+      setIsBooking(false);
     }
   }
 
@@ -172,22 +210,31 @@ export default function AgendaMobileView() {
     if (!cancelTarget) return;
     setIsCancelling(true);
     try {
-      const { data: creditoReintegrado, error: rpcError } = await supabase.rpc('cancel_booking', {
-        p_class_id: cancelTarget.id,
-        p_booking_date: cancelTarget.occurrenceDate,
-        p_reason: reason || null,
-      });
+      const { data: creditoReintegrado, error: rpcError } = await withTimeout(
+        supabase.rpc('cancel_booking', {
+          p_class_id: cancelTarget.id,
+          p_booking_date: cancelTarget.occurrenceDate,
+          p_reason: reason || null,
+        }),
+        RPC_TIMEOUT_MS,
+        RPC_TIMEOUT_MESSAGE
+      );
       if (rpcError) throw new Error(rpcError.message);
       setCancelTarget(null);
       await load();
-      Alert.alert(
-        'Reserva cancelada',
-        creditoReintegrado
+      setMessageModal({
+        title: 'Reserva cancelada',
+        message: creditoReintegrado
           ? 'Te devolvimos el crédito.'
-          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
-      );
+          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.',
+        tone: creditoReintegrado ? 'success' : 'info',
+      });
     } catch (err) {
-      Alert.alert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      setMessageModal({
+        title: 'No se pudo cancelar',
+        message: err instanceof Error ? err.message : 'Intentá de nuevo.',
+        tone: 'error',
+      });
     } finally {
       setIsCancelling(false);
     }
@@ -336,6 +383,24 @@ export default function AgendaMobileView() {
         }
         onClose={() => setConfirmedBooking(null)}
       />
+
+      <BookingConfirmModal
+        visible={!!confirmTarget}
+        target={
+          confirmTarget && {
+            title: confirmTarget.title,
+            startLabel: formatClassTime(confirmTarget.startAt),
+            endLabel: confirmTarget.endAt ? formatClassTime(confirmTarget.endAt) : null,
+            instructor: confirmTarget.instructor,
+            location: confirmTarget.location,
+          }
+        }
+        isSubmitting={isBooking}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={confirmBooking}
+      />
+
+      <MessageModal content={messageModal} onClose={() => setMessageModal(null)} />
     </View>
   );
 }

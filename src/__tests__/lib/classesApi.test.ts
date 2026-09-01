@@ -1,10 +1,11 @@
-jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn() } }));
+jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { supabase } from '../../lib/supabase';
 import { loadClassesForDate } from '../../lib/classesApi';
 
 const mockedFrom = supabase.from as jest.Mock;
+const mockedRpc = supabase.rpc as jest.Mock;
 
 function makeChain(result: any) {
   const chain: any = {};
@@ -14,6 +15,16 @@ function makeChain(result: any) {
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
+}
+
+// El conteo de inscriptos ya NO sale de un SELECT directo a `bookings`
+// (ver el bug real documentado en classesApi.ts y en
+// supabase_migration_bookings_count_rpc.sql) sino del RPC
+// get_bookings_count_por_clase -- este helper mockea esa respuesta.
+function mockBookingsCount(rows: { class_id: string; booked_count: number }[]) {
+  mockedRpc.mockImplementation((fn: string) =>
+    fn === 'get_bookings_count_por_clase' ? Promise.resolve({ data: rows, error: null }) : Promise.resolve({ data: null, error: null })
+  );
 }
 
 // Un lunes real, para que `days_of_week: [1]` siempre matchee sin importar
@@ -59,9 +70,9 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
       if (tabla === 'classes') {
         return makeChain({ data: [claseDe({ is_active: true, show_in_agenda: true })], error: null });
       }
-      if (tabla === 'bookings') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
+    mockBookingsCount([]);
 
     const resultado = await loadClassesForDate(LUNES);
     expect(resultado).toHaveLength(1);
@@ -84,9 +95,9 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
       if (tabla === 'classes') {
         return makeChain({ data: [claseDe(undefined as any)], error: null });
       }
-      if (tabla === 'bookings') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
+    mockBookingsCount([]);
 
     const resultado = await loadClassesForDate(LUNES);
     expect(resultado).toHaveLength(1);
@@ -95,9 +106,12 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
 
 // Visibilidad de inscriptos (pedido del cliente): la Agenda de la PWA
 // muestra "X/Y cupos" por tarjeta (ver AgendaMobileView.tsx) -- ese X sale
-// de `bookedCount`, que acá se calcula contando filas de `bookings` por
-// class_id para la fecha puntual. Estos tests cubren que el conteo sea
-// exacto: sumado bien por clase, sin cruzarse entre clases distintas.
+// de `bookedCount`, que acá se calcula vía el RPC get_bookings_count_por_clase
+// (no un SELECT directo a `bookings` -- ver el bug real reportado, "0 de X
+// cupos" en la PWA con inscriptos reales en el Admin, documentado en
+// classesApi.ts y supabase_migration_bookings_count_rpc.sql). Estos tests
+// cubren que el conteo sea exacto: sumado bien por clase, sin cruzarse
+// entre clases distintas.
 describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, para el indicador "X/Y cupos")', () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -120,14 +134,9 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
   it('suma correctamente varias reservas activas de la MISMA clase', async () => {
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
-      if (tabla === 'bookings') {
-        return makeChain({
-          data: [{ class_id: 'clase-1' }, { class_id: 'clase-1' }, { class_id: 'clase-1' }],
-          error: null,
-        });
-      }
       throw new Error(`tabla inesperada: ${tabla}`);
     });
+    mockBookingsCount([{ class_id: 'clase-1', booked_count: 3 }]);
 
     const [resultado] = await loadClassesForDate(LUNES);
     expect(resultado.bookedCount).toBe(3);
@@ -142,14 +151,12 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
           error: null,
         });
       }
-      if (tabla === 'bookings') {
-        return makeChain({
-          data: [{ class_id: 'clase-1' }, { class_id: 'clase-1' }, { class_id: 'clase-2' }],
-          error: null,
-        });
-      }
       throw new Error(`tabla inesperada: ${tabla}`);
     });
+    mockBookingsCount([
+      { class_id: 'clase-1', booked_count: 2 },
+      { class_id: 'clase-2', booked_count: 1 },
+    ]);
 
     const resultado = await loadClassesForDate(LUNES);
     const porId = new Map(resultado.map((c) => [c.id, c.bookedCount]));
@@ -160,11 +167,118 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
   it('sin ninguna reserva, bookedCount es 0 (no rompe ni deja undefined)', async () => {
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
-      if (tabla === 'bookings') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
+    mockBookingsCount([]);
 
     const [resultado] = await loadClassesForDate(LUNES);
     expect(resultado.bookedCount).toBe(0);
+  });
+
+  // El bug real reportado ("0 de X cupos" en la PWA con inscriptos reales
+  // en el Admin): antes, `bookedCount` salía de un SELECT directo a
+  // `bookings`, restringido por RLS a `auth.uid() = user_id or is_admin()`
+  // -- un socio común solo veía SUS PROPIAS filas. Este test prueba
+  // justamente el escenario reportado: el RPC (que sí ve todas las filas,
+  // vía SECURITY DEFINER) devuelve un conteo alto aunque la query directa
+  // a `bookings` esté mockeada para no devolver nada -- si el código
+  // volviera a leer `bookings` directo por error, este test rompería.
+  it('lee el conteo real vía RPC aunque un SELECT directo a bookings esté vacío (el escenario del bug real: PWA veía 0, Admin veía 15)', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      // Simula la RLS: un SELECT directo a `bookings` de un socio común no
+      // vería las reservas de otros socios.
+      if (tabla === 'bookings') return makeChain({ data: [], error: null });
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([{ class_id: 'clase-1', booked_count: 15 }]);
+
+    const [resultado] = await loadClassesForDate(LUNES);
+    expect(resultado.bookedCount).toBe(15);
+    expect(mockedRpc).toHaveBeenCalledWith('get_bookings_count_por_clase', {
+      p_class_ids: ['clase-1'],
+      p_booking_date: '2026-08-10',
+    });
+  });
+
+  // Fail-open a propósito (mismo criterio que syncMyMembership/
+  // fetchDisciplinasDelPlanActual en creditsApi.ts): si el RPC todavía no
+  // existe en este ambiente (falta correr la migración), la Agenda entera
+  // no debe caerse -- las clases se siguen mostrando, solo con el cupo en
+  // 0 hasta que se corra supabase_migration_bookings_count_rpc.sql.
+  it('si el RPC de conteo falla (ej. migración no corrida), no rompe la Agenda -- solo deja bookedCount en 0', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockedRpc.mockResolvedValue({ data: null, error: { message: 'function not found in schema cache' } });
+
+    const resultado = await loadClassesForDate(LUNES);
+    expect(resultado).toHaveLength(1);
+    expect(resultado[0].bookedCount).toBe(0);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+// Item 4 del ticket: la vista "HOY" seguía mostrando clases cuyo horario de
+// inicio ya pasó -- ensucia la pantalla si el socio entra a la tarde/noche.
+describe('loadClassesForDate -- oculta clases de HOY cuyo horario de inicio ya pasó', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function claseDe(id: string, startTime: string) {
+    return {
+      id,
+      title: 'CrossFit',
+      discipline_id: 'disc-crossfit',
+      instructor: null,
+      location: null,
+      capacity: 15,
+      days_of_week: [0, 1, 2, 3, 4, 5, 6], // cualquier día, no es el foco del test
+      start_time: startTime,
+      end_time: null,
+      disciplines: { is_active: true, show_in_agenda: true },
+    };
+  }
+
+  it('para HOY, esconde las clases cuyo horario de inicio ya pasó y deja las que faltan (en orden cronológico)', async () => {
+    // Hora fija (con fake timers) en vez de `new Date()` real -- de lo
+    // contrario el test es flaky cerca de la medianoche: "una hora
+    // después" de las 23:30 cae al día siguiente, y la clase "futura"
+    // terminaría comparándose como si ya hubiera pasado. Mismo escenario
+    // que describe el ticket: el socio entra a las 20:00 y la clase de
+    // 07:00 (mañana) ya pasó, pero la de 21:00 (noche) todavía no.
+    const ahora = new Date(2026, 7, 31, 20, 0, 0); // 31/ago/2026 20:00 local
+    jest.useFakeTimers().setSystemTime(ahora);
+
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') {
+        return makeChain({
+          data: [claseDe('clase-pasada', '07:00:00'), claseDe('clase-futura', '21:00:00')],
+          error: null,
+        });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+
+    const resultado = await loadClassesForDate(ahora);
+    expect(resultado.map((c) => c.id)).toEqual(['clase-futura']);
+
+    jest.useRealTimers();
+  });
+
+  it('para un día que NO es hoy, no filtra nada aunque el horario "ya haya pasado" en términos de reloj', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') {
+        return makeChain({ data: [claseDe('clase-1', '07:00:00')], error: null });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+
+    const resultado = await loadClassesForDate(LUNES);
+    expect(resultado).toHaveLength(1);
   });
 });

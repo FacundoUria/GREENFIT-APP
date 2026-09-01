@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
   Linking,
   Platform,
@@ -20,6 +19,7 @@ import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
 import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, creditosOriginalesPara } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
+import { showAlert } from '../../lib/crossPlatformAlert';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
@@ -241,20 +241,6 @@ export default function HomeScreen({ navigation }: any) {
     navigation.navigate('PaymentWebView', { webResultado: resultado });
   }, [navigation]);
 
-  // react-native-web implementa Alert.alert como un no-op literal
-  // (`static alert() {}`, node_modules/react-native-web/src/exports/Alert) --
-  // en Web, Alert.alert('...', '...') no muestra NADA. Sin esto, un error
-  // real de create-payment-preference (Mercado Pago rechazó la preferencia,
-  // token vencido, etc.) quedaba mudo en la PWA: el socio no sabía por qué
-  // no pasó nada al tocar el pack.
-  function mostrarErrorPago(mensaje: string) {
-    if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined') window.alert(mensaje);
-      return;
-    }
-    Alert.alert('No se pudo iniciar el pago', mensaje);
-  }
-
   async function handleSelectPack(pack: Pack) {
     if (!user || buyingPackId) return;
     setBuyingPackId(pack.id);
@@ -267,7 +253,7 @@ export default function HomeScreen({ navigation }: any) {
       // rechazado, sin volver a esta pantalla ni reabrir el modal.
       navigation.navigate('PaymentWebView', { initPoint: preference.initPoint, packId: pack.id, userId: user.id });
     } catch (err) {
-      mostrarErrorPago(err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo iniciar el pago', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setBuyingPackId(null);
     }
@@ -288,14 +274,14 @@ export default function HomeScreen({ navigation }: any) {
       if (rpcError) throw new Error(rpcError.message);
       setShowCancelModal(false);
       await load();
-      Alert.alert(
+      showAlert(
         'Reserva cancelada',
         creditoReintegrado
           ? 'Te devolvimos el crédito.'
           : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
       );
     } catch (err) {
-      Alert.alert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setIsCancelling(false);
     }

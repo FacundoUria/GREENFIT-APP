@@ -195,6 +195,36 @@ export async function mockSupabase(page: Page, options: MockSupabaseOptions) {
 
       if (pathname.startsWith('/rest/v1/rpc/')) {
         const fnName = pathname.replace('/rest/v1/rpc/', '');
+
+        // get_bookings_count_por_clase (ver supabase_migration_bookings_
+        // count_rpc.sql -- fix del bug real "0 de X cupos" en la PWA, ver
+        // classesApi.ts): si el test no lo pisa explícitamente en `rpc`, se
+        // calcula solo a partir del fixture de `bookings` -- el mismo
+        // COUNT real que hace el RPC de verdad -- así cualquier test que ya
+        // sembraba `bookings` (el patrón de siempre en esta suite) sigue
+        // funcionando tal cual, sin tener que agregar un fixture de RPC a
+        // mano en cada uno.
+        if (fnName === 'get_bookings_count_por_clase' && !(fnName in rpc)) {
+          let params: { p_class_ids?: string[]; p_booking_date?: string } = {};
+          try {
+            params = request.postDataJSON() ?? {};
+          } catch {
+            // sin body parseable -- se responde con 0 filas.
+          }
+          const classIds = params.p_class_ids ?? [];
+          const filas = (tables.bookings ?? []).filter(
+            (b) => b.booking_date === params.p_booking_date && classIds.includes(b.class_id)
+          );
+          const counts = new Map<string, number>();
+          for (const b of filas) counts.set(b.class_id, (counts.get(b.class_id) ?? 0) + 1);
+          await responderJson(
+            route,
+            200,
+            Array.from(counts, ([class_id, booked_count]) => ({ class_id, booked_count }))
+          );
+          return;
+        }
+
         if (fnName in rpc) {
           const value = typeof rpc[fnName] === 'function' ? rpc[fnName](request) : rpc[fnName];
           await responderJson(route, 200, value);

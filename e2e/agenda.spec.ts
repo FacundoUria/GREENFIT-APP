@@ -7,6 +7,19 @@ import { irATab } from './support/nav';
 // (verde flúor / badge "Disponible") y la ausencia del botón flotante "+"
 // (se sacó de acá -- ahora es exclusivo de Comunidad).
 test.describe('PWA -- Mi Agenda', () => {
+  // Reloj congelado a las 08:00 de HOY (mismo día real que HOY_STR, solo
+  // fijamos la hora): CLASE_HOY es a las 19:00 -- item 4 del ticket
+  // ("ocultar clases de HOY cuyo horario de inicio ya pasó", ver
+  // classesApi.ts) la escondería si esta suite corriera de noche, después
+  // de las 19:00, rompiendo estos tests sin que el producto tenga ningún
+  // bug real. Se instala ANTES de cualquier navegación para que la app
+  // arranque ya con esta hora.
+  test.beforeEach(async ({ page }) => {
+    const hoyALasOcho = new Date();
+    hoyALasOcho.setHours(8, 0, 0, 0);
+    await page.clock.install({ time: hoyALasOcho });
+  });
+
   test('muestra las tarjetas de clases del día y NO tiene el botón flotante "+"', async ({ page }) => {
     await loginComoSocio(page, {
       tables: {
@@ -93,5 +106,89 @@ test.describe('PWA -- Mi Agenda', () => {
 
     const tarjetaClase = page.getByTestId('agenda-card-class-crossfit-hoy');
     await expect(tarjetaClase.getByText('3/12 cupos')).toBeVisible();
+  });
+
+  // Item 2 del ticket ("evitar accidentes"): tocar una clase disponible ya
+  // NO reserva directo (one-tap) -- abre un modal de confirmación primero.
+  // book_class recién se llama al tocar "Confirmar" ahí adentro.
+  test('tocar una clase disponible pide confirmación antes de reservar -- cancelar el modal NO reserva', async ({
+    page,
+  }) => {
+    let bookClassLlamado = false;
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        classes: [CLASE_HOY],
+        user_credits: [
+          {
+            id: 'uc-1',
+            user_id: SOCIO_DEMO.id,
+            remaining_credits: 5,
+            expires_at: null,
+            created_at: '2026-08-01T00:00:00.000Z',
+            discipline: DISCIPLINA_CROSSFIT,
+            pack: null,
+          },
+        ],
+      },
+      rpc: { book_class: () => ((bookClassLlamado = true), 'e2e-booking-id') },
+    });
+
+    await irATab(page, 'Agenda');
+    await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+
+    await expect(page.getByText('Reservar CrossFit')).toBeVisible();
+    await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
+
+    await page.getByText('Cancelar', { exact: true }).click();
+    await expect(page.getByText('Reservar CrossFit')).toHaveCount(0);
+    expect(bookClassLlamado).toBe(false);
+    await expect(page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Disponible')).toBeVisible();
+  });
+
+  // Mismo flujo, pero confirmando: book_class se llama, el badge pasa a
+  // "Reservada" y aparece el modal gamificado de reserva confirmada.
+  test('confirmar el modal reserva de verdad -- llama a book_class y la tarjeta pasa a "Reservada"', async ({
+    page,
+  }) => {
+    const tables = {
+      ...tablasBase(),
+      classes: [CLASE_HOY],
+      user_credits: [
+        {
+          id: 'uc-1',
+          user_id: SOCIO_DEMO.id,
+          remaining_credits: 5,
+          expires_at: null,
+          created_at: '2026-08-01T00:00:00.000Z',
+          discipline: DISCIPLINA_CROSSFIT,
+          pack: null,
+        },
+      ],
+      bookings: [] as any[],
+    };
+    await loginComoSocio(page, {
+      tables,
+      rpc: {
+        // El RPC real inserta la fila en `bookings` -- se simula lo mismo
+        // acá para que el siguiente `load()` (loadAgendaClasses) ya vea la
+        // reserva y la tarjeta refleje "Reservada" de verdad, no un estado
+        // optimista falso.
+        book_class: () => {
+          tables.bookings.push({ id: 'bk-e2e', user_id: SOCIO_DEMO.id, class_id: CLASE_HOY.id, booking_date: HOY_STR });
+          return 'e2e-booking-id';
+        },
+      },
+    });
+
+    await irATab(page, 'Agenda');
+    await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+    await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
+
+    await page.getByText('Confirmar', { exact: true }).click();
+
+    await expect(page.getByText('¡Reserva confirmada!')).toBeVisible();
+    await page.getByText('Listo').click();
+    await expect(page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Reservada')).toBeVisible();
   });
 });

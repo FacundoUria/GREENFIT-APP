@@ -82,16 +82,41 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   if (classesActivas.length === 0) return [];
 
   const classIds = classesActivas.map((c) => c.id);
-  const { data: bookings, error: bookingsError } = await supabase
-    .from('bookings')
-    .select('class_id')
-    .eq('booking_date', occurrenceDate)
-    .in('class_id', classIds);
-  if (bookingsError) throw new Error(bookingsError.message);
+
+  // Cuenta real de inscriptos por clase para esta fecha puntual -- vía RPC
+  // (SECURITY DEFINER), no con un SELECT directo a `bookings`. La policy
+  // RLS de esa tabla es `auth.uid() = user_id or is_admin()` (ver
+  // backend/supabase-schema.sql): un socio común que hiciera ese SELECT
+  // directo solo podía leer SUS PROPIAS filas, así que `bookedCount` acá
+  // daba como mucho 1 por clase (0 si el socio no se había anotado él
+  // mismo) -- de ahí el bug real reportado ("0 de X cupos" en la PWA
+  // mientras el Dashboard Admin, que sí bypasea esa policy vía is_admin(),
+  // mostraba el número real de inscriptos para la MISMA clase). El RPC lee
+  // la MISMA tabla con el MISMO filtro que ya usa el Admin (Clases.jsx:
+  // `.from('bookings').eq('booking_date', fecha)`), solo que server-side
+  // con privilegios elevados -- misma fuente de verdad para los dos, y
+  // devuelve nada más que un COUNT (sin PII, no expone qué socios en
+  // particular están anotados). Ver supabase_migration_bookings_count_rpc.sql.
+  // Fail-open a propósito (mismo criterio que syncMyMembership/
+  // fetchDisciplinasDelPlanActual en creditsApi.ts): si el RPC todavía no
+  // existe en este ambiente (la migración no se corrió) no tiene sentido
+  // tirar abajo TODA la Agenda -- mejor mostrar las clases con el cupo en 0
+  // (mismo estado que había antes de este fix) que dejar al socio sin
+  // poder ver ni reservar nada por un problema de conteo nada más.
+  const { data: counts, error: bookingsError } = await supabase.rpc('get_bookings_count_por_clase', {
+    p_class_ids: classIds,
+    p_booking_date: occurrenceDate,
+  });
+  if (bookingsError) {
+    console.warn(
+      '[GreenFit] No se pudo leer el conteo real de inscriptos (¿falta correr supabase_migration_bookings_count_rpc.sql?):',
+      bookingsError.message
+    );
+  }
 
   const countByClass = new Map<string, number>();
-  for (const b of bookings ?? []) {
-    countByClass.set(b.class_id, (countByClass.get(b.class_id) ?? 0) + 1);
+  for (const row of (counts ?? []) as { class_id: string; booked_count: number }[]) {
+    countByClass.set(row.class_id, Number(row.booked_count));
   }
 
   const withBookings = classesActivas.map((c) => {
@@ -120,6 +145,20 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
       byLogicalKey.set(key, item);
     }
   }
-  return Array.from(byLogicalKey.values());
+  const resultado = Array.from(byLogicalKey.values());
+
+  // Bug real reportado: la vista "HOY" de la Agenda seguía mostrando las
+  // clases de la mañana aunque el socio entrara a la app a las 20:00 --
+  // ensucia la pantalla con horarios a los que ya no puede anotarse. Ya
+  // viene ordenado cronológicamente (el SELECT de `classes` pidió
+  // `order('start_time', ascending)` y ningún paso de arriba reordena), así
+  // que alcanza con filtrar las que ya arrancaron -- SOLO cuando `date` es
+  // hoy: para cualquier otro día del selector ninguna ocurrencia "ya pasó"
+  // todavía, así que el filtro no debe tocarlas.
+  if (occurrenceDate === formatDateOnly(new Date())) {
+    const ahora = new Date();
+    return resultado.filter((item) => new Date(item.startAt) >= ahora);
+  }
+  return resultado;
 }
 

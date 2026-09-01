@@ -1,5 +1,4 @@
 import React from 'react';
-import { Alert } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 jest.mock('../../context/AuthContext', () => ({
@@ -81,12 +80,29 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     expect(getByText('Disponible')).toBeTruthy();
   });
 
-  it('reservar una clase llama a book_class y dispara el modal de confirmación gamificado', async () => {
+  // Antes reservaba directo al primer tap (one-tap) -- un socio que
+  // scrolleaba con el dedo mal puesto se anotaba por accidente. Ahora el
+  // tap solo abre BookingConfirmModal; book_class recién se llama al tocar
+  // "Confirmar" ahí adentro.
+  it('tocar una clase disponible abre el modal de confirmación en vez de reservar directo (evita el one-tap accidental)', async () => {
     mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
     const { getByText, getByTestId } = render(<AgendaMobileView />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
+
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+  });
+
+  it('confirmar en el modal llama a book_class y dispara el modal de confirmación gamificado', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
+    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar'));
 
     await waitFor(() =>
       expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
@@ -122,16 +138,15 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   // lock `for update` sobre la fila de user_credits -- ver
   // supabase_migration_cancel_booking_2h.sql) devuelve un boolean real
   // (true = reintegró, false = no) según el tiempo de gracia de
-  // configuracion.limite_cancelacion_minutos. Antes de esto, ningún test
-  // verificaba que la UI le muestre al socio el resultado REAL de ese
-  // boolean -- el test de arriba mockea la RPC devolviendo `null` siempre
-  // y nunca chequea el Alert.
-  it('cancelar A TIEMPO (dentro del límite de gracia): la RPC devuelve true y el Alert confirma que se reintegró el crédito', async () => {
+  // configuracion.limite_cancelacion_minutos. El resultado se muestra con
+  // MessageModal (un Modal real, no Alert.alert -- ver crossPlatformAlert.ts
+  // sobre por qué Alert.alert es un no-op en Web/PWA y por qué esto dejó de
+  // usarlo), así que se verifica como texto renderizado, no como spy.
+  it('cancelar A TIEMPO (dentro del límite de gracia): la RPC devuelve true y el modal confirma que se reintegró el crédito', async () => {
     mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking' ? Promise.resolve({ data: true, error: null }) : Promise.resolve({ data: null, error: null })
     );
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     const { getByText, getByTestId } = render(<AgendaMobileView />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
@@ -140,15 +155,15 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
     fireEvent.press(getByText('Confirmar cancelación'));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Reserva cancelada', 'Te devolvimos el crédito.'));
+    await waitFor(() => expect(getByText('Reserva cancelada')).toBeTruthy());
+    expect(getByText('Te devolvimos el crédito.')).toBeTruthy();
   });
 
-  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el Alert avisa que NO se reintegra el crédito', async () => {
+  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el modal avisa que NO se reintegra el crédito', async () => {
     mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
     );
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     const { getByText, getByTestId } = render(<AgendaMobileView />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
@@ -158,10 +173,9 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     fireEvent.press(getByText('Confirmar cancelación'));
 
     await waitFor(() =>
-      expect(alertSpy).toHaveBeenCalledWith(
-        'Reserva cancelada',
-        'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
-      )
+      expect(
+        getByText('Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.')
+      ).toBeTruthy()
     );
   });
 
@@ -172,19 +186,17 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
         ? Promise.resolve({ data: null, error: { message: 'No tenías una reserva en esta clase' } })
         : Promise.resolve({ data: null, error: null })
     );
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
     await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
     fireEvent.press(getByText('Confirmar cancelación'));
 
-    await waitFor(() =>
-      expect(alertSpy).toHaveBeenCalledWith('No se pudo cancelar', 'No tenías una reserva en esta clase')
-    );
-    expect(alertSpy).not.toHaveBeenCalledWith('Reserva cancelada', expect.anything());
+    await waitFor(() => expect(getByText('No se pudo cancelar')).toBeTruthy());
+    expect(getByText('No tenías una reserva en esta clase')).toBeTruthy();
+    expect(queryByText('Reserva cancelada')).toBeNull();
   });
 
   it('NO muestra el botón flotante "+" (se sacó de Agenda -- ahora es exclusivo de Comunidad, para no confundirlo con "crear publicación")', async () => {
