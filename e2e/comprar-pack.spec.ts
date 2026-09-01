@@ -335,4 +335,81 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     await expect(page.getByText(`Vence el ${fechaEsperada}`)).toBeVisible();
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
   });
+
+  // Pedido explícito: "el webhook debe saber cómo dividir cualquier plan,
+  // especialmente los Combos (ej. 12 Cross + 8 Boxeo)... sumar los créditos
+  // correspondientes a CADA disciplina por separado en user_credits".
+  // mp_process_payment (backend/supabase_migration_planes_combos.sql) YA
+  // hace esto -- loopea sobre p_creditos (un {discipline_id, credits} por
+  // disciplina del combo) e inserta una fila de user_credits POR CADA UNA.
+  // No había ningún test cubriendo el caso multi-disciplina real (los dos
+  // de arriba son de una sola disciplina) -- esta prueba sella el estado
+  // que ese loop deja escrito (2 filas de user_credits, una por disciplina)
+  // y confirma que el socio ve LAS DOS acreditadas, ninguna pisando a la
+  // otra.
+  test('Prueba 3 (Combo): tras una compra aprobada de "Combo 12 CrossFit + 8 Boxeo", el Home muestra los créditos de LAS DOS disciplinas por separado', async ({
+    page,
+  }) => {
+    const DISCIPLINA_BOXEO = { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' };
+    const COMBO_CROSSFIT_BOXEO = {
+      id: 'pack-combo-crossfit-boxeo',
+      name: 'Combo 12 CrossFit + 8 Boxeo',
+      price: 42000,
+      is_active: true,
+      incluye_aparatos: false,
+      dias_vigencia: null,
+      creditos: [
+        { discipline_id: DISCIPLINA_CROSSFIT.id, credits: 12 },
+        { discipline_id: DISCIPLINA_BOXEO.id, credits: 8 },
+      ],
+    };
+    // Estado que mp_process_payment deja escrito tras aprobar este combo:
+    // UNA fila de user_credits POR DISCIPLINA (el loop de la RPC), las dos
+    // con el mismo pack_id -- ninguna pisa el balance de la otra.
+    const BALANCE_CROSSFIT = {
+      id: 'uc-combo-crossfit',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: 12,
+      expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+      discipline: DISCIPLINA_CROSSFIT,
+      pack: COMBO_CROSSFIT_BOXEO,
+    };
+    const BALANCE_BOXEO = {
+      id: 'uc-combo-boxeo',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: 8,
+      expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      created_at: new Date().toISOString(),
+      discipline: DISCIPLINA_BOXEO,
+      pack: COMBO_CROSSFIT_BOXEO,
+    };
+
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        disciplines: [...tablasBase().disciplines, DISCIPLINA_BOXEO],
+        packs: [COMBO_CROSSFIT_BOXEO],
+        user_credits: [BALANCE_CROSSFIT, BALANCE_BOXEO],
+        pagos_socio: [
+          {
+            id: 'pago-mp-combo',
+            user_id: SOCIO_DEMO.id,
+            paquete: 'Combo 12 CrossFit + 8 Boxeo',
+            monto: 42000,
+            metodo_pago: 'mercado_pago',
+            estado: 'pagado',
+            origen: 'mercado_pago',
+            mercado_pago_payment_id: 'mp-e2e-combo',
+            created_at: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+
+    await expect(page.getByText('CrossFit')).toBeVisible();
+    await expect(page.getByText(/12.*clases restantes/)).toBeVisible();
+    await expect(page.getByText('Boxeo')).toBeVisible();
+    await expect(page.getByText(/8.*clases restantes/)).toBeVisible();
+  });
 });

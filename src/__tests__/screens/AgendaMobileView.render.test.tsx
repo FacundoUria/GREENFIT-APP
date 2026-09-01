@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
 jest.mock('../../context/AuthContext', () => ({
@@ -114,6 +115,76 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
       })
     );
     await waitFor(() => expect(getByText('Disponible')).toBeTruthy());
+  });
+
+  // TAREA 4 (bug de seguridad reportado: "una alumna canceló a tiempo y el
+  // sistema no le devolvió el crédito"): cancel_booking() (backend, con
+  // lock `for update` sobre la fila de user_credits -- ver
+  // supabase_migration_cancel_booking_2h.sql) devuelve un boolean real
+  // (true = reintegró, false = no) según el tiempo de gracia de
+  // configuracion.limite_cancelacion_minutos. Antes de esto, ningún test
+  // verificaba que la UI le muestre al socio el resultado REAL de ese
+  // boolean -- el test de arriba mockea la RPC devolviendo `null` siempre
+  // y nunca chequea el Alert.
+  it('cancelar A TIEMPO (dentro del límite de gracia): la RPC devuelve true y el Alert confirma que se reintegró el crédito', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking' ? Promise.resolve({ data: true, error: null }) : Promise.resolve({ data: null, error: null })
+    );
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Reserva cancelada', 'Te devolvimos el crédito.'));
+  });
+
+  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el Alert avisa que NO se reintegra el crédito', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
+    );
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith(
+        'Reserva cancelada',
+        'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
+      )
+    );
+  });
+
+  it('si cancel_booking devuelve un error real, avisa con el motivo y NO dice "cancelada" (ningún crédito se pierde en el éter)', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking'
+        ? Promise.resolve({ data: null, error: { message: 'No tenías una reserva en esta clase' } })
+        : Promise.resolve({ data: null, error: null })
+    );
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith('No se pudo cancelar', 'No tenías una reserva en esta clase')
+    );
+    expect(alertSpy).not.toHaveBeenCalledWith('Reserva cancelada', expect.anything());
   });
 
   it('NO muestra el botón flotante "+" (se sacó de Agenda -- ahora es exclusivo de Comunidad, para no confundirlo con "crear publicación")', async () => {

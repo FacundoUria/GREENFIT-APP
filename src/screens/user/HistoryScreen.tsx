@@ -86,14 +86,16 @@ export default function HistoryScreen() {
                 {new Date(`${item.bookingDate}T00:00:00`).toLocaleDateString('es-AR')}
               </Text>
             </View>
-            <Text
-              style={[
-                styles.status,
-                item.attended === true ? styles.statusOk : item.attended === false ? styles.statusBad : styles.statusPending,
-              ]}
-            >
-              {item.attended === true ? 'Asistió' : item.attended === false ? 'No asistió' : 'Sin marcar'}
-            </Text>
+            {/* `fetchHistory` ya trae solo reservas con booking_date <= hoy --
+                cancelar una reserva BORRA su fila (ver cancel_booking() en
+                el backend), así que cualquier fila que llega hasta acá
+                nunca se canceló. Bug real reportado: antes esto dependía de
+                `attended` (solo se pone en true a mano desde "Check-in
+                Rápido" en el gimnasio) y mostraba "No asistió" para
+                cualquier clase a la que el socio SÍ fue pero nadie le hizo
+                ese check-in puntual. Regla correcta: reserva activa +
+                fecha ya pasada = Asistió, siempre. */}
+            <Text style={[styles.status, styles.statusOk]}>Asistió</Text>
           </View>
         )}
       />
@@ -119,6 +121,4 @@ const styles = StyleSheet.create({
   date: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   status: { fontSize: 12, fontWeight: '700' },
   statusOk: { color: colors.primary },
-  statusBad: { color: colors.danger },
-  statusPending: { color: colors.textSecondary },
 });
