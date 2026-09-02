@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { checkAvatarDisponible, subirAvatarPerfil } from '../lib/avatarApi';
+import { showAlert } from '../lib/crossPlatformAlert';
 
 // Lógica de "tocar el avatar para cambiar la foto de perfil", extraída de
 // PerfilMobileView.tsx para poder reusarla tal cual en la tarjeta de perfil
@@ -14,12 +14,12 @@ export function useAvatarUpload(userId: string | undefined, onUploaded: (url: st
     if (!userId || isUploadingAvatar) return;
     const disponible = await checkAvatarDisponible();
     if (!disponible) {
-      Alert.alert('Función no disponible', 'La foto de perfil todavía no está activada. Probá de nuevo más tarde.');
+      showAlert('Función no disponible', 'La foto de perfil todavía no está activada. Probá de nuevo más tarde.');
       return;
     }
     const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permiso.granted) {
-      Alert.alert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder cambiar tu foto de perfil.');
+      showAlert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder cambiar tu foto de perfil.');
       return;
     }
     const resultado = await ImagePicker.launchImageLibraryAsync({
@@ -35,7 +35,7 @@ export function useAvatarUpload(userId: string | undefined, onUploaded: (url: st
       const url = await subirAvatarPerfil(userId, resultado.assets[0].uri);
       onUploaded(url);
     } catch (err) {
-      Alert.alert('No se pudo actualizar la foto', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo actualizar la foto', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setIsUploadingAvatar(false);
     }

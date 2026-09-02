@@ -72,6 +72,11 @@ describe('ProgresoMobileView (Módulo 5 -- PRs y evolución de cargas)', () => {
   });
 
   it('rechaza un valor inválido sin guardar el PR', async () => {
+    // ProgresoMobileView.tsx llama a showAlert(), no a Alert.alert() directo
+    // (ver crossPlatformAlert.ts). Este spy sigue siendo válido -- jest-expo
+    // simula Platform.OS='ios' por defecto, así que showAlert() cae en su
+    // rama nativa y llama a este mismo Alert.alert -- pero no cubre la rama
+    // Web (la que realmente estaba rota). Ver crossPlatformAlert.test.ts.
     const alertSpy = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
     const { getByText, getByPlaceholderText } = render(<ProgresoMobileView />);
     await waitFor(() => expect(getByText('Back Squat')).toBeTruthy());

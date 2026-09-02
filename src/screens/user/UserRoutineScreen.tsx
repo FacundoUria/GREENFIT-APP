@@ -9,11 +9,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   Linking,
-  Alert,
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+import { showAlert } from '../../lib/crossPlatformAlert';
 import { colors } from '../../theme/colors';
 import { colorGrupoMuscular } from '../../theme/muscleGroups';
 import {
@@ -270,7 +270,7 @@ export default function UserRoutineScreen() {
         else next.delete(routineExerciseId);
         return next;
       });
-      Alert.alert('No se pudo guardar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo guardar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -302,7 +302,7 @@ export default function UserRoutineScreen() {
         else next.set(routineExerciseId, anterior);
         return next;
       });
-      Alert.alert('No se pudo guardar la carga', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo guardar la carga', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 

@@ -7,11 +7,11 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
+import { showAlert } from '../../lib/crossPlatformAlert';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { usePushPermission } from '../../hooks/usePushPermission';
@@ -127,7 +127,7 @@ export default function ProfileScreen({ navigation }: any) {
     try {
       await pushPermission.toggle(next);
     } catch (err) {
-      Alert.alert('No se pudo actualizar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo actualizar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -162,7 +162,7 @@ export default function ProfileScreen({ navigation }: any) {
     const domicilio = form.domicilio.trim();
     const emergencyContactPhone = form.emergencyContactPhone.trim();
     if (!phone || !domicilio || !emergencyContactPhone) {
-      Alert.alert('Faltan datos obligatorios', 'Completá Teléfono, Domicilio y Teléfono de emergencia antes de guardar.');
+      showAlert('Faltan datos obligatorios', 'Completá Teléfono, Domicilio y Teléfono de emergencia antes de guardar.');
       return;
     }
 
@@ -194,9 +194,9 @@ export default function ProfileScreen({ navigation }: any) {
       // Desbloquea la pestaña Perfil al instante si hacía falta -- no-op
       // inofensivo si ya estaba completo de antes.
       marcarPerfilCompleto();
-      Alert.alert('Guardado', 'Tus datos se actualizaron.');
+      showAlert('Guardado', 'Tus datos se actualizaron.');
     } catch (err) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo guardar.');
+      showAlert('Error', err instanceof Error ? err.message : 'No se pudo guardar.');
     } finally {
       setIsSaving(false);
     }

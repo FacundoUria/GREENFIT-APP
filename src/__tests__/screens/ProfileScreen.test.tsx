@@ -101,6 +101,13 @@ describe('ProfileScreen ("Mis Datos") -- perfil obligatorio', () => {
     jest.clearAllMocks();
     mockUpdateResult = { data: null, error: null };
     mockRpcResult = { data: null, error: null };
+    // ProfileScreen.tsx llama a showAlert(), no a Alert.alert() directo (ver
+    // crossPlatformAlert.ts -- Alert.alert es un no-op mudo en Web). Este
+    // spy sigue siendo válido: jest-expo simula Platform.OS='ios' por
+    // defecto, así que showAlert() cae en su rama nativa y llama a este
+    // mismo Alert.alert de abajo -- pero esto NO cubre la rama Web (la que
+    // realmente estaba rota). Ver crossPlatformAlert.test.ts para el test
+    // que fuerza Platform.OS='web' y confirma window.alert.
     jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   });
 

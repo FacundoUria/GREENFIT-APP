@@ -9,7 +9,6 @@ import {
   RefreshControl,
   Modal,
   TextInput,
-  Alert,
 } from 'react-native';
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,6 +17,7 @@ import { colors } from '../../theme/colors';
 import { getDisciplineStyle } from '../../theme/disciplineColors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { showAlert } from '../../lib/crossPlatformAlert';
 import { formatDateOnly } from '../../lib/classesApi';
 import {
   checkMetasDisponible,
@@ -325,7 +325,7 @@ function PRModal({
     if (!lift) return;
     const parsed = lift.kind === 'peso' ? Number(texto.replace(',', '.')) : parseTextoATiempo(texto);
     if (!parsed || parsed <= 0) {
-      Alert.alert(
+      showAlert(
         'Valor inválido',
         lift.kind === 'peso' ? 'Ingresá un peso en kilos (ej: 82.5).' : 'Ingresá un tiempo en formato mm:ss (ej: 4:15).'
       );
@@ -438,7 +438,7 @@ export default function ProgresoMobileView() {
       setNuevaMetaTexto('');
       setMetaActiva(await fetchMetaActiva(user.id, modoDemoMetas));
     } catch (err) {
-      Alert.alert('No se pudo crear la meta', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo crear la meta', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setCreandoMeta(false);
     }
@@ -450,9 +450,9 @@ export default function ProgresoMobileView() {
     try {
       await completarMeta(user.id, metaActiva, modoDemoMetas);
       setMetaActiva(null);
-      Alert.alert('¡Meta completada! 🎉', modoDemoMetas ? 'En modo demo esto no suma XP real todavía.' : 'Sumaste +300 XP.');
+      showAlert('¡Meta completada! 🎉', modoDemoMetas ? 'En modo demo esto no suma XP real todavía.' : 'Sumaste +300 XP.');
     } catch (err) {
-      Alert.alert('No se pudo completar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo completar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setCompletandoMeta(false);
     }

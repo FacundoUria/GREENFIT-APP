@@ -1,5 +1,4 @@
 import React from 'react';
-import { Alert } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
 import { useAuth } from '../context/AuthContext';
@@ -7,11 +6,16 @@ import ProfileScreen from '../screens/user/ProfileScreen';
 import HistoryScreen from '../screens/user/HistoryScreen';
 import ProgresoMobileView from '../screens/user/ProgresoMobileView';
 import PerfilMobileView, { PerfilAccesoDirecto } from '../screens/user/PerfilMobileView';
+import { showAlert } from '../lib/crossPlatformAlert';
 
 const Stack = createNativeStackNavigator();
 
+// Placeholder de una feature todavía no construida ("Pagos y Facturas",
+// "Mi Plan / Membresía") -- no un error real, pero igual necesita
+// showAlert() en vez de Alert.alert() para que el mensaje se vea en Web
+// (react-native-web lo deja mudo, ver crossPlatformAlert.ts).
 function proximamente(titulo: string) {
-  Alert.alert(titulo, 'Todavía estamos preparando esta sección.');
+  showAlert(titulo, 'Todavía estamos preparando esta sección.');
 }
 
 // Traduce cada tile de la grilla 3x3 de PerfilMobileView a una ruta real.

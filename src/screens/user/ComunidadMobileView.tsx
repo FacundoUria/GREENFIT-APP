@@ -11,7 +11,6 @@ import {
   RefreshControl,
   Modal,
   TextInput,
-  Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +18,7 @@ import { colors } from '../../theme/colors';
 import { getDisciplineStyle } from '../../theme/disciplineColors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import { showAlert } from '../../lib/crossPlatformAlert';
 import {
   checkComunidadDisponible,
   checkRankingDisponible,
@@ -207,7 +207,7 @@ export default function ComunidadMobileView() {
   async function handleElegirFoto() {
     const permiso = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permiso.granted) {
-      Alert.alert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder adjuntar una imagen.');
+      showAlert('Permiso necesario', 'Habilitá el acceso a tus fotos para poder adjuntar una imagen.');
       return;
     }
     const resultado = await ImagePicker.launchImageLibraryAsync({
@@ -235,7 +235,7 @@ export default function ComunidadMobileView() {
             // este mismo dispositivo -- la dejamos como preview local.
             mediaUrl = composerImageUri;
           } else {
-            Alert.alert(
+            showAlert(
               'No se pudo subir la foto',
               err instanceof Error ? err.message : 'Intentá de nuevo o publicá sin foto.'
             );
@@ -253,7 +253,7 @@ export default function ComunidadMobileView() {
       setComposerVisible(false);
       setPosts(await fetchFeed(user.id, modoDemo));
     } catch (err) {
-      Alert.alert('No se pudo publicar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo publicar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setIsPosting(false);
     }
@@ -272,7 +272,7 @@ export default function ComunidadMobileView() {
       await toggleReaction(user.id, post.id, post.reactedByMe, modoDemo);
     } catch (err) {
       setPosts((prev) => prev.map((p) => (p.id === post.id ? post : p)));
-      Alert.alert('No se pudo reaccionar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo reaccionar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -291,7 +291,7 @@ export default function ComunidadMobileView() {
       const comentarios = await fetchComentarios(user.id, postId, modoDemo);
       setExpandedComments((prev) => ({ ...prev, [postId]: comentarios }));
     } catch (err) {
-      Alert.alert('No se pudieron cargar los comentarios', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudieron cargar los comentarios', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -306,7 +306,7 @@ export default function ComunidadMobileView() {
       setExpandedComments((prev) => ({ ...prev, [postId]: comentarios }));
       setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, commentCount: comentarios.length } : p)));
     } catch (err) {
-      Alert.alert('No se pudo comentar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo comentar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -324,7 +324,7 @@ export default function ComunidadMobileView() {
       setDmChat({ threadId, otherUserId, otherUserName, otherAvatarUrl });
       setDmMensajes(await fetchMensajesPrivados(user.id, threadId, mensajesDemo));
     } catch (err) {
-      Alert.alert('No se pudo abrir el chat', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo abrir el chat', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setDmLoading(false);
     }
@@ -342,7 +342,7 @@ export default function ComunidadMobileView() {
     try {
       setDmMensajes(await fetchMensajesPrivados(user.id, thread.threadId, mensajesDemo));
     } catch (err) {
-      Alert.alert('No se pudieron cargar los mensajes', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudieron cargar los mensajes', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
       setDmLoading(false);
     }
@@ -360,7 +360,7 @@ export default function ComunidadMobileView() {
         .then(setInboxMensajes)
         .catch(() => {});
     } catch (err) {
-      Alert.alert('No se pudo enviar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo enviar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
@@ -371,7 +371,7 @@ export default function ComunidadMobileView() {
     try {
       setRanking(await fetchRanking(rankingDemo, disciplina?.id ?? null));
     } catch (err) {
-      Alert.alert('No se pudo filtrar el ranking', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      showAlert('No se pudo filtrar el ranking', err instanceof Error ? err.message : 'Intentá de nuevo.');
     }
   }
 
