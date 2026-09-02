@@ -126,13 +126,62 @@ export function calcularRachaDias(fechasAsistencia: string[], hoy: Date = new Da
   return racha;
 }
 
+// Decisión de negocio confirmada: "Clases del mes" cuenta desde el último
+// corte/renovación del socio (socios.dia_corte -- el mismo eje que ya usa
+// el resto del sistema para vencimiento/cobro), no desde el 1° del mes
+// calendario. Si hoy todavía no llegó al día de corte de este mes, el
+// ciclo vigente arrancó el mes anterior; si hoy ya llegó o pasó el corte
+// de este mes, el ciclo arrancó este mes. `diaCorte` es un día del 1 al
+// 31 (columna `socios.dia_corte`, un integer -- no una fecha completa).
+//
+// Clamp defensivo: un mes con menos días que `diaCorte` (ej. diaCorte=31
+// y el mes de referencia es febrero) usa el último día real de ESE mes en
+// vez de desbordar al mes siguiente (new Date(2026, 1, 31) rueda solo a
+// marzo si no se lo frena acá).
+export function calcularInicioCicloDeCorte(diaCorte: number, hoy: Date): string {
+  let anio = hoy.getFullYear();
+  let mes = hoy.getMonth(); // 0-11 -- mes en el que cae el corte del ciclo vigente
+  if (hoy.getDate() < diaCorte) {
+    mes -= 1;
+    if (mes < 0) {
+      mes = 11;
+      anio -= 1;
+    }
+  }
+  const ultimoDiaDelMes = new Date(anio, mes + 1, 0).getDate();
+  const dia = Math.min(diaCorte, ultimoDiaDelMes);
+  return `${anio}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+}
+
+// `dia_corte` vive en `socios` (panel Admin) -- una tabla a la que el
+// propio socio logueado en la PWA NO tiene acceso por RLS (socios_admin_all
+// exige is_admin()). mi_dia_corte() es un RPC security definer que resuelve
+// auth.uid() -> profiles.dni -> socios.dia_corte y devuelve SOLO el propio
+// (mismo patrón que disciplinas_del_plan_actual()/sync_my_membership() en
+// creditsApi.ts). Fail-open a propósito: si el RPC todavía no está
+// desplegado en este ambiente, o el socio no tiene ficha vinculada en
+// `socios` todavía, se usa el 1° del mes calendario -- el comportamiento de
+// siempre -- en vez de romperle la pantalla a alguien sin ficha admin real
+// de la que depender.
+async function resolverInicioDelCiclo(hoy: Date): Promise<string> {
+  const inicioMesCalendario = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
+  const { data, error } = await supabase.rpc('mi_dia_corte').single();
+  if (error) return inicioMesCalendario;
+
+  const resultado = data as { vinculado: boolean; dia_corte: number | null } | null;
+  if (!resultado?.vinculado || !resultado.dia_corte) return inicioMesCalendario;
+  return calcularInicioCicloDeCorte(resultado.dia_corte, hoy);
+}
+
 // "Clases del mes" -- días DISTINTOS con asistencia registrada dentro del
-// mes en curso (no clases totales de siempre, ese era el bug: PerfilMobileView
-// mostraba fetchClasesRealizadas(), un conteo histórico completo, bajo la
-// etiqueta "Clases").
+// ciclo de corte vigente del socio (no clases totales de siempre, ese era
+// el bug original: PerfilMobileView mostraba fetchClasesRealizadas(), un
+// conteo histórico completo, bajo la etiqueta "Clases"; y no el mes
+// calendario a secas, ese fue el bug real reportado después -- ver
+// calcularInicioCicloDeCorte más arriba).
 export async function fetchClasesDelMes(userId: string): Promise<number> {
   const now = new Date();
-  const inicioMes = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const inicio = await resolverInicioDelCiclo(now);
   const hoyStr = formatDateOnly(now);
 
   const { data, error } = await supabase
@@ -140,7 +189,7 @@ export async function fetchClasesDelMes(userId: string): Promise<number> {
     .select('event_date')
     .eq('user_id', userId)
     .eq('event_type', 'asistencia')
-    .gte('event_date', inicioMes)
+    .gte('event_date', inicio)
     .lte('event_date', hoyStr);
   if (!error) return new Set((data ?? []).map((row: any) => row.event_date as string)).size;
   if (!isMissingRelationError(error)) throw new Error(error.message);
@@ -150,7 +199,7 @@ export async function fetchClasesDelMes(userId: string): Promise<number> {
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
     .eq('attended', true)
-    .gte('booking_date', inicioMes)
+    .gte('booking_date', inicio)
     .lte('booking_date', hoyStr);
   if (countError) throw new Error(countError.message);
   return count ?? 0;

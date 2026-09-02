@@ -69,7 +69,7 @@ function makeChain(result: any) {
   return chain;
 }
 
-jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn() } }));
+jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
 
 import { supabase } from '../../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
@@ -77,17 +77,20 @@ import { checkAvatarDisponible, subirAvatarPerfil } from '../../lib/avatarApi';
 import PerfilMobileView from '../../screens/user/PerfilMobileView';
 
 const mockedFrom = supabase.from as jest.Mock;
+const mockedRpc = supabase.rpc as jest.Mock;
 
 // 1150 XP reales en xp_events -> nivel floor(1150/500)+1 = 3, con 150/500
 // XP de progreso dentro de ese nivel (fórmula que xpApi.test.ts verifica
 // por separado, acá solo se prueba que PerfilMobileView la conecta bien al
 // badge y a la barra de progreso). HOY y AYER tienen asistencia real -> la
-// racha (días consecutivos) y "Clases (mes)" (días distintos del mes con
-// asistencia) dan 2, ambos calculados sobre las mismas 2 filas de
+// racha (días consecutivos) y "Clases (mes)" (días distintos del ciclo de
+// corte con asistencia) dan 2, ambos calculados sobre las mismas 2 filas de
 // xp_events -- fechas relativas a la fecha real de ejecución del test, no
 // hardcodeadas, para que nunca se desalinee con "hoy".
-const HOY = formatDateOnly(new Date());
-const AYER = formatDateOnly(new Date(Date.now() - 86_400_000));
+const HOY_DATE = new Date();
+const AYER_DATE = new Date(Date.now() - 86_400_000);
+const HOY = formatDateOnly(HOY_DATE);
+const AYER = formatDateOnly(AYER_DATE);
 
 function configurarMocksReales() {
   mockedFrom.mockImplementation((table: string) => {
@@ -102,6 +105,14 @@ function configurarMocksReales() {
       });
     }
     return makeChain({ data: [], error: null });
+  });
+  // "Clases del mes" ahora cuenta desde socios.dia_corte (RPC
+  // mi_dia_corte, ver xpApi.ts) -- dia_corte = día de AYER garantiza que
+  // el ciclo resultante arranque exactamente en AYER sin importar qué día
+  // del mes real corra el test (incluido el 1°, el caso que rompía con el
+  // cálculo viejo de "1° del mes calendario").
+  mockedRpc.mockReturnValue({
+    single: jest.fn().mockResolvedValue({ data: { vinculado: true, dia_corte: AYER_DATE.getDate() }, error: null }),
   });
 }
 

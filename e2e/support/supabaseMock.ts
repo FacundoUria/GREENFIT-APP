@@ -225,6 +225,25 @@ export async function mockSupabase(page: Page, options: MockSupabaseOptions) {
           return;
         }
 
+        // mi_dia_corte (ver supabase_migration_mi_dia_corte.sql -- "Clases
+        // del mes" ahora cuenta desde el corte del socio, no desde el 1°
+        // del mes calendario): si el test no lo pisa explícitamente en
+        // `rpc`, se responde con un dia_corte calculado a partir de AYER
+        // (mismo `Date.now() - 1 día` que ya usan HOY/AYER en
+        // fixtures.ts) -- NO un valor fijo tipo "10". La cuenta importa:
+        // dia_corte = AYER.getDate() garantiza que el ciclo resultante
+        // arranque exactamente en la fecha real de AYER sin importar qué
+        // día del mes corra la suite (incluido el 1°, que es justo el
+        // caso que rompía con el cálculo viejo de "1° del mes
+        // calendario") -- así los fixtures HOY_STR/AYER_STR (xp_events)
+        // que ya usan home/perfil/perfil-mobile.spec.ts siguen contando
+        // "2" sin que cada test tenga que pisar este RPC a mano.
+        if (fnName === 'mi_dia_corte' && !(fnName in rpc)) {
+          const ayer = new Date(Date.now() - 86_400_000);
+          await responderJson(route, 200, { vinculado: true, dia_corte: ayer.getDate() });
+          return;
+        }
+
         if (fnName in rpc) {
           const value = typeof rpc[fnName] === 'function' ? rpc[fnName](request) : rpc[fnName];
           await responderJson(route, 200, value);

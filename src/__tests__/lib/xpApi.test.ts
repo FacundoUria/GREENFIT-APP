@@ -11,6 +11,7 @@ import {
   fetchFechasAsistencia,
   calcularRachaDias,
   fetchClasesDelMes,
+  calcularInicioCicloDeCorte,
   fetchEntrenamientosHoy,
   registrarHoyEntrene,
   XP_POR_NIVEL,
@@ -149,17 +150,127 @@ describe('fetchFechasAsistencia', () => {
   });
 });
 
-describe('fetchClasesDelMes (fix del bug: antes mostraba el total histórico bajo la etiqueta "Clases")', () => {
-  afterEach(() => jest.clearAllMocks());
-
-  it('cuenta días DISTINTOS con asistencia real dentro del mes en curso', async () => {
-    mockedFrom.mockReturnValue(
-      makeChain({ data: [{ event_date: '2026-08-01' }, { event_date: '2026-08-02' }, { event_date: '2026-08-02' }], error: null })
-    );
-    expect(await fetchClasesDelMes('user-1')).toBe(2);
+// calcularInicioCicloDeCorte: decisión de negocio confirmada -- "Clases del
+// mes" cuenta desde el último corte/renovación del socio (socios.dia_corte),
+// no desde el 1° del mes calendario. Función pura, sin red de por medio.
+describe('calcularInicioCicloDeCorte (día 1 al 31 -> primer día del ciclo vigente)', () => {
+  it('hoy ANTES del día de corte de este mes -- el ciclo arrancó el mes anterior', () => {
+    const hoy = new Date(2026, 7, 5); // 5/ago/2026, corte el 10
+    expect(calcularInicioCicloDeCorte(10, hoy)).toBe('2026-07-10');
   });
 
-  it('si xp_events todavía no existe, cae al conteo de bookings.attended del mes', async () => {
+  it('hoy DESPUÉS del día de corte de este mes -- el ciclo arrancó este mes', () => {
+    const hoy = new Date(2026, 7, 15); // 15/ago/2026, corte el 10
+    expect(calcularInicioCicloDeCorte(10, hoy)).toBe('2026-08-10');
+  });
+
+  it('hoy es EXACTAMENTE el día de corte -- cuenta como "ya llegó", el ciclo arranca hoy mismo', () => {
+    const hoy = new Date(2026, 7, 10); // 10/ago/2026, corte el 10
+    expect(calcularInicioCicloDeCorte(10, hoy)).toBe('2026-08-10');
+  });
+
+  it('cruza de año -- enero antes del corte cae en diciembre del año anterior', () => {
+    const hoy = new Date(2026, 0, 3); // 3/ene/2026, corte el 20
+    expect(calcularInicioCicloDeCorte(20, hoy)).toBe('2025-12-20');
+  });
+
+  it('clamp defensivo: dia_corte=31 con el mes anterior de solo 28/29/30 días usa su último día real', () => {
+    const hoy = new Date(2026, 2, 5); // 5/mar/2026 (no bisiesto), corte el 31 -> mes anterior: febrero
+    expect(calcularInicioCicloDeCorte(31, hoy)).toBe('2026-02-28');
+  });
+
+  // El caso que ya rompía antes de este fix: 1° del mes calendario con un
+  // dia_corte tarde en el mes -- exactamente el escenario real reportado
+  // (HOY_STR + AYER_STR de los fixtures E2E, que caen en meses calendario
+  // distintos cuando "hoy" es el 1°).
+  it('caso real que rompía: hoy es el 1° del mes calendario, dia_corte tarde en el mes anterior', () => {
+    const hoy = new Date(2026, 8, 1); // 1/sep/2026, corte el 25
+    expect(calcularInicioCicloDeCorte(25, hoy)).toBe('2026-08-25');
+  });
+});
+
+describe('fetchClasesDelMes (cuenta desde el corte del socio -- fix del bug real: rompía el 1° del mes calendario)', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  function mockDiaCorte(resultado: { vinculado: boolean; dia_corte: number | null } | null, error: any = null) {
+    mockedRpc.mockReturnValue({ single: jest.fn().mockResolvedValue({ data: resultado, error }) });
+  }
+
+  it('cuenta días DISTINTOS con asistencia real dentro del ciclo de corte vigente', async () => {
+    mockDiaCorte({ vinculado: true, dia_corte: 10 });
+    const chain = makeChain({
+      data: [{ event_date: '2026-08-10' }, { event_date: '2026-08-12' }, { event_date: '2026-08-12' }],
+      error: null,
+    });
+    mockedFrom.mockReturnValue(chain);
+
+    expect(await fetchClasesDelMes('user-1')).toBe(2);
+    expect(mockedRpc).toHaveBeenCalledWith('mi_dia_corte');
+  });
+
+  // El caso real reportado: hoy 1° de septiembre, dia_corte tarde en agosto
+  // -- una asistencia de ayer (31/ago) y una de hoy (1/sep) tienen que
+  // contar juntas (2), algo que el cálculo viejo (1° del mes calendario)
+  // no podía dar nunca porque quedaban en meses distintos.
+  it('hoy antes del corte de este mes: el rango arranca en el corte del mes anterior', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 8, 1)); // 1/sep/2026
+    mockDiaCorte({ vinculado: true, dia_corte: 25 });
+    const chain = makeChain({
+      data: [{ event_date: '2026-08-31' }, { event_date: '2026-09-01' }],
+      error: null,
+    });
+    mockedFrom.mockReturnValue(chain);
+
+    expect(await fetchClasesDelMes('user-1')).toBe(2);
+    expect(chain.gte).toHaveBeenCalledWith('event_date', '2026-08-25');
+    expect(chain.lte).toHaveBeenCalledWith('event_date', '2026-09-01');
+
+    jest.useRealTimers();
+  });
+
+  it('hoy después (o igual) del corte de este mes: el rango arranca en el corte de este mes', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 7, 20)); // 20/ago/2026
+    mockDiaCorte({ vinculado: true, dia_corte: 10 });
+    const chain = makeChain({ data: [{ event_date: '2026-08-15' }], error: null });
+    mockedFrom.mockReturnValue(chain);
+
+    expect(await fetchClasesDelMes('user-1')).toBe(1);
+    expect(chain.gte).toHaveBeenCalledWith('event_date', '2026-08-10');
+
+    jest.useRealTimers();
+  });
+
+  // Fail-open (mismo criterio que disciplinas_del_plan_actual/
+  // sync_my_membership): sin ficha vinculada en `socios`, o el RPC
+  // mi_dia_corte todavía no está desplegado, se cae al 1° del mes
+  // calendario -- el comportamiento de siempre -- en vez de romper la
+  // pantalla del socio.
+  it('sin ficha vinculada en socios (vinculado=false), cae al 1° del mes calendario', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 7, 20));
+    mockDiaCorte({ vinculado: false, dia_corte: null });
+    const chain = makeChain({ data: [{ event_date: '2026-08-05' }], error: null });
+    mockedFrom.mockReturnValue(chain);
+
+    expect(await fetchClasesDelMes('user-1')).toBe(1);
+    expect(chain.gte).toHaveBeenCalledWith('event_date', '2026-08-01');
+
+    jest.useRealTimers();
+  });
+
+  it('si el RPC mi_dia_corte todavía no existe en este ambiente, cae al 1° del mes calendario', async () => {
+    jest.useFakeTimers().setSystemTime(new Date(2026, 7, 20));
+    mockDiaCorte(null, { code: 'PGRST202', message: 'function not found in schema cache' });
+    const chain = makeChain({ data: [{ event_date: '2026-08-05' }], error: null });
+    mockedFrom.mockReturnValue(chain);
+
+    expect(await fetchClasesDelMes('user-1')).toBe(1);
+    expect(chain.gte).toHaveBeenCalledWith('event_date', '2026-08-01');
+
+    jest.useRealTimers();
+  });
+
+  it('si xp_events todavía no existe, cae al conteo de bookings.attended del ciclo vigente', async () => {
+    mockDiaCorte({ vinculado: true, dia_corte: 10 });
     mockedFrom.mockImplementation((table: string) => {
       if (table === 'xp_events') {
         return makeChain({ data: null, error: { code: '42P01', message: 'no existe' } });
