@@ -46,12 +46,28 @@ export function formatDateOnly(date: Date): string {
 }
 
 // Combina una fecha ("YYYY-MM-DD") con una hora de plantilla ("HH:mm:ss") en
-// un ISO datetime local, para poder usar formatClassTime()/getCountdown().
+// el instante real de esa ocurrencia -- SIEMPRE en horario de Argentina
+// (-03:00 fijo, sin horario de verano desde 2009 -- mismo criterio que ya
+// usan las RPCs de SQL, ej. cancel_booking() con
+// `at time zone 'America/Argentina/Mendoza'`), nunca según la zona
+// horaria configurada en el dispositivo.
+//
+// Bug real reportado: la versión anterior armaba esto con
+// `new Date(y, mo - 1, d, h, m, s)` -- componentes numéricos sueltos, que
+// el motor de JS SIEMPRE interpreta según la zona horaria del dispositivo
+// donde corre, nunca una zona fija. Si el celular del socio tenía la zona
+// mal configurada (ej. UTC en vez de UTC-3 -- pasa en dispositivos sin
+// auto-zona), CADA horario de clase se reconstruía corrido esa cantidad
+// de horas, y el filtro de "¿ya pasó?" de loadClassesForDate() terminaba
+// marcando el día entero como pasado -- Agenda vacía para cualquier
+// disciplina, en cualquier dispositivo mal configurado, sin que la app
+// dijera nada. Escribir el offset "-03:00" explícito en el string ISO
+// antes de construir el Date lo vuelve inequívoco: el motor de JS ya no
+// tiene ninguna zona que adivinar, sin necesidad de sumar una librería de
+// fechas (day.js/luxon/date-fns-tz) que este repo no tiene instalada.
 export function combineDateAndTime(dateStr: string, timeStr: string | null): string | null {
   if (!timeStr) return null;
-  const [h, m, s] = timeStr.split(':').map(Number);
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  return new Date(y, mo - 1, d, h, m, s ?? 0).toISOString();
+  return new Date(`${dateStr}T${timeStr}-03:00`).toISOString();
 }
 
 // Clases que se dictan el día de `date` (según days_of_week), con la
@@ -155,9 +171,18 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   // que alcanza con filtrar las que ya arrancaron -- SOLO cuando `date` es
   // hoy: para cualquier otro día del selector ninguna ocurrencia "ya pasó"
   // todavía, así que el filtro no debe tocarlas.
+  //
+  // `item.startAt` ya es el instante real (fijo en -03:00, ver
+  // combineDateAndTime) -- comparar contra Date.now() acá es seguro: a
+  // diferencia de la construcción del instante de la clase, esta
+  // comparación NO depende de ninguna zona horaria (dos instantes
+  // absolutos se comparan igual sin importar cómo los muestre el
+  // dispositivo), solo de que el reloj del dispositivo esté bien puesto en
+  // términos absolutos -- un problema mucho más raro que una zona mal
+  // configurada, y fuera del alcance de este fix.
   if (occurrenceDate === formatDateOnly(new Date())) {
-    const ahora = new Date();
-    return resultado.filter((item) => new Date(item.startAt) >= ahora);
+    const ahora = Date.now();
+    return resultado.filter((item) => new Date(item.startAt).getTime() >= ahora);
   }
   return resultado;
 }

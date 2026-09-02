@@ -269,6 +269,54 @@ describe('loadClassesForDate -- oculta clases de HOY cuyo horario de inicio ya p
     jest.useRealTimers();
   });
 
+  // Bug real reportado (regresión del fix de arriba): combineDateAndTime()
+  // armaba el instante de cada clase con `new Date(y, mo-1, d, h, m, s)`
+  // (componentes numéricos sueltos) -- el motor de JS SIEMPRE interpreta
+  // eso según la zona horaria CONFIGURADA EN EL DISPOSITIVO, nunca según
+  // Argentina fija. Con el celular del socio en UTC en vez de UTC-3 (zona
+  // mal configurada, sin auto-zona), cada horario de clase se corría 3
+  // horas -- suficiente para que TODA la Agenda del día se calculara como
+  // "ya pasada" al mismo tiempo, en cualquier disciplina. Este test simula
+  // exactamente ese dispositivo (process.env.TZ = 'UTC') y confirma que
+  // una clase de la noche (21:00, hora de pared de Argentina) sigue
+  // apareciendo como pendiente cuando en términos reales todavía faltan
+  // horas para que arranque -- fallaba con la implementación vieja de
+  // combineDateAndTime(), pasa con el offset -03:00 fijo.
+  it('con el dispositivo en UTC (zona mal configurada, no Argentina), las clases de la noche siguen apareciendo como pendientes', async () => {
+    const tzOriginal = process.env.TZ;
+    process.env.TZ = 'UTC';
+    try {
+      // 20:00 hora real de Argentina = 23:00 UTC -- mismo instante real
+      // que "las 20:00" del resto de esta suite, solo que ahora el reloj
+      // del dispositivo lo muestra en UTC en vez de en hora de Argentina.
+      const ahora = new Date('2026-08-31T23:00:00Z');
+      jest.useFakeTimers().setSystemTime(ahora);
+
+      mockedFrom.mockImplementation((tabla: string) => {
+        if (tabla === 'classes') {
+          return makeChain({
+            data: [claseDe('clase-pasada', '07:00:00'), claseDe('clase-futura', '21:00:00')],
+            error: null,
+          });
+        }
+        throw new Error(`tabla inesperada: ${tabla}`);
+      });
+      mockBookingsCount([]);
+
+      const resultado = await loadClassesForDate(ahora);
+      // La de 07:00 (hora de pared ARG) ya pasó de sobra a las 20:00 ARG
+      // reales -- se sigue ocultando. La de 21:00 (hora de pared ARG)
+      // todavía no arrancó a las 20:00 ARG reales -- tiene que seguir
+      // apareciendo, sin importar que el reloj del dispositivo diga
+      // "23:00" en vez de "20:00".
+      expect(resultado.map((c) => c.id)).toEqual(['clase-futura']);
+
+      jest.useRealTimers();
+    } finally {
+      process.env.TZ = tzOriginal;
+    }
+  });
+
   it('para un día que NO es hoy, no filtra nada aunque el horario "ya haya pasado" en términos de reloj', async () => {
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') {
