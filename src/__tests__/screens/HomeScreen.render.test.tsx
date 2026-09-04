@@ -411,11 +411,14 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     });
   });
 
-  // Fase 2 (pago por transferencia con comprobante) -- coexiste con
-  // Mercado Pago, no lo reemplaza. Tocar un pack en "Elegí tu pack" abre un
-  // selector de método en vez de ir directo a handleSelectPack; ese sigue
-  // siendo el único camino real hacia Mercado Pago.
-  describe('selector de método de pago (Mercado Pago vs. transferencia)', () => {
+  // Fase 4: Mercado Pago se desconectó de la interfaz -- transferencia
+  // (Fase 2) queda como único camino, así que el selector "¿Cómo querés
+  // pagar?" (que existió entre Fase 2 y Fase 3) se sacó: con una sola
+  // opción no tenía sentido preguntar. handleSelectPack/createPaymentPreference
+  // NO se borraron del código (ver el comentario en HomeScreen.tsx), solo
+  // dejaron de estar cableados a ningún botón -- por eso esta suite confirma
+  // que ya no se llaman desde acá, sin importar que la función siga existiendo.
+  describe('tocar un pack (Mercado Pago desconectado de la UI -- Fase 4)', () => {
     const PACK_TEST = {
       id: 'pack-1',
       name: 'Combo 8+8',
@@ -430,66 +433,23 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
       (fetchPacks as jest.Mock).mockResolvedValueOnce([PACK_TEST]);
     });
 
-    async function abrirSelectorDeMetodo(getByText: any) {
+    it('al tocar un pack en "Elegí tu pack", navega directo a TransferReceipt -- ya no pregunta "¿Cómo querés pagar?"', async () => {
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
       await waitFor(() => expect(getByText('Elegir mi pack')).toBeTruthy());
       fireEvent.press(getByText('Elegir mi pack'));
       await waitFor(() => expect(getByText('Combo 8+8')).toBeTruthy());
+
       fireEvent.press(getByText('Combo 8+8'));
-      await waitFor(() => expect(getByText('¿Cómo querés pagar?')).toBeTruthy());
-    }
-
-    it('al tocar un pack, muestra la elección entre Mercado Pago y transferencia (no navega directo a ningún lado)', async () => {
-      const { getByText } = render(<HomeScreen navigation={navigation} />);
-      await abrirSelectorDeMetodo(getByText);
-
-      expect(getByText('Pagar con Mercado Pago')).toBeTruthy();
-      expect(getByText('Pagar por transferencia')).toBeTruthy();
-      expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
-      expect(navigation.navigate).not.toHaveBeenCalledWith('TransferReceipt', expect.anything());
-    });
-
-    it('"Cancelar" cierra el selector sin navegar a ningún lado', async () => {
-      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-      await abrirSelectorDeMetodo(getByText);
-
-      fireEvent.press(getByText('Cancelar'));
-      await waitFor(() => expect(queryByText('¿Cómo querés pagar?')).toBeNull());
-      expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
-      expect(navigation.navigate).not.toHaveBeenCalledWith('TransferReceipt', expect.anything());
-    });
-
-    it('"Pagar con Mercado Pago" sigue yendo por el flujo real existente (createPaymentPreference + PaymentWebView), sin tocarlo', async () => {
-      (createPaymentPreference as jest.Mock).mockResolvedValueOnce({ initPoint: 'https://mp.test/x', preferenceId: 'pref-1' });
-
-      const { getByText } = render(<HomeScreen navigation={navigation} />);
-      await abrirSelectorDeMetodo(getByText);
-
-      fireEvent.press(getByText('Pagar con Mercado Pago'));
-
-      await waitFor(() =>
-        expect(createPaymentPreference).toHaveBeenCalledWith({ packId: 'pack-1', userId: 'user-1' })
-      );
-      await waitFor(() =>
-        expect(navigation.navigate).toHaveBeenCalledWith('PaymentWebView', {
-          initPoint: 'https://mp.test/x',
-          packId: 'pack-1',
-          userId: 'user-1',
-        })
-      );
-    });
-
-    it('"Pagar por transferencia" navega a TransferReceipt con los datos del pack, sin llamar a Mercado Pago', async () => {
-      const { getByText } = render(<HomeScreen navigation={navigation} />);
-      await abrirSelectorDeMetodo(getByText);
-
-      fireEvent.press(getByText('Pagar por transferencia'));
 
       expect(navigation.navigate).toHaveBeenCalledWith('TransferReceipt', {
         packId: 'pack-1',
         packName: 'Combo 8+8',
         monto: 15000,
       });
+      expect(queryByText('¿Cómo querés pagar?')).toBeNull();
+      expect(queryByText('Pagar con Mercado Pago')).toBeNull();
       expect(createPaymentPreference).not.toHaveBeenCalled();
+      expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
     });
   });
 });

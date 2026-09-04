@@ -119,9 +119,6 @@ export default function HomeScreen({ navigation }: any) {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [buyingPackId, setBuyingPackId] = useState<string | null>(null);
-  // Pack sobre el que se está eligiendo el método de pago (Mercado Pago vs.
-  // transferencia) -- null cuando no hay ningún selector abierto.
-  const [packParaMetodo, setPackParaMetodo] = useState<Pack | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [xpInfoVisible, setXpInfoVisible] = useState(false);
@@ -557,70 +554,27 @@ export default function HomeScreen({ navigation }: any) {
                 <TouchableOpacity
                   key={p.id}
                   style={styles.packRow}
-                  disabled={!!buyingPackId}
-                  onPress={() => setPackParaMetodo(p)}
+                  onPress={() => {
+                    // Fase 4: Mercado Pago se desconectó de la interfaz --
+                    // transferencia es el único camino real hoy, así que ya
+                    // no tiene sentido preguntar "¿cómo querés pagar?" con
+                    // una sola opción. Tocar el pack va directo a la
+                    // pantalla del comprobante. handleSelectPack (Mercado
+                    // Pago) NO se borró -- sigue ahí para cuando se
+                    // reconecte o se limpie en un ticket aparte, solo dejó
+                    // de estar cableado a ningún botón visible.
+                    setShowBuyModal(false);
+                    navigation.navigate('TransferReceipt', { packId: p.id, packName: p.name, monto: p.price });
+                  }}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={styles.packRowName}>{p.name}</Text>
                     <Text style={styles.packRowSub}>{buildPackSubtitle(p)}</Text>
                   </View>
-                  {buyingPackId === p.id ? (
-                    <ActivityIndicator color={colors.primary} size="small" />
-                  ) : (
-                    <Text style={styles.packRowPrice}>{formatCurrency(p.price)}</Text>
-                  )}
+                  <Text style={styles.packRowPrice}>{formatCurrency(p.price)}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Selector de método de pago: se abre al tocar un pack en "Elegí tu
-          pack" -- Mercado Pago sigue yendo por handleSelectPack (sin
-          tocar), transferencia abre TransferReceiptScreen. */}
-      <Modal
-        visible={!!packParaMetodo}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setPackParaMetodo(null)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.metodoSheet}>
-            <Text style={styles.modalTitle}>¿Cómo querés pagar?</Text>
-            {!!packParaMetodo && (
-              <Text style={styles.metodoPackLabel}>
-                {packParaMetodo.name} · {formatCurrency(packParaMetodo.price)}
-              </Text>
-            )}
-
-            <TouchableOpacity
-              style={styles.metodoButton}
-              disabled={!!buyingPackId}
-              onPress={() => {
-                const pack = packParaMetodo;
-                setPackParaMetodo(null);
-                if (pack) handleSelectPack(pack);
-              }}
-            >
-              <Text style={styles.metodoButtonText}>Pagar con Mercado Pago</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.metodoButtonSecondary}
-              onPress={() => {
-                const pack = packParaMetodo;
-                setPackParaMetodo(null);
-                setShowBuyModal(false);
-                if (pack) navigation.navigate('TransferReceipt', { packId: pack.id, packName: pack.name, monto: pack.price });
-              }}
-            >
-              <Text style={styles.metodoButtonSecondaryText}>Pagar por transferencia</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity onPress={() => setPackParaMetodo(null)} style={styles.metodoCancelWrap}>
-              <Text style={styles.metodoCancel}>Cancelar</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -824,31 +778,4 @@ const styles = StyleSheet.create({
   packRowName: { color: colors.textPrimary, fontWeight: '600', fontSize: 14 },
   packRowSub: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   packRowPrice: { color: colors.primary, fontWeight: '700', fontSize: 15 },
-  metodoSheet: {
-    backgroundColor: colors.background,
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginBottom: 40,
-  },
-  metodoPackLabel: { color: colors.textSecondary, fontSize: 13, marginBottom: 18, marginTop: 4 },
-  metodoButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  metodoButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
-  metodoButtonSecondary: {
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
-  metodoButtonSecondaryText: { color: colors.textPrimary, fontWeight: '700', fontSize: 14 },
-  metodoCancelWrap: { alignItems: 'center', marginTop: 14 },
-  metodoCancel: { color: colors.textSecondary, fontSize: 13 },
 });

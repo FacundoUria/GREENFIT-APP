@@ -128,76 +128,31 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     await expect(page.getByText('No hay packs disponibles todavía.')).toBeVisible();
   });
 
-  // Bug crítico (2026-08-07): "React Native WebView does not support this
-  // platform" al tocar un pack en Web -- react-native-webview no soporta ese
-  // entorno, así que ahí PaymentWebViewScreen redirige la pestaña entera
-  // (window.location.href) en vez de embeber un WebView. `mercadopago.com.ar`
-  // se intercepta para no navegar de verdad a internet -- lo que se prueba
-  // es que la redirección se dispara con la URL real de la preferencia, sin
-  // que aparezca ningún error de plataforma en el camino.
-  test('tocar un pack en Web redirige la pestaña entera al Checkout de Mercado Pago -- sin el crash de WebView', async ({
-    page,
-  }) => {
-    await page.route('https://www.mercadopago.com.ar/**', (route) =>
-      route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>Checkout Mercado Pago (mock)</body></html>' })
-    );
-
-    await loginComoSocio(page, {
-      tables: { ...tablasBase(), user_credits: [BALANCE_VENCIDO], packs: [PACK_CROSSFIT] },
-    });
-
-    await page.getByText('Renovar').click();
-    // Tocar el pack ahora abre el selector de método de pago (Fase 2, pago
-    // por transferencia coexistiendo con Mercado Pago) -- Mercado Pago
-    // sigue siendo un click más adelante, no automático.
-    await page.getByText('Pack 12 clases CrossFit').click();
-    await expect(page.getByText('¿Cómo querés pagar?')).toBeVisible();
-    await page.getByText('Pagar con Mercado Pago').click();
-
-    await page.waitForURL(/mercadopago\.com\.ar/, { timeout: 15_000 });
-    await expect(page.getByText('Checkout Mercado Pago (mock)')).toBeVisible();
-    await expect(page.getByText('does not support this platform')).toHaveCount(0);
-  });
-
-  // Bug crítico (2026-08-07): "Tuvimos un problema (COW00...)" en el
-  // checkout de Mercado Pago -- create-payment-preference ahora puede
-  // rechazar la preferencia con un error real (token vencido, Mercado Pago
-  // la rechazó, etc.). Antes, paymentsApi.ts caía SIEMPRE al mock ante
-  // cualquier error (aunque la función estuviera desplegada), así que la
-  // PWA redirigía igual a una URL de mentira sin avisar nada -- y
-  // Alert.alert no muestra nada en Web (es un no-op literal en
-  // react-native-web), así que ni siquiera hacía falta este bug para que
-  // el socio se quedara sin feedback.
-  test('si create-payment-preference devuelve un error real, avisa con un mensaje claro en vez de redirigir a una URL rota', async ({
+  // Fase 4: Mercado Pago se desconectó de la interfaz -- transferencia
+  // (Fase 2) queda como único camino, así que tocar un pack ya no abre
+  // ningún selector, va directo a la pantalla del comprobante. Las 2
+  // pruebas que antes vivían acá ("tocar un pack en Web redirige... al
+  // Checkout de Mercado Pago" / "si create-payment-preference devuelve un
+  // error real, avisa...") probaban un camino que un socio real ya no
+  // puede alcanzar desde la UI -- se sacaron de esta suite (que es sobre el
+  // recorrido real de compra) en vez de simular un click sobre un botón que
+  // ya no existe. Esa lógica (redirección real, manejo de error de la Edge
+  // Function) NO se borró del código y sigue cubierta de forma aislada en
+  // src/__tests__/lib/paymentsApi.test.ts, mercadopago.test.ts y
+  // PaymentWebViewScreen.web.test.tsx/.native.test.tsx.
+  test('tocar un pack navega directo a "Pagar por transferencia" -- ya no pregunta método ni ofrece Mercado Pago', async ({
     page,
   }) => {
     await loginComoSocio(page, {
       tables: { ...tablasBase(), user_credits: [BALANCE_VENCIDO], packs: [PACK_CROSSFIT] },
     });
 
-    // Sobreescribe el mock exitoso por defecto de create-payment-preference
-    // (ver e2e/support/supabaseMock.ts) -- simula que la Edge Function SÍ
-    // está desplegada pero Mercado Pago rechazó la preferencia.
-    await page.route('**/functions/v1/create-payment-preference', (route) =>
-      route.fulfill({
-        status: 502,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: 'Mercado Pago respondió 400 al crear la preferencia.' }),
-      })
-    );
-
-    let mensajeDialog = '';
-    page.once('dialog', async (dialog) => {
-      mensajeDialog = dialog.message();
-      await dialog.dismiss();
-    });
-
     await page.getByText('Renovar').click();
     await page.getByText('Pack 12 clases CrossFit').click();
-    await page.getByText('Pagar con Mercado Pago').click();
 
-    await expect.poll(() => mensajeDialog).toBe('Mercado Pago respondió 400 al crear la preferencia.');
-    expect(page.url()).not.toContain('mercadopago');
+    await expect(page.getByText('Pagar por transferencia')).toBeVisible();
+    await expect(page.getByText('¿Cómo querés pagar?')).toHaveCount(0);
+    await expect(page.getByText('Pagar con Mercado Pago')).toHaveCount(0);
   });
 });
 
@@ -210,6 +165,12 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
 // acá se cubre el lado PWA completo: el pack recién creado se ve en "Elegí
 // tu pack" (ya cubierto arriba) Y, apenas la compra queda aprobada, el
 // socio ve el resultado real.
+//
+// Fase 4: estas 3 pruebas siguen vigentes a propósito -- Mercado Pago se
+// desconectó solo de la INTERFAZ de compra (arriba), no del historial. Un
+// pago histórico con origen='mercado_pago' en pagos_socio (de antes de esta
+// fase, o de una reconexión futura) tiene que seguir reflejándose bien acá;
+// mp_process_payment y las tablas no se tocaron.
 //
 // "Simular la compra aprobada" NO puede ser un click en un botón de Mercado
 // Pago real desde un E2E (es un dominio externo, y la acreditación la hace
