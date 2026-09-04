@@ -6,6 +6,11 @@ export interface MessageModalContent {
   title: string;
   message: string;
   tone?: 'success' | 'error' | 'info';
+  // Acción opcional además de cerrar -- ej. "Completar mis datos" llevando
+  // a otra pantalla. Sin esto (caso por defecto, sin cambios) el modal
+  // sigue mostrando un único botón "Entendido" que solo cierra.
+  actionLabel?: string;
+  onAction?: () => void;
 }
 
 interface MessageModalProps {
@@ -46,9 +51,22 @@ export default function MessageModal({ content, onClose }: MessageModalProps) {
         <View style={styles.card}>
           <Text style={[styles.title, { color }]}>{content.title}</Text>
           <Text style={styles.message}>{content.message}</Text>
-          <TouchableOpacity style={[styles.button, { backgroundColor: color }]} onPress={onClose}>
-            <Text style={[styles.buttonText, { color: buttonTextColor }]}>Entendido</Text>
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: color }]}
+            onPress={() => {
+              // Cierra primero -- el modal no debe quedar visible detrás de
+              // la pantalla a la que onAction navega.
+              onClose();
+              content.onAction?.();
+            }}
+          >
+            <Text style={[styles.buttonText, { color: buttonTextColor }]}>{content.actionLabel ?? 'Entendido'}</Text>
           </TouchableOpacity>
+          {!!content.onAction && (
+            <TouchableOpacity style={styles.secondaryButton} onPress={onClose}>
+              <Text style={styles.secondaryButtonText}>Cerrar</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Modal>
@@ -73,4 +91,6 @@ const styles = StyleSheet.create({
   message: { color: colors.textSecondary, fontSize: 13.5, lineHeight: 19, marginBottom: 18 },
   button: { borderRadius: 10, paddingVertical: 13, alignItems: 'center' },
   buttonText: { fontWeight: '700', fontSize: 14 },
+  secondaryButton: { paddingVertical: 12, alignItems: 'center' },
+  secondaryButtonText: { color: colors.textSecondary, fontWeight: '600', fontSize: 13.5 },
 });

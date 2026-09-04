@@ -9,6 +9,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
 import { getDisciplineStyle } from '../../theme/disciplineColors';
 import { supabase } from '../../lib/supabase';
@@ -73,11 +74,38 @@ async function fetchCreditsByDiscipline(userId: string): Promise<Map<string, num
   return map;
 }
 
+// Gate de reservas (aparte del gate de "perfil obligatorio" de
+// ProfileStack.tsx, que bloquea la pestaña Perfil entera si faltan
+// domicilio/teléfono/etc. -- ese no se toca, este es uno nuevo y más
+// puntual): sin nombre Y teléfono de contacto de emergencia, no se puede
+// reservar una clase. A propósito una consulta EN VIVO acá (no un campo
+// cacheado en el user de AuthContext) -- si el socio recién completó el
+// dato en "Mis datos" y vuelve a Agenda, tiene que verse desbloqueado sin
+// necesidad de cerrar sesión y volver a entrar.
+//
+// Fail-open ante un error real de red/consulta -- a diferencia de otras
+// columnas "nuevas" de este archivo (avatar_url, domicilio, etc.) estas dos
+// ya existen hace tiempo (AuthContext.tsx/ProfileScreen.tsx ya las leen),
+// así que un error acá es un problema de conexión puntual, no una
+// migración pendiente -- no tiene sentido bloquear TODA la agenda por eso.
+async function fetchTieneContactoEmergencia(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('emergency_contact_name, emergency_contact_phone')
+    .eq('id', userId)
+    .single();
+  if (error || !data) {
+    console.warn('[GreenFit] No se pudo verificar el contacto de emergencia:', error?.message);
+    return true;
+  }
+  return !!data.emergency_contact_name?.trim() && !!data.emergency_contact_phone?.trim();
+}
+
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export default function AgendaMobileView() {
+export default function AgendaMobileView({ navigation }: any) {
   useTicker();
   const { user } = useAuth();
   const { configuracion } = useConfiguracion();
@@ -99,6 +127,11 @@ export default function AgendaMobileView() {
   const [confirmTarget, setConfirmTarget] = useState<AgendaClass | null>(null);
   const [isBooking, setIsBooking] = useState(false);
   const [messageModal, setMessageModal] = useState<MessageModalContent | null>(null);
+  // Ver fetchTieneContactoEmergencia -- arranca en true (no bloquea) para
+  // no trabar el primer render mientras se resuelve; en la práctica ya está
+  // resuelto antes de que exista ninguna tarjeta para tocar (useFocusEffect
+  // corre antes de que loadAgendaClasses termine de poblar `classes`).
+  const [tieneContactoEmergencia, setTieneContactoEmergencia] = useState(true);
 
   const selectedDateStr = formatDateOnly(selectedDate);
   const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
@@ -130,6 +163,17 @@ export default function AgendaMobileView() {
       .then(setClosedDays)
       .catch((err) => console.error('No se pudieron cargar los días de cierre:', err));
   }, []);
+
+  // useFocusEffect (no useEffect simple) -- mismo criterio que HomeScreen.tsx:
+  // cubre el fetch inicial Y el refresco al volver de "Mis datos" (Perfil)
+  // después de completar el contacto de emergencia, sin depender de que el
+  // socio cierre sesión y vuelva a entrar.
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return;
+      fetchTieneContactoEmergencia(user.id).then(setTieneContactoEmergencia);
+    }, [user])
+  );
 
   // "HOY" / "MAÑANA" / "PRÓXIMOS DÍAS" -- el selector deja elegir cualquier
   // día suelto, así que el agrupado temporal se resuelve como un encabezado
@@ -172,6 +216,22 @@ export default function AgendaMobileView() {
         title: 'Sin créditos',
         message: `No te quedan créditos de ${item.title} para reservar.`,
         tone: 'error',
+      });
+      return;
+    }
+    // Gate nuevo, aparte del de "perfil obligatorio" (ProfileStack.tsx, que
+    // bloquea la pestaña Perfil entera y no se toca acá): sin nombre Y
+    // teléfono de contacto de emergencia, no se deja avanzar a la reserva.
+    // Va DESPUÉS de cerrado/cupo/créditos a propósito -- no tiene sentido
+    // mandar al socio a completar su perfil por una clase que igual no
+    // podría reservar (sin cupo, sin créditos, gimnasio cerrado).
+    if (!tieneContactoEmergencia) {
+      setMessageModal({
+        title: 'Completá tu contacto de emergencia',
+        message: 'Para poder reservar una clase, necesitamos el nombre y el teléfono de alguien a quien contactar en caso de emergencia.',
+        tone: 'error',
+        actionLabel: 'Completar mis datos',
+        onAction: () => navigation.navigate('Perfil', { screen: 'MyData' }),
       });
       return;
     }

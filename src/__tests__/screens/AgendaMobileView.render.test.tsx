@@ -1,6 +1,20 @@
 import React from 'react';
 import { render, fireEvent, waitFor } from '@testing-library/react-native';
 
+// AgendaMobileView usa useFocusEffect (refresco del gate de contacto de
+// emergencia al volver de "Mis datos") -- sin un NavigationContainer real
+// alrededor, hay que mockearlo para que dispare el callback al montar,
+// mismo patrón que HomeScreen.render.test.tsx.
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ReactActual = require('react');
+    ReactActual.useEffect(() => {
+      callback();
+    }, []);
+  },
+}));
+
 jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria' } }),
 }));
@@ -59,12 +73,29 @@ const CLASE_BASE = {
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'in', 'order'].forEach((m) => {
+  ['select', 'eq', 'in', 'order', 'single'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
 }
+
+// Contacto de emergencia completo por defecto -- el foco de la mayoría de
+// estos tests es reservar/cancelar, no el gate nuevo (ver el describe
+// dedicado más abajo), así que por defecto no debe bloquear nada.
+const CONTACTO_COMPLETO = {
+  data: { emergency_contact_name: 'Ana Pérez', emergency_contact_phone: '2611234567' },
+  error: null,
+};
+
+// `supabase.from` se llama tanto para `bookings` (isBooked de cada clase)
+// como, ahora, para `profiles` (fetchTieneContactoEmergencia) -- discrimina
+// por tabla en vez de un mock ciego para cualquier `.from(...)`.
+function mockFromDefault(bookingsResult: any, contactoResult: any = CONTACTO_COMPLETO) {
+  mockedFrom.mockImplementation((table: string) => (table === 'profiles' ? makeChain(contactoResult) : makeChain(bookingsResult)));
+}
+
+const navigation = { navigate: jest.fn() };
 
 describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', () => {
   beforeEach(() => {
@@ -74,8 +105,8 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('muestra la clase como Disponible cuando el socio todavía no la reservó', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
-    const { getByText } = render(<AgendaMobileView />);
+    mockFromDefault({ data: [], error: null });
+    const { getByText } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
     expect(getByText('Disponible')).toBeTruthy();
   });
@@ -85,8 +116,8 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   // tap solo abre BookingConfirmModal; book_class recién se llama al tocar
   // "Confirmar" ahí adentro.
   it('tocar una clase disponible abre el modal de confirmación en vez de reservar directo (evita el one-tap accidental)', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    mockFromDefault({ data: [], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -96,8 +127,8 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('confirmar en el modal llama a book_class y dispara el modal de confirmación gamificado', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    mockFromDefault({ data: [], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -111,8 +142,8 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('muestra la clase como Reservada y permite cancelarla, liberando el cupo', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -120,7 +151,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
 
     // Después de confirmar, la próxima carga (loadClassesForDate) ya no
     // debería devolver la clase como reservada -- simula que el cupo se liberó.
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
+    mockFromDefault({ data: [], error: null });
     fireEvent.press(getByText('Confirmar cancelación'));
 
     await waitFor(() =>
@@ -143,12 +174,12 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   // sobre por qué Alert.alert es un no-op en Web/PWA y por qué esto dejó de
   // usarlo), así que se verifica como texto renderizado, no como spy.
   it('cancelar A TIEMPO (dentro del límite de gracia): la RPC devuelve true y el modal confirma que se reintegró el crédito', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking' ? Promise.resolve({ data: true, error: null }) : Promise.resolve({ data: null, error: null })
     );
 
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -160,12 +191,12 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el modal avisa que NO se reintegra el crédito', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
     );
 
-    const { getByText, getByTestId } = render(<AgendaMobileView />);
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -180,14 +211,14 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('si cancel_booking devuelve un error real, avisa con el motivo y NO dice "cancelada" (ningún crédito se pierde en el éter)', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [{ class_id: 'class-1' }], error: null }));
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking'
         ? Promise.resolve({ data: null, error: { message: 'No tenías una reserva en esta clase' } })
         : Promise.resolve({ data: null, error: null })
     );
 
-    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView />);
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
@@ -200,10 +231,95 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
   });
 
   it('NO muestra el botón flotante "+" (se sacó de Agenda -- ahora es exclusivo de Comunidad, para no confundirlo con "crear publicación")', async () => {
-    mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
-    const { getByText, queryByLabelText } = render(<AgendaMobileView />);
+    mockFromDefault({ data: [], error: null });
+    const { getByText, queryByLabelText } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
     expect(queryByLabelText('Nueva publicación')).toBeNull();
     expect(queryByLabelText('Volver a hoy')).toBeNull();
+  });
+
+  // Gate nuevo, aparte del de "perfil obligatorio" de ProfileStack.tsx (ese
+  // bloquea la pestaña Perfil entera y no se toca acá): sin nombre Y
+  // teléfono de contacto de emergencia, no se deja avanzar a reservar.
+  describe('gate de contacto de emergencia (nombre + teléfono, aparte del gate de "perfil obligatorio")', () => {
+    const CONTACTO_INCOMPLETO = {
+      data: { emergency_contact_name: null, emergency_contact_phone: null },
+      error: null,
+    };
+
+    it('sin contacto de emergencia completo, tocar una clase disponible bloquea con el mensaje claro -- NO abre BookingConfirmModal ni llama a book_class', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_INCOMPLETO);
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('Completá tu contacto de emergencia')).toBeTruthy());
+      expect(
+        getByText('Para poder reservar una clase, necesitamos el nombre y el teléfono de alguien a quien contactar en caso de emergencia.')
+      ).toBeTruthy();
+      expect(queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+      expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+    });
+
+    it('con solo el teléfono cargado (falta el nombre), sigue bloqueando -- el gate pide los DOS campos', async () => {
+      mockFromDefault(
+        { data: [], error: null },
+        { data: { emergency_contact_name: null, emergency_contact_phone: '2611234567' }, error: null }
+      );
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('Completá tu contacto de emergencia')).toBeTruthy());
+      expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+    });
+
+    it('tocar "Completar mis datos" navega a Perfil > MyData (la misma pantalla que ya usa ProfileScreen.tsx)', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_INCOMPLETO);
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+      await waitFor(() => expect(getByText('Completá tu contacto de emergencia')).toBeTruthy());
+      fireEvent.press(getByText('Completar mis datos'));
+
+      expect(navigation.navigate).toHaveBeenCalledWith('Perfil', { screen: 'MyData' });
+    });
+
+    it('con contacto de emergencia completo, el flujo de reservar sigue exactamente igual (sin cambios): abre el modal de confirmación y book_class se llama al confirmar', async () => {
+      mockFromDefault({ data: [], error: null }); // CONTACTO_COMPLETO por defecto
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+      await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+      fireEvent.press(getByText('Confirmar'));
+
+      await waitFor(() =>
+        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
+      );
+    });
+
+    it('cancelar una reserva existente NO se bloquea por este gate (ya tiene el lugar -- solo aplica a RESERVAR una clase nueva)', async () => {
+      mockFromDefault({ data: [{ class_id: 'class-1' }], error: null }, CONTACTO_INCOMPLETO);
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    });
+
+    it('si la consulta a profiles falla (error de red), no bloquea la agenda (fail-open) -- deja reservar igual', async () => {
+      mockFromDefault({ data: [], error: null }, { data: null, error: { message: 'network error' } });
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    });
   });
 });

@@ -191,4 +191,75 @@ test.describe('PWA -- Mi Agenda', () => {
     await page.getByText('Listo').click();
     await expect(page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Reservada')).toBeVisible();
   });
+
+  // Gate nuevo, aparte del de "perfil obligatorio" (perfil-obligatorio.spec.ts,
+  // que bloquea la pestaña Perfil entera y no se toca acá): sin nombre Y
+  // teléfono de contacto de emergencia, no se deja avanzar a reservar.
+  // `emergencyContactName: null` a propósito (no domicilio/phone) -- deja
+  // el resto del perfil "completo" para aislar ESTE gate del otro.
+  test.describe('gate de contacto de emergencia (nombre + teléfono)', () => {
+    test('sin el nombre del contacto de emergencia cargado, tocar una clase disponible bloquea con un mensaje claro -- NO reserva', async ({
+      page,
+    }) => {
+      let bookClassLlamado = false;
+      await loginComoSocio(page, {
+        user: { ...SOCIO_DEMO, emergencyContactName: null },
+        tables: {
+          ...tablasBase(),
+          classes: [CLASE_HOY],
+          user_credits: [
+            {
+              id: 'uc-1',
+              user_id: SOCIO_DEMO.id,
+              remaining_credits: 5,
+              expires_at: null,
+              created_at: '2026-08-01T00:00:00.000Z',
+              discipline: DISCIPLINA_CROSSFIT,
+              pack: null,
+            },
+          ],
+        },
+        rpc: { book_class: () => ((bookClassLlamado = true), 'e2e-booking-id') },
+      });
+
+      await irATab(page, 'Agenda');
+      await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+
+      await expect(page.getByText('Completá tu contacto de emergencia')).toBeVisible();
+      await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toHaveCount(0);
+      expect(bookClassLlamado).toBe(false);
+    });
+
+    test('tocar "Completar mis datos" lleva directo a "Mis datos" (Perfil), donde puede cargar el contacto', async ({
+      page,
+    }) => {
+      await loginComoSocio(page, {
+        user: { ...SOCIO_DEMO, emergencyContactName: null },
+        tables: {
+          ...tablasBase(),
+          classes: [CLASE_HOY],
+          user_credits: [
+            {
+              id: 'uc-1',
+              user_id: SOCIO_DEMO.id,
+              remaining_credits: 5,
+              expires_at: null,
+              created_at: '2026-08-01T00:00:00.000Z',
+              discipline: DISCIPLINA_CROSSFIT,
+              pack: null,
+            },
+          ],
+        },
+      });
+
+      await irATab(page, 'Agenda');
+      await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+      await expect(page.getByText('Completá tu contacto de emergencia')).toBeVisible();
+
+      await page.getByText('Completar mis datos', { exact: true }).click();
+
+      await expect(page.getByRole('heading', { name: 'Mis datos' })).toBeVisible();
+      await expect(page.getByText('Nombre del contacto')).toBeVisible();
+    });
+  });
 });
