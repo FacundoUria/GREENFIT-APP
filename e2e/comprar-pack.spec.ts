@@ -147,7 +147,12 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
     });
 
     await page.getByText('Renovar').click();
+    // Tocar el pack ahora abre el selector de método de pago (Fase 2, pago
+    // por transferencia coexistiendo con Mercado Pago) -- Mercado Pago
+    // sigue siendo un click más adelante, no automático.
     await page.getByText('Pack 12 clases CrossFit').click();
+    await expect(page.getByText('¿Cómo querés pagar?')).toBeVisible();
+    await page.getByText('Pagar con Mercado Pago').click();
 
     await page.waitForURL(/mercadopago\.com\.ar/, { timeout: 15_000 });
     await expect(page.getByText('Checkout Mercado Pago (mock)')).toBeVisible();
@@ -189,6 +194,7 @@ test.describe('PWA -- Elegí tu pack (packs dinámicos desde el Admin)', () => {
 
     await page.getByText('Renovar').click();
     await page.getByText('Pack 12 clases CrossFit').click();
+    await page.getByText('Pagar con Mercado Pago').click();
 
     await expect.poll(() => mensajeDialog).toBe('Mercado Pago respondió 400 al crear la preferencia.');
     expect(page.url()).not.toContain('mercadopago');
