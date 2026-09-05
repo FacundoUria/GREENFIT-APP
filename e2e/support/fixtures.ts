@@ -57,6 +57,14 @@ export const CLASE_APARATOS_HOY = {
   disciplines: { is_active: true, show_in_agenda: false },
 };
 
+// 'v1' -- tiene que ser EXACTAMENTE la misma string que CONSENT_VERSION en
+// greenfit-app/src/lib/consentApi.ts (duplicada a mano acá, no importada:
+// esta suite E2E nunca importa de src/, mismo criterio que el resto de este
+// archivo). Si CONSENT_VERSION sube en código, actualizar acá también, o
+// el gate de consentimiento (agenda.spec.ts) empieza a pedir la pantalla
+// completa en toda la suite que no lo espera.
+const CONSENT_VERSION_E2E = 'v1';
+
 // Tipado como TablaFixtures (no inferido) a propósito: así un test puede
 // pushear una fila con campos extra (ej. discipline_id, ver xp-sync.spec.ts)
 // sin chocar contra el shape puntual de XP_EVENTS_BASE.
@@ -68,6 +76,22 @@ export function tablasBase(): TablaFixtures {
     bookings: [],
     packs: [],
     classes: [],
+    // Consentimiento informado (gate nuevo, aparte del de contacto de
+    // emergencia de arriba) YA aceptado por defecto -- mismo criterio que
+    // profiles/mockProfileRow: completo por defecto para no romper el resto
+    // de la suite, a la que no le interesa este gate. Un spec que sí quiera
+    // probar "sin consentimiento" pisa esta tabla a `[]` explícitamente
+    // (ver agenda.spec.ts).
+    consentimientos_socio: [
+      {
+        id: 'consent-e2e-1',
+        user_id: SOCIO_DEMO.id,
+        version: CONSENT_VERSION_E2E,
+        nombre_declarado: SOCIO_DEMO.fullName,
+        dni_declarado: SOCIO_DEMO.dni,
+        fecha_aceptacion: '2025-01-15T00:00:00.000Z',
+      },
+    ],
   };
 }
 

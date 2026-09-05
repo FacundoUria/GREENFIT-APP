@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
+import { CONSENT_TEXT_SHORT } from '../lib/consentApi';
 
 export interface BookingConfirmTarget {
   title: string;
@@ -30,6 +32,17 @@ export default function BookingConfirmModal({
   onClose,
   onConfirm,
 }: BookingConfirmModalProps) {
+  // Reafirmación corta de salud -- se pide SIEMPRE, en cada reserva, incluso
+  // el mismo día que se aceptó la declaración completa por primera vez (ver
+  // ConsentModal.tsx / consentApi.ts). Es solo fricción de UI antes de
+  // confirmar: no se guarda en la base, así que no hay nada que precargar
+  // acá -- arranca destildado en cada apertura.
+  const [reafirmado, setReafirmado] = useState(false);
+
+  useEffect(() => {
+    if (visible) setReafirmado(false);
+  }, [visible]);
+
   if (!target) return null;
 
   return (
@@ -44,11 +57,29 @@ export default function BookingConfirmModal({
             {target.location ? ` · ${target.location}` : ''}
           </Text>
           <Text style={styles.question}>¿Confirmás tu lugar en esta clase?</Text>
+
+          <TouchableOpacity
+            style={styles.checkboxRow}
+            onPress={() => setReafirmado((v) => !v)}
+            disabled={isSubmitting}
+          >
+            <Ionicons
+              name={reafirmado ? 'checkbox' : 'square-outline'}
+              size={20}
+              color={reafirmado ? colors.primary : colors.textSecondary}
+            />
+            <Text style={styles.checkboxLabel}>{CONSENT_TEXT_SHORT}</Text>
+          </TouchableOpacity>
+
           <View style={styles.buttonRow}>
             <TouchableOpacity style={styles.secondaryButton} onPress={onClose} disabled={isSubmitting}>
               <Text style={styles.secondaryButtonText}>Cancelar</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.primaryButton} onPress={onConfirm} disabled={isSubmitting}>
+            <TouchableOpacity
+              style={[styles.primaryButton, !reafirmado && styles.primaryButtonDisabled]}
+              onPress={onConfirm}
+              disabled={!reafirmado || isSubmitting}
+            >
               {isSubmitting ? (
                 <ActivityIndicator color={colors.onPrimary} size="small" />
               ) : (
@@ -79,6 +110,8 @@ const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   subtitle: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
   question: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 14, marginBottom: 4 },
+  checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  checkboxLabel: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
   buttonRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   secondaryButton: {
     flex: 1,
@@ -95,5 +128,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.primary,
   },
+  primaryButtonDisabled: { opacity: 0.4 },
   primaryButtonText: { color: colors.onPrimary, fontWeight: '700' },
 });

@@ -25,7 +25,9 @@ import CancelBookingModal from '../../components/CancelBookingModal';
 import DaySelector from '../../components/DaySelector';
 import ReservaConfirmadaModal from '../../components/ReservaConfirmadaModal';
 import BookingConfirmModal from '../../components/BookingConfirmModal';
+import ConsentModal from '../../components/ConsentModal';
 import MessageModal, { MessageModalContent } from '../../components/MessageModal';
+import { fetchTieneConsentimientoVigente, registrarConsentimiento } from '../../lib/consentApi';
 
 // Timeout de red para reservar/cancelar: el cliente de Supabase no tiene
 // uno por defecto -- si la conexión se cuelga a mitad de la request (wifi
@@ -132,6 +134,11 @@ export default function AgendaMobileView({ navigation }: any) {
   // resuelto antes de que exista ninguna tarjeta para tocar (useFocusEffect
   // corre antes de que loadAgendaClasses termine de poblar `classes`).
   const [tieneContactoEmergencia, setTieneContactoEmergencia] = useState(true);
+  // Segundo gate, coexiste con el de arriba (ver handlePress): clase que
+  // está esperando que el socio acepte la declaración de salud/consentimiento
+  // informado (versión vigente) antes de pasar a BookingConfirmModal.
+  const [consentTarget, setConsentTarget] = useState<AgendaClass | null>(null);
+  const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
 
   const selectedDateStr = formatDateOnly(selectedDate);
   const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
@@ -194,7 +201,10 @@ export default function AgendaMobileView({ navigation }: any) {
   // Ya NO dispara la reserva -- solo valida y, si todo está en orden, abre
   // el modal de confirmación (BookingConfirmModal). El RPC real vive en
   // confirmBooking(), disparado recién cuando el socio toca "Confirmar".
-  function handlePress(item: AgendaClass) {
+  // Async desde el gate de consentimiento en adelante: esos dos chequeos
+  // finales pegan contra la base (a diferencia de los de arriba, que solo
+  // miran estado ya cargado en memoria).
+  async function handlePress(item: AgendaClass) {
     if (item.isBooked) {
       setCancelTarget(item);
       return;
@@ -219,12 +229,13 @@ export default function AgendaMobileView({ navigation }: any) {
       });
       return;
     }
-    // Gate nuevo, aparte del de "perfil obligatorio" (ProfileStack.tsx, que
-    // bloquea la pestaña Perfil entera y no se toca acá): sin nombre Y
-    // teléfono de contacto de emergencia, no se deja avanzar a la reserva.
-    // Va DESPUÉS de cerrado/cupo/créditos a propósito -- no tiene sentido
-    // mandar al socio a completar su perfil por una clase que igual no
-    // podría reservar (sin cupo, sin créditos, gimnasio cerrado).
+    // Gate 1: contacto de emergencia, aparte del de "perfil obligatorio"
+    // (ProfileStack.tsx, que bloquea la pestaña Perfil entera y no se toca
+    // acá): sin nombre Y teléfono de contacto de emergencia, no se deja
+    // avanzar a la reserva. Va DESPUÉS de cerrado/cupo/créditos a propósito
+    // -- no tiene sentido mandar al socio a completar su perfil por una
+    // clase que igual no podría reservar (sin cupo, sin créditos, gimnasio
+    // cerrado).
     if (!tieneContactoEmergencia) {
       setMessageModal({
         title: 'Completá tu contacto de emergencia',
@@ -235,7 +246,56 @@ export default function AgendaMobileView({ navigation }: any) {
       });
       return;
     }
+    if (!user) return;
+
+    // Gate 2: consentimiento informado / declaración de salud (coexiste con
+    // el de arriba, va después). A diferencia del contacto de emergencia
+    // (cacheado en estado, refrescado por useFocusEffect), esto se consulta
+    // EN VIVO acá mismo -- así, apenas el socio acepta en ConsentModal, se
+    // puede pasar directo a BookingConfirmModal sin depender de un refoco de
+    // pantalla. Fail-closed a propósito (decisión explícita, distinta del
+    // contacto de emergencia): es un registro legal, así que ante un error
+    // real de red/consulta no se deja avanzar -- ver consentApi.ts.
+    setPendingId(item.id);
+    const { tieneConsentimiento, error: consentError } = await fetchTieneConsentimientoVigente(user.id);
+    setPendingId(null);
+    if (consentError) {
+      setMessageModal({
+        title: 'No se pudo verificar tu consentimiento',
+        message: 'No pudimos confirmar tu declaración de salud. Revisá tu conexión e intentá de nuevo.',
+        tone: 'error',
+      });
+      return;
+    }
+    if (!tieneConsentimiento) {
+      setConsentTarget(item);
+      return;
+    }
     setConfirmTarget(item);
+  }
+
+  // Se llama al tocar "Continuar" en ConsentModal con "Acepto" marcado.
+  // Snapshot de nombre/DNI actuales del socio (si edita su perfil después,
+  // este registro puntual no cambia -- ver la migración) y, si sale bien,
+  // sigue derecho a BookingConfirmModal sin que el socio tenga que volver a
+  // tocar la tarjeta de la clase.
+  async function handleAcceptConsent() {
+    if (!consentTarget || !user) return;
+    setIsAcceptingConsent(true);
+    try {
+      await registrarConsentimiento(user.id, user.name, user.dni ?? '');
+      const item = consentTarget;
+      setConsentTarget(null);
+      setConfirmTarget(item);
+    } catch (err) {
+      setMessageModal({
+        title: 'No se pudo registrar tu aceptación',
+        message: err instanceof Error ? err.message : 'Intentá de nuevo.',
+        tone: 'error',
+      });
+    } finally {
+      setIsAcceptingConsent(false);
+    }
   }
 
   async function confirmBooking() {
@@ -442,6 +502,13 @@ export default function AgendaMobileView({ navigation }: any) {
           }
         }
         onClose={() => setConfirmedBooking(null)}
+      />
+
+      <ConsentModal
+        visible={!!consentTarget}
+        isSubmitting={isAcceptingConsent}
+        onClose={() => setConsentTarget(null)}
+        onAccept={handleAcceptConsent}
       />
 
       <BookingConfirmModal

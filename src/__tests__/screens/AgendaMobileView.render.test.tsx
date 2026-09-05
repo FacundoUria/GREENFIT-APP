@@ -16,7 +16,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 
 jest.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria' } }),
+  useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', dni: '30111222' } }),
 }));
 jest.mock('../../context/ConfiguracionContext', () => ({
   useConfiguracion: () => ({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } }),
@@ -48,6 +48,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.
 
 import { loadClassesForDate } from '../../lib/classesApi';
 import { supabase } from '../../lib/supabase';
+import { CONSENT_TEXT_SHORT } from '../../lib/consentApi';
 import AgendaMobileView from '../../screens/user/AgendaMobileView';
 
 const mockedLoadClasses = loadClassesForDate as jest.Mock;
@@ -73,11 +74,22 @@ const CLASE_BASE = {
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'in', 'order', 'single'].forEach((m) => {
+  ['select', 'eq', 'in', 'order', 'single', 'limit'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
+}
+
+// consentimientos_socio necesita, además de la cadena de SELECT de arriba
+// (.select('id').eq(...).eq(...).limit(1)), un .insert(...) que resuelve
+// aparte -- se comparten en un solo objeto porque ambos "viven" en la misma
+// tabla mockeada por `from`.
+function makeConsentChain(selectResult: any, insertResult: any = { error: null }) {
+  return {
+    ...makeChain(selectResult),
+    insert: jest.fn().mockResolvedValue(insertResult),
+  };
 }
 
 // Contacto de emergencia completo por defecto -- el foco de la mayoría de
@@ -88,11 +100,26 @@ const CONTACTO_COMPLETO = {
   error: null,
 };
 
-// `supabase.from` se llama tanto para `bookings` (isBooked de cada clase)
-// como, ahora, para `profiles` (fetchTieneContactoEmergencia) -- discrimina
+// Consentimiento vigente por defecto -- el foco de la mayoría de estos
+// tests es reservar/cancelar, no el gate de consentimiento (ver el describe
+// dedicado más abajo), así que por defecto no debe bloquear nada.
+const CONSENT_VIGENTE = { data: [{ id: 'consent-1' }], error: null };
+
+// `supabase.from` se llama para `bookings` (isBooked de cada clase),
+// `profiles` (fetchTieneContactoEmergencia) y, ahora, `consentimientos_socio`
+// (fetchTieneConsentimientoVigente/registrarConsentimiento) -- discrimina
 // por tabla en vez de un mock ciego para cualquier `.from(...)`.
-function mockFromDefault(bookingsResult: any, contactoResult: any = CONTACTO_COMPLETO) {
-  mockedFrom.mockImplementation((table: string) => (table === 'profiles' ? makeChain(contactoResult) : makeChain(bookingsResult)));
+function mockFromDefault(
+  bookingsResult: any,
+  contactoResult: any = CONTACTO_COMPLETO,
+  consentSelectResult: any = CONSENT_VIGENTE,
+  consentInsertResult: any = { error: null }
+) {
+  mockedFrom.mockImplementation((table: string) => {
+    if (table === 'profiles') return makeChain(contactoResult);
+    if (table === 'consentimientos_socio') return makeConsentChain(consentSelectResult, consentInsertResult);
+    return makeChain(bookingsResult);
+  });
 }
 
 const navigation = { navigate: jest.fn() };
@@ -133,6 +160,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
 
     fireEvent.press(getByTestId('agenda-card-class-1'));
     await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    fireEvent.press(getByText(CONSENT_TEXT_SHORT));
     fireEvent.press(getByText('Confirmar'));
 
     await waitFor(() =>
@@ -295,6 +323,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
 
       fireEvent.press(getByTestId('agenda-card-class-1'));
       await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+      fireEvent.press(getByText(CONSENT_TEXT_SHORT));
       fireEvent.press(getByText('Confirmar'));
 
       await waitFor(() =>
@@ -320,6 +349,164 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
       fireEvent.press(getByTestId('agenda-card-class-1'));
 
       await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    });
+  });
+
+  // Segundo gate de reserva, coexiste con el de contacto de emergencia de
+  // arriba (no se toca) -- ver ConsentModal.tsx / consentApi.ts. Todos estos
+  // tests usan CONTACTO_COMPLETO (por defecto de mockFromDefault) para que
+  // el gate de emergencia no interfiera y el foco quede en este.
+  describe('gate de consentimiento informado / declaración de salud (segundo gate, va después del de contacto de emergencia)', () => {
+    const CONSENT_FALTA = { data: [], error: null };
+    const CONSENT_ERROR = { data: null, error: { message: 'network error' } };
+    const CONTACTO_INCOMPLETO = {
+      data: { emergency_contact_name: null, emergency_contact_phone: null },
+      error: null,
+    };
+
+    it('socio sin nada de contacto de emergencia NI consentimiento: primero bloquea el gate de emergencia (no llega a consultar consentimiento)', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_INCOMPLETO, CONSENT_FALTA);
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('Completá tu contacto de emergencia')).toBeTruthy());
+      expect(queryByText(/Declaración de salud y consentimiento/)).toBeNull();
+    });
+
+    it('socio nuevo (contacto de emergencia completo, pero sin ninguna aceptación): al reservar ve la pantalla completa del consentimiento, ANTES de BookingConfirmModal', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_COMPLETO, CONSENT_FALTA);
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() =>
+        expect(getByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeTruthy()
+      );
+      expect(queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+      expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+    });
+
+    it('"No acepto" (o no marcar nada) no deja avanzar -- "Continuar" queda deshabilitado y no se registra nada ni se abre BookingConfirmModal', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_COMPLETO, CONSENT_FALTA);
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+      await waitFor(() =>
+        expect(getByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeTruthy()
+      );
+
+      // Sin marcar nada, "Continuar" ya está deshabilitado.
+      fireEvent.press(getByText('Continuar'));
+      expect(queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+
+      // Marcar "No acepto." tampoco lo habilita.
+      fireEvent.press(getByText('No acepto.'));
+      fireEvent.press(getByText('Continuar'));
+      expect(queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+    });
+
+    it('aceptar la declaración completa: registra la fila (con nombre/DNI del socio) y sigue derecho a BookingConfirmModal, sin volver a tocar la tarjeta', async () => {
+      const insertMock = jest.fn().mockResolvedValue({ error: null });
+      mockedFrom.mockImplementation((table: string) => {
+        if (table === 'profiles') return makeChain(CONTACTO_COMPLETO);
+        if (table === 'consentimientos_socio') {
+          const chain = makeConsentChain(CONSENT_FALTA);
+          chain.insert = insertMock;
+          return chain;
+        }
+        return makeChain({ data: [], error: null });
+      });
+
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+      await waitFor(() =>
+        expect(getByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeTruthy()
+      );
+
+      fireEvent.press(
+        getByText('Acepto la declaración de salud, el consentimiento informado y las condiciones de participación.')
+      );
+      fireEvent.press(getByText('Continuar'));
+
+      await waitFor(() =>
+        expect(insertMock).toHaveBeenCalledWith({
+          user_id: 'user-1',
+          version: 'v1',
+          nombre_declarado: 'Facundo Uria',
+          dni_declarado: '30111222',
+        })
+      );
+      // Directo a BookingConfirmModal -- no hace falta volver a tocar la tarjeta.
+      await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    });
+
+    it('socio con la versión vigente ya aceptada: NO ve la pantalla completa -- va directo a BookingConfirmModal, con el checkbox corto de reafirmación y "Confirmar" deshabilitado hasta marcarlo', async () => {
+      mockFromDefault({ data: [], error: null }); // CONTACTO_COMPLETO y CONSENT_VIGENTE por defecto
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+      expect(queryByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeNull();
+      expect(getByText(CONSENT_TEXT_SHORT)).toBeTruthy();
+
+      // "Confirmar" deshabilitado hasta marcar la reafirmación corta.
+      fireEvent.press(getByText('Confirmar'));
+      expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+
+      fireEvent.press(getByText(CONSENT_TEXT_SHORT));
+      fireEvent.press(getByText('Confirmar'));
+      await waitFor(() =>
+        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
+      );
+    });
+
+    // Simula un cambio de versión: CONSENT_VERSION en código pasó a ser
+    // distinta de la que el socio tiene guardada -- la fila vieja no
+    // matchea el filtro por versión de fetchTieneConsentimientoVigente, así
+    // que la consulta devuelve vacío exactamente igual que un socio nuevo
+    // (mismo mecanismo, sin distinguir "nunca aceptó" de "aceptó una
+    // versión que ya no es la vigente").
+    it('si el socio solo tiene aceptada una versión vieja (simulando que CONSENT_VERSION subió), le vuelve a pedir la pantalla completa', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_COMPLETO, CONSENT_FALTA);
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() =>
+        expect(getByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeTruthy()
+      );
+    });
+
+    it('fail-CLOSED: si la consulta a consentimientos_socio falla (error de red), bloquea con un mensaje claro -- NO abre ni la pantalla de consentimiento ni BookingConfirmModal (a diferencia del gate de contacto de emergencia, que es fail-open)', async () => {
+      mockFromDefault({ data: [], error: null }, CONTACTO_COMPLETO, CONSENT_ERROR);
+      const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('No se pudo verificar tu consentimiento')).toBeTruthy());
+      expect(queryByText(/Declaración de salud y consentimiento para realizar actividad física/)).toBeNull();
+      expect(queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+      expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+    });
+
+    it('cancelar una reserva existente NO se bloquea por este gate (ya tiene el lugar -- solo aplica a RESERVAR una clase nueva)', async () => {
+      mockFromDefault({ data: [{ class_id: 'class-1' }], error: null }, CONTACTO_COMPLETO, CONSENT_FALTA);
+      const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+      await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+      fireEvent.press(getByTestId('agenda-card-class-1'));
+
+      await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
     });
   });
 });

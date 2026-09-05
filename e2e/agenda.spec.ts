@@ -3,6 +3,12 @@ import { loginComoSocio, SOCIO_DEMO } from './support/auth';
 import { tablasBase, CLASE_HOY, CLASE_APARATOS_HOY, DISCIPLINA_CROSSFIT, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
 
+// Texto corto de reafirmación de salud (BookingConfirmModal) -- exacto,
+// mismo string que CONSENT_TEXT_SHORT en src/lib/consentApi.ts (duplicado a
+// mano: esta suite nunca importa de src/, ver fixtures.ts).
+const REAFIRMACION_SALUD =
+  'Declaro que mi estado de salud no ha cambiado desde mi última declaración y que me encuentro en condiciones de realizar la actividad.';
+
 // Cubre el checklist de Agenda: tarjetas de clases con el estilo renovado
 // (verde flúor / badge "Disponible") y la ausencia del botón flotante "+"
 // (se sacó de acá -- ahora es exclusivo de Comunidad).
@@ -185,6 +191,10 @@ test.describe('PWA -- Mi Agenda', () => {
     await page.getByTestId('agenda-card-class-crossfit-hoy').click();
     await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
 
+    // Reafirmación corta de salud (segundo gate, coexiste con el
+    // consentimiento informado completo -- ver ConsentModal.tsx): se pide
+    // SIEMPRE, "Confirmar" no habilita hasta marcarla.
+    await page.getByText(REAFIRMACION_SALUD).click();
     await page.getByText('Confirmar', { exact: true }).click();
 
     await expect(page.getByText('¡Reserva confirmada!')).toBeVisible();
@@ -260,6 +270,83 @@ test.describe('PWA -- Mi Agenda', () => {
 
       await expect(page.getByRole('heading', { name: 'Mis datos' })).toBeVisible();
       await expect(page.getByText('Nombre del contacto')).toBeVisible();
+    });
+  });
+
+  // Segundo gate de reserva, coexiste con el de contacto de emergencia de
+  // arriba (no se toca) -- ver ConsentModal.tsx / consentApi.ts.
+  // `consentimientos_socio: []` a propósito para simular un socio sin
+  // ninguna aceptación (tablasBase() lo deja vigente por defecto).
+  test.describe('gate de consentimiento informado / declaración de salud', () => {
+    function tablasSinConsentimiento() {
+      return {
+        ...tablasBase(),
+        consentimientos_socio: [] as any[],
+        classes: [CLASE_HOY],
+        user_credits: [
+          {
+            id: 'uc-1',
+            user_id: SOCIO_DEMO.id,
+            remaining_credits: 5,
+            expires_at: null,
+            created_at: '2026-08-01T00:00:00.000Z',
+            discipline: DISCIPLINA_CROSSFIT,
+            pack: null,
+          },
+        ],
+      };
+    }
+
+    test('socio sin ninguna aceptación: al reservar ve la pantalla completa del consentimiento, ANTES de BookingConfirmModal', async ({
+      page,
+    }) => {
+      await loginComoSocio(page, { tables: tablasSinConsentimiento() });
+
+      await irATab(page, 'Agenda');
+      await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+
+      await expect(
+        page.getByText('Declaración de salud y consentimiento para realizar actividad física')
+      ).toBeVisible();
+      await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toHaveCount(0);
+    });
+
+    test('"No acepto" no deja avanzar -- "Continuar" queda deshabilitado', async ({ page }) => {
+      await loginComoSocio(page, { tables: tablasSinConsentimiento() });
+
+      await irATab(page, 'Agenda');
+      await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+      await expect(
+        page.getByText('Declaración de salud y consentimiento para realizar actividad física')
+      ).toBeVisible();
+
+      await page.getByText('No acepto.', { exact: true }).click();
+      await page.getByText('Continuar', { exact: true }).click();
+
+      await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toHaveCount(0);
+    });
+
+    test('aceptar la declaración completa registra el consentimiento y sigue derecho a BookingConfirmModal, sin volver a tocar la tarjeta', async ({
+      page,
+    }) => {
+      await loginComoSocio(page, { tables: tablasSinConsentimiento() });
+
+      await irATab(page, 'Agenda');
+      await page.getByTestId('agenda-card-class-crossfit-hoy').click();
+      await expect(
+        page.getByText('Declaración de salud y consentimiento para realizar actividad física')
+      ).toBeVisible();
+
+      await page
+        .getByText(
+          'Acepto la declaración de salud, el consentimiento informado y las condiciones de participación.',
+          { exact: true }
+        )
+        .click();
+      await page.getByText('Continuar', { exact: true }).click();
+
+      // Directo a BookingConfirmModal -- no hace falta volver a tocar la tarjeta.
+      await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
     });
   });
 });
