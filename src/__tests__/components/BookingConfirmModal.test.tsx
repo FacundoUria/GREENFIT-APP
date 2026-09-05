@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import BookingConfirmModal from '../../components/BookingConfirmModal';
+import { CONSENT_TEXT_SHORT } from '../../lib/consentApi';
 
 const TARGET = {
   title: 'CrossFit',
@@ -29,12 +30,37 @@ describe('BookingConfirmModal', () => {
     expect(getByText(/19:00 - 20:00 hs · Prof\. Seba · Box 1/)).toBeTruthy();
   });
 
-  it('llama a onConfirm al tocar "Confirmar" y a onClose al tocar "Cancelar"', () => {
+  // Reafirmación corta de salud (segundo gate, coexiste con el
+  // consentimiento informado completo de ConsentModal -- ver consentApi.ts):
+  // se pide SIEMPRE, en cada reserva, y "Confirmar" no habilita hasta
+  // marcarla.
+  it('muestra el texto corto de reafirmación de salud', () => {
+    const { getByText } = render(
+      <BookingConfirmModal visible target={TARGET} onClose={jest.fn()} onConfirm={jest.fn()} />
+    );
+    expect(getByText(CONSENT_TEXT_SHORT)).toBeTruthy();
+  });
+
+  it('"Confirmar" arranca deshabilitado hasta marcar la reafirmación de salud', () => {
+    const onConfirm = jest.fn();
+    const { getByText } = render(
+      <BookingConfirmModal visible target={TARGET} onClose={jest.fn()} onConfirm={onConfirm} />
+    );
+    fireEvent.press(getByText('Confirmar'));
+    expect(onConfirm).not.toHaveBeenCalled();
+
+    fireEvent.press(getByText(CONSENT_TEXT_SHORT));
+    fireEvent.press(getByText('Confirmar'));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('llama a onConfirm al tocar "Confirmar" (con la reafirmación marcada) y a onClose al tocar "Cancelar"', () => {
     const onConfirm = jest.fn();
     const onClose = jest.fn();
     const { getByText } = render(
       <BookingConfirmModal visible target={TARGET} onClose={onClose} onConfirm={onConfirm} />
     );
+    fireEvent.press(getByText(CONSENT_TEXT_SHORT));
     fireEvent.press(getByText('Confirmar'));
     expect(onConfirm).toHaveBeenCalledTimes(1);
     fireEvent.press(getByText('Cancelar'));
@@ -49,6 +75,17 @@ describe('BookingConfirmModal', () => {
     // Con isSubmitting, el botón "Confirmar" muestra un spinner en vez del texto.
     expect(queryByText('Confirmar')).toBeNull();
     fireEvent.press(getByText('Cancelar'));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('reabrir el modal (visible pasa a true de nuevo) resetea la reafirmación destildada', () => {
+    const onConfirm = jest.fn();
+    const { getByText, rerender } = render(
+      <BookingConfirmModal visible={false} target={TARGET} onClose={jest.fn()} onConfirm={onConfirm} />
+    );
+    rerender(<BookingConfirmModal visible target={TARGET} onClose={jest.fn()} onConfirm={onConfirm} />);
+
+    fireEvent.press(getByText('Confirmar'));
     expect(onConfirm).not.toHaveBeenCalled();
   });
 });
