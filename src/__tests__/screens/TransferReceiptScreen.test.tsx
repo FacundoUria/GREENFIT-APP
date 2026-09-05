@@ -106,7 +106,7 @@ describe('TransferReceiptScreen (pago por transferencia con comprobante -- Fase 
     expect(queryByText('Cambiar foto')).toBeNull();
   });
 
-  it('envío exitoso: sube el comprobante, crea el pago pendiente con los datos del pack, confirma SIN prometer un tiempo, y vuelve atrás', async () => {
+  it('envío exitoso: sube el comprobante, lo acredita automático (Fase 3, ya no queda "pendiente"), confirma SIN prometer un tiempo, y vuelve atrás', async () => {
     (subirComprobantePago as jest.Mock).mockResolvedValue('socio-1/123.jpg');
     (crearPagoPendiente as jest.Mock).mockResolvedValue('pago-1');
 
@@ -127,8 +127,8 @@ describe('TransferReceiptScreen (pago por transferencia con comprobante -- Fase 
 
     await waitFor(() =>
       expect(showAlert).toHaveBeenCalledWith(
-        'Comprobante enviado',
-        'Tu comprobante fue enviado, en cuanto lo revisen vas a recibir tus créditos.'
+        '¡Comprobante recibido!',
+        'Ya acreditamos tu pago -- revisá tu saldo actualizado en Inicio.'
       )
     );
     // Ninguna de las dos llamadas de showAlert de este flujo promete un
