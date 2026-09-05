@@ -20,10 +20,11 @@ interface RouteParams {
 // de pago en HomeScreen.tsx (handleSelectPack sigue siendo el único camino
 // hacia Mercado Pago, sin tocar). Flujo: mostrar alias/titular reales
 // (configuracion, ya públicos) con copiar-al-portapapeles, sacar/elegir la
-// foto del comprobante, y mandarlo -- queda 'pendiente' hasta que un admin
-// lo apruebe a mano (Fase 1, admin_aprobar_comprobante). Sin promesa de
-// tiempo en la confirmación a propósito -- el pedido explícito es no decir
-// "en X horas", porque la revisión es manual y no hay forma de garantizarlo.
+// foto del comprobante, y mandarlo -- se acredita AUTOMÁTICO al subirse
+// (Fase 3, crear_pago_pendiente_transferencia -> acreditar_pack): ya no
+// pasa por 'pendiente' ni por una aprobación manual de un admin. El control
+// pasa a ser reactivo (admin_revertir_comprobante, si hace falta corregir
+// algo después), no preventivo -- cambio de flujo de negocio ya decidido.
 export default function TransferReceiptScreen({ navigation, route }: any) {
   const { packId, packName, monto } = route.params as RouteParams;
   const { user } = useAuth();
@@ -69,8 +70,8 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
       const path = await subirComprobantePago(user.id, imageUri);
       await crearPagoPendiente({ packId, comprobantePath: path, monto });
       showAlert(
-        'Comprobante enviado',
-        'Tu comprobante fue enviado, en cuanto lo revisen vas a recibir tus créditos.'
+        '¡Comprobante recibido!',
+        'Ya acreditamos tu pago -- revisá tu saldo actualizado en Inicio.'
       );
       navigation.goBack();
     } catch (err) {
