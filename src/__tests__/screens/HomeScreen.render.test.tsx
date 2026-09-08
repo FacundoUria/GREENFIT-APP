@@ -330,6 +330,80 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   // real (disciplinas activas), conectado de punta a punta -- RPC real,
   // balance de XP en pantalla actualizado al instante, estado del botón
   // persistido.
+  // Créditos por lotes (ver supabase_migration_lotes_creditos_fase1/2.sql):
+  // la Hero Card de "Mi Plan" ya no puede mostrar una sola fecha de
+  // vencimiento por disciplina de créditos -- puede haber 2+ lotes activos
+  // con fechas distintas. formatCreditosDisponibles() corre REAL acá (solo
+  // fetchUserBalances/fetchPacks están mockeados, ver arriba), así que
+  // estos tests ejercitan el texto tal cual se ve en pantalla.
+  describe('Hero Card "Mi Plan" -- créditos por lotes', () => {
+    it('1 solo lote activo -- mismo formato compacto de siempre, con la fecha de vencimiento', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 4,
+          expiresAt: '2026-10-05T12:00:00.000Z',
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+          lotes: [{ id: 'lote-1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ]);
+
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+
+      await waitFor(() => expect(getByText('4 créditos disponibles · vencen el 05/10/2026')).toBeTruthy());
+      // Con un solo lote no hay nada que desglosar -- no debería aparecer
+      // ninguna línea extra de detalle.
+      expect(queryByText(/y \d+ más/)).toBeNull();
+    });
+
+    it('2 lotes activos de la misma disciplina, fechas distintas -- total grande + desglose por lote en orden FIFO', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 20,
+          expiresAt: '2026-09-20T12:00:00.000Z',
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+          lotes: [
+            { id: 'lote-viejo', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+            { id: 'lote-nuevo', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
+          ],
+        },
+      ]);
+
+      const { getByText } = render(<HomeScreen navigation={navigation} />);
+
+      // El total grande -- SIN fecha (con 2 lotes, una sola fecha sería ambigua).
+      await waitFor(() => expect(getByText('20 créditos disponibles')).toBeTruthy());
+      // El desglose -- el que vence antes, primero.
+      expect(getByText('8 vencen el 20/09/2026 · 12 vencen el 15/10/2026')).toBeTruthy();
+    });
+
+    it('Aparatos (membership) sigue mostrándose exactamente igual -- una sola fecha, sin desglose', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: null,
+          expiresAt: '2026-11-01T00:00:00.000Z',
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' },
+          pack: null,
+        },
+      ]);
+
+      const { getByText } = render(<HomeScreen navigation={navigation} />);
+
+      await waitFor(() => expect(getByText('Aparatos')).toBeTruthy());
+      expect(getByText('Vence el 1 de Noviembre, 2026')).toBeTruthy();
+    });
+  });
+
   describe('botón "Hoy Entrené" (autoreporte con tope = disciplinas activas)', () => {
     it('sin ninguna disciplina activa (balances vacío, default), no muestra el botón', async () => {
       const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);

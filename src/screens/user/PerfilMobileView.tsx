@@ -5,8 +5,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
-import { fetchUserBalances, creditosOriginalesPara } from '../../lib/creditsApi';
-import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
+import { fetchUserBalances, formatCreditosDisponibles } from '../../lib/creditsApi';
+import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
+import { formatLongDate } from '../../lib/dateFormat';
 import {
   fetchTotalXp,
   calcularResumenXp,
@@ -226,26 +227,33 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         ) : balancesConEstado.length === 0 ? (
           <Text style={styles.planEmptyText}>Todavía no tenés ningún pack activo.</Text>
         ) : (
-          balancesConEstado.map(({ balance: b, isMembership, status }) => (
-            <View key={b.id} style={styles.planRow}>
+          balancesConEstado.map(({ balance: b, isMembership, status }) => {
+            const creditosTexto = !isMembership ? formatCreditosDisponibles(b.remainingCredits, b.lotes) : null;
+            return (
+            <View key={b.discipline.id} style={styles.planRow}>
               <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={styles.planName} numberOfLines={1}>
                   {b.pack?.name ?? (isMembership ? 'Aparatos' : b.discipline.name)}
                 </Text>
-                <Text style={styles.planDetail}>
-                  {isMembership
-                    ? b.expiresAt
+                {isMembership ? (
+                  <Text style={styles.planDetail}>
+                    {b.expiresAt
                       ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
-                      : 'Sin fecha de vencimiento cargada'
-                    : `${b.remainingCredits ?? 0}${(() => {
-                        const original = creditosOriginalesPara(b.pack, b.discipline.id);
-                        return original ? ` de ${original}` : '';
-                      })()} clases restantes`}
-                </Text>
+                      : 'Sin fecha de vencimiento cargada'}
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={styles.planDetail}>{creditosTexto!.principal}</Text>
+                    {!!creditosTexto!.desglose && (
+                      <Text style={styles.planDetailDesglose}>{creditosTexto!.desglose}</Text>
+                    )}
+                  </>
+                )}
               </View>
               <StatusBadge status={status} />
             </View>
-          ))
+            );
+          })
         )}
       </View>
 
@@ -319,6 +327,9 @@ const styles = StyleSheet.create({
   },
   planName: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
   planDetail: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  // Línea de desglose por lote (2+ tandas activas de la misma disciplina)
+  // -- más chica y más tenue que planDetail, es información secundaria.
+  planDetailDesglose: { color: colors.textSecondary, fontSize: 11, marginTop: 1, opacity: 0.75 },
   statusBadge: { borderRadius: 20, paddingVertical: 4, paddingHorizontal: 10 },
   statusBadgeText: { fontSize: 10.5, fontWeight: '800' },
 

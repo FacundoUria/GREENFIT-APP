@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, AYER_STR, HOY_STR, DISCIPLINA_CROSSFIT } from './support/fixtures';
+import { tablasBase, AYER_STR, HOY_STR, DISCIPLINA_CROSSFIT, EN_30_DIAS } from './support/fixtures';
 
 // Cubre el checklist de Home: widget "Progreso Diario" (anillo de XP +
 // "¡Hoy entrené!" + reglas), y la ausencia de la vieja tarjeta "Mi Pase".
@@ -170,7 +170,7 @@ test.describe('PWA -- Botón "Hoy Entrené" (autoreporte con tope = disciplinas 
             user_id: SOCIO_DEMO.id,
             discipline: DISCIPLINA_CROSSFIT,
             remaining_credits: 5,
-            expires_at: null,
+            expires_at: EN_30_DIAS,
             created_at: '2026-01-01T00:00:00.000Z',
           },
         ],

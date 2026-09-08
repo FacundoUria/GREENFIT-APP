@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS } from './support/fixtures';
+import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS, EN_30_DIAS } from './support/fixtures';
 
 // Checklist "Dinamismo total de packs y precios desde el Admin": "Elegí tu
 // pack" tiene que mostrar EXACTAMENTE lo que hay en `packs` -- sin nada
@@ -63,7 +63,7 @@ test.describe('PWA -- Acceso para comprar (antes solo "Renovar", oculto salvo co
       id: 'uc-activo',
       user_id: SOCIO_DEMO.id,
       remaining_credits: 5,
-      expires_at: null,
+      expires_at: EN_30_DIAS,
       created_at: '2026-08-01T00:00:00.000Z',
       discipline: DISCIPLINA_CROSSFIT,
       pack: null,
@@ -230,7 +230,9 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     });
 
     await expect(page.getByText('CrossFit')).toBeVisible();
-    await expect(page.getByText(/4.*clases restantes/)).toBeVisible();
+    // "X de Y clases restantes" se sacó (rediseño de la card de créditos) --
+    // ahora es "N créditos disponibles" + fecha de vencimiento del lote.
+    await expect(page.getByText(/4 créditos disponibles/)).toBeVisible();
     await expect(page.getByText('Activo', { exact: true })).toBeVisible();
 
     // El pack recién creado sigue disponible para una PRÓXIMA compra --
@@ -375,8 +377,8 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
     });
 
     await expect(page.getByText('CrossFit')).toBeVisible();
-    await expect(page.getByText(/12.*clases restantes/)).toBeVisible();
+    await expect(page.getByText(/12 créditos disponibles/)).toBeVisible();
     await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/8.*clases restantes/)).toBeVisible();
+    await expect(page.getByText(/8 créditos disponibles/)).toBeVisible();
   });
 });

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import Confetti from './Confetti';
 import { addToCalendar, shareReserva, ShareResult } from '../lib/calendarShare';
+import { capitalize } from '../lib/dateFormat';
 
 export interface ReservaConfirmada {
   disciplina: string;
@@ -25,10 +26,6 @@ const SHARE_FEEDBACK: Record<ShareResult, string | null> = {
   cancelled: null,
   unavailable: 'No se pudo compartir en este dispositivo',
 };
-
-function capitalize(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
 
 // Pantalla gamificada de "reserva confirmada": mascota + confetti + resumen
 // de la clase + acciones de agendar/compartir. Se dispara SOLO tras un

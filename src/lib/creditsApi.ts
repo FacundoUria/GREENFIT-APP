@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
-import { Pack, UserCredit, CreditoDePack } from '../types';
+import { Pack, UserCredit, CreditoDePack, CreditLote } from '../types';
+import { formatShortDate } from './dateFormat';
 
 // Un pack ahora es un combo: `creditos` (jsonb en la tabla) trae
 // [{discipline_id, credits}, ...] -- 0 a N disciplinas -- en vez del viejo
@@ -103,15 +104,22 @@ async function fetchDisciplinasDelPlanActual(): Promise<Set<string> | null> {
   return new Set(fila.discipline_ids ?? []);
 }
 
-// El balance más reciente del socio para CADA disciplina en la que tenga
-// algo cargado (una fila por disciplina, no una sola global) -- filtrado a
-// las disciplinas que el panel Admin tiene tildadas HOY para este socio.
+// El balance del socio para CADA disciplina en la que tenga algo cargado
+// (una entrada por disciplina, no una sola global) -- filtrado a las
+// disciplinas que el panel Admin tiene tildadas HOY para este socio.
 // `user_credits` es un ledger append-only (nunca se borra una fila): si el
 // admin destildó una disciplina, su fila vieja sigue existiendo para la
 // auditoría, pero acá deja de ser VISIBLE apenas se saca del plan -- sin
 // esto, un socio seguía viendo para siempre disciplinas que el admin ya
 // le había sacado (bug real reportado: "figuran activos Boxeo, Kickstrike
 // y CrossFit" en la PWA cuando el Admin solo tenía tildado Boxeo).
+//
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// una disciplina de créditos puede tener 2+ filas activas al mismo tiempo
+// (compras distintas, vencimientos distintos) -- antes acá se quedaba con
+// "la fila más reciente" nada más, así que un socio con 2 lotes veía un
+// balance incompleto (le faltaba sumar el otro). Ahora se agrupa TODO lo
+// que tiene esa disciplina y se arma el total + el desglose real.
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   const [{ data, error }, { data: disciplinasData, error: discError }, disciplinasDelPlan] = await Promise.all([
     supabase
@@ -131,14 +139,14 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   if (discError) throw new Error(discError.message);
   const disciplinasPorId = new Map((disciplinasData ?? []).map((d) => [d.id, d]));
 
-  const latestByDiscipline = new Map<string, (typeof data)[number]>();
-  for (const row of data ?? []) {
-    const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
-    if (disciplinasDelPlan && !disciplinasDelPlan.has(discipline.id)) continue;
-    if (!latestByDiscipline.has(discipline.id)) latestByDiscipline.set(discipline.id, row);
-  }
+  type FilaRaw = NonNullable<typeof data>[number];
 
-  return Array.from(latestByDiscipline.values()).map((row) => {
+  // Arma el UserCredit "base" a partir de UNA fila de referencia (para
+  // 'membership', la única que importa; para 'credits', solo se usa para
+  // id/pack/createdAt de referencia -- remainingCredits/expiresAt se
+  // pisan después con el total/lote más próximo real). `lotes` se recibe
+  // ya calculado, nunca se recalcula acá.
+  function mapRow(row: FilaRaw, lotes: CreditLote[]): UserCredit {
     const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
     const pack = Array.isArray(row.pack) ? row.pack[0] : row.pack;
     const creditosRaw = Array.isArray(pack?.creditos) ? (pack!.creditos as { discipline_id: string; credits: number }[]) : [];
@@ -169,13 +177,119 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
             isActive: pack.is_active,
           }
         : null,
+      lotes,
     };
+  }
+
+  // Filtro de "plan actual" -- mismo criterio de siempre, sin cambios.
+  const filasVisibles = (data ?? []).filter((row) => {
+    const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
+    return !disciplinasDelPlan || disciplinasDelPlan.has(discipline.id);
   });
+
+  // Agrupar TODAS las filas por disciplina (ya no solo la más reciente).
+  const filasPorDisciplina = new Map<string, FilaRaw[]>();
+  for (const row of filasVisibles) {
+    const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
+    const lista = filasPorDisciplina.get(discipline.id) ?? [];
+    lista.push(row);
+    filasPorDisciplina.set(discipline.id, lista);
+  }
+
+  const ahora = Date.now();
+  const resultado: UserCredit[] = [];
+
+  for (const filas of filasPorDisciplina.values()) {
+    // Ya vienen ordenadas desc por created_at (la query de arriba) -- la
+    // primera es "la más reciente".
+    const filaMasReciente = filas[0];
+    const discipline = Array.isArray(filaMasReciente.discipline)
+      ? filaMasReciente.discipline[0]
+      : filaMasReciente.discipline;
+
+    if (discipline.kind === 'membership') {
+      // SIN CAMBIOS -- Aparatos no tiene lotes (es una membresía sin
+      // cantidad, una sola fecha) -- sigue siendo la fila más reciente tal
+      // cual, como antes de esta fase.
+      resultado.push(mapRow(filaMasReciente, []));
+      continue;
+    }
+
+    // Créditos -- lotes ACTIVOS (con saldo Y sin vencer), en orden FIFO
+    // (el que vence antes, primero) -- mismo criterio que ya usa
+    // book_class() del lado del servidor para descontar.
+    const lotesActivos = filas
+      .filter(
+        (row) => (row.remaining_credits ?? 0) > 0 && !!row.expires_at && new Date(row.expires_at).getTime() > ahora
+      )
+      .sort((a, b) => new Date(a.expires_at as string).getTime() - new Date(b.expires_at as string).getTime());
+
+    const lotes: CreditLote[] = lotesActivos.map((row) => ({
+      id: row.id,
+      remainingCredits: row.remaining_credits ?? 0,
+      expiresAt: row.expires_at as string,
+    }));
+    const totalCreditos = lotes.reduce((suma, lote) => suma + lote.remainingCredits, 0);
+
+    const base = mapRow(filaMasReciente, lotes);
+    resultado.push({ ...base, remainingCredits: totalCreditos, expiresAt: lotes[0]?.expiresAt ?? null });
+  }
+
+  return resultado;
 }
 
-// Cuántos créditos originales le correspondían a ESTA disciplina puntual
-// dentro del combo comprado -- para el "X de Y clases restantes" (Y = lo
-// que vino en el pack para esta disciplina, no el total del combo entero).
-export function creditosOriginalesPara(pack: Pack | null | undefined, disciplineId: string): number | null {
-  return pack?.creditos.find((c) => c.disciplineId === disciplineId)?.credits ?? null;
+// Lo que arma formatCreditosDisponibles() -- separado en dos porque con
+// 2+ lotes activos no alcanza una sola línea sin ser ambiguo (¿cuál de
+// las fechas es la que importa?): `principal` es el total grande de
+// siempre, `desglose` es la línea chica de abajo con el detalle por lote
+// (null si no hace falta desglosar nada).
+export interface CreditosDisponiblesTexto {
+  principal: string;
+  desglose: string | null;
+}
+
+// Con más de esta cantidad de lotes activos, se muestran los que vencen
+// antes y el resto se resume como "y N más" -- para no romper el layout
+// de la card con un socio que llegó a acumular muchas tandas sueltas
+// (caso poco común, pero posible).
+const MAX_LOTES_EN_DESGLOSE = 2;
+
+// Texto de saldo de créditos para Home/Perfil -- SIN el "X de Y" del
+// tamaño del último pack comprado (bug real reportado: confundía a los
+// socios -- "52 de 12" no tiene sentido una vez que se compró más de un
+// pack a lo largo del tiempo, porque 52 es el ACUMULADO real y 12 es solo
+// el tamaño de la ÚLTIMA compra, sin relación entre sí -- ver
+// creditosOriginalesPara(), reemplazada por esto).
+//
+// Créditos por LOTES: ya no hay una sola fecha "de la fila" -- puede haber
+// 2+ lotes activos de la misma disciplina con vencimientos distintos (ver
+// fetchUserBalances). `lotes` viene en orden FIFO (el que vence antes,
+// primero):
+//   - 0 lotes activos (agotado/vencido): solo el saldo, sin fecha.
+//   - 1 lote: el formato compacto de siempre, todo en `principal`.
+//   - 2+ lotes: `principal` es el TOTAL sin fecha (mostrar una sola acá
+//     sería, directamente, mostrar información incompleta) -- el detalle
+//     va en `desglose`.
+export function formatCreditosDisponibles(remainingCredits: number | null, lotes: CreditLote[] = []): CreditosDisponiblesTexto {
+  const cantidad = remainingCredits ?? 0;
+  const principal = cantidad === 1 ? '1 crédito disponible' : `${cantidad} créditos disponibles`;
+
+  if (lotes.length === 0) {
+    return { principal, desglose: null };
+  }
+
+  if (lotes.length === 1) {
+    const verbo = cantidad === 1 ? 'vence' : 'vencen';
+    return { principal: `${principal} · ${verbo} el ${formatShortDate(lotes[0].expiresAt)}`, desglose: null };
+  }
+
+  const visibles = lotes.slice(0, MAX_LOTES_EN_DESGLOSE);
+  const partes = visibles.map((lote) => {
+    const verboLote = lote.remainingCredits === 1 ? 'vence' : 'vencen';
+    return `${lote.remainingCredits} ${verboLote} el ${formatShortDate(lote.expiresAt)}`;
+  });
+  const restantes = lotes.length - visibles.length;
+  if (restantes > 0) partes.push(`y ${restantes} más`);
+
+  return { principal, desglose: partes.join(' · ') };
 }
