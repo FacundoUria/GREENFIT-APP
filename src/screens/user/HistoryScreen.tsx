@@ -5,6 +5,7 @@ import { Booking } from '../../types';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { formatDateOnly } from '../../lib/classesApi';
+import { formatShortDate } from '../../lib/dateFormat';
 
 async function fetchHistory(userId: string): Promise<Booking[]> {
   const todayStr = formatDateOnly(new Date());
@@ -82,9 +83,7 @@ export default function HistoryScreen() {
           <View style={styles.row}>
             <View>
               <Text style={styles.className}>{item.gymClass.title}</Text>
-              <Text style={styles.date}>
-                {new Date(`${item.bookingDate}T00:00:00`).toLocaleDateString('es-AR')}
-              </Text>
+              <Text style={styles.date}>{formatShortDate(`${item.bookingDate}T00:00:00`)}</Text>
             </View>
             {/* `fetchHistory` ya trae solo reservas con booking_date <= hoy --
                 cancelar una reserva BORRA su fila (ver cancel_booking() en

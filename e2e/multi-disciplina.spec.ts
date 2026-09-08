@@ -54,7 +54,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
     });
 
     await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/6.*clases restantes/)).toBeVisible();
+    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
     await expect(page.getByText('Activo', { exact: true })).toBeVisible();
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
   });
@@ -85,8 +85,8 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
 
     // Cada una con su balance EXACTO -- ninguna quedó en "0 clases" por
     // pisarse con las otras filas de user_credits.
-    await expect(page.getByText(/6.*clases restantes/)).toBeVisible();
-    await expect(page.getByText(/3.*clases restantes/)).toBeVisible();
+    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
+    await expect(page.getByText(/3 créditos disponibles/)).toBeVisible();
 
     // Las 3 activas (membresía vigente + créditos > 0 en ambas) -- CERO
     // "Vencido" de más, y el badge "Activo" aparece 3 veces (uno por fila).
@@ -120,8 +120,8 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
 
     await expect(page.getByText('CrossFit')).toBeVisible();
     await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/6.*clases restantes/)).toBeVisible();
-    await expect(page.getByText(/0.*clases restantes/)).toBeVisible();
+    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
+    await expect(page.getByText(/0 créditos disponibles/)).toBeVisible();
     // Exactamente una Activo (CrossFit) y una Vencido (Boxeo) -- ninguna de
     // las dos se "pisa" con el estado de la otra.
     await expect(page.getByText('Activo', { exact: true })).toHaveCount(1);
@@ -170,6 +170,6 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
     await expect(page.getByText('Aparatos').last()).toBeVisible();
     await expect(page.getByText('Boxeo').last()).toBeVisible();
     await expect(page.getByText('CrossFit').last()).toBeVisible();
-    await expect(page.getByText(/6 de \d+ clases restantes|6.*clases restantes/).last()).toBeVisible();
+    await expect(page.getByText(/6 créditos disponibles/).last()).toBeVisible();
   });
 });

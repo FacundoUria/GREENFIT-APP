@@ -28,6 +28,7 @@ import BookingConfirmModal from '../../components/BookingConfirmModal';
 import ConsentModal from '../../components/ConsentModal';
 import MessageModal, { MessageModalContent } from '../../components/MessageModal';
 import { fetchTieneConsentimientoVigente, registrarConsentimiento } from '../../lib/consentApi';
+import { capitalize } from '../../lib/dateFormat';
 
 // Timeout de red para reservar/cancelar: el cliente de Supabase no tiene
 // uno por defecto -- si la conexión se cuelga a mitad de la request (wifi
@@ -101,10 +102,6 @@ async function fetchTieneContactoEmergencia(userId: string): Promise<boolean> {
     return true;
   }
   return !!data.emergency_contact_name?.trim() && !!data.emergency_contact_phone?.trim();
-}
-
-function capitalize(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export default function AgendaMobileView({ navigation }: any) {

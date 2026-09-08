@@ -50,6 +50,16 @@ export interface Pack {
   isActive: boolean;
 }
 
+// Un lote individual de créditos (una compra/acreditación puntual) --
+// ver supabase_migration_lotes_creditos_fase1.sql: cada acreditación de
+// créditos es su propio lote independiente, con su propia cantidad y
+// vencimiento (se fusionan solo si caen exacto el mismo día calendario).
+export interface CreditLote {
+  id: string;
+  remainingCredits: number;
+  expiresAt: string;
+}
+
 // Balance de un socio para UNA disciplina puntual. Un socio tiene un
 // UserCredit por cada disciplina en la que tenga algo cargado.
 export interface UserCredit {
@@ -59,9 +69,21 @@ export interface UserCredit {
   // puntual) no tienen pack asociado -- `pack_id` es nullable en la tabla.
   pack: Pack | null;
   discipline: Discipline;
-  remainingCredits: number | null; // solo aplica si discipline.kind === 'credits'
-  expiresAt: string | null;        // solo aplica si discipline.kind === 'membership'
+  // Para 'credits': SUMA de remaining_credits de todos los lotes ACTIVOS
+  // (no un solo lote -- ver `lotes`). Para 'membership' siempre null.
+  remainingCredits: number | null;
+  // Para 'membership': la fecha de vencimiento real (única, Aparatos no
+  // tiene lotes). Para 'credits': la fecha del lote que vence MÁS PRONTO
+  // entre los activos (o null si no queda ninguno activo) -- para el
+  // desglose completo, usar `lotes`, no este campo solo.
+  expiresAt: string | null;
   createdAt: string;
+  // NUEVO -- solo tiene contenido real para 'credits': cada lote ACTIVO
+  // (remaining_credits>0, expires_at>now()), ordenado por expiresAt
+  // ascendente (el que vence antes, primero). Opcional para no romper
+  // código/tests existentes que todavía arman un UserCredit sin este
+  // campo -- tratalo como `[]` si viene ausente.
+  lotes?: CreditLote[];
 }
 
 export interface CreditTransaction {

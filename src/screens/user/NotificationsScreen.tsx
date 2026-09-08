@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
+import { formatShortDate } from '../../lib/dateFormat';
 
 interface MyNotification {
   id: string;
@@ -65,14 +66,8 @@ export default function NotificationsScreen() {
             <Text style={styles.title}>{item.title}</Text>
             <Text style={styles.body}>{item.body}</Text>
             <Text style={styles.date}>
-              {new Date(item.createdAt).toLocaleString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-              })}
+              {formatShortDate(item.createdAt)}{' '}
+              {new Date(item.createdAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })}
             </Text>
           </View>
         )}

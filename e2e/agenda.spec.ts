@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, CLASE_HOY, CLASE_APARATOS_HOY, DISCIPLINA_CROSSFIT, HOY_STR } from './support/fixtures';
+import { tablasBase, CLASE_HOY, CLASE_APARATOS_HOY, DISCIPLINA_CROSSFIT, HOY_STR, EN_30_DIAS } from './support/fixtures';
 import { irATab } from './support/nav';
 
 // Texto corto de reafirmación de salud (BookingConfirmModal) -- exacto,
@@ -36,7 +36,7 @@ test.describe('PWA -- Mi Agenda', () => {
             id: 'uc-1',
             user_id: SOCIO_DEMO.id,
             remaining_credits: 5,
-            expires_at: null,
+            expires_at: EN_30_DIAS,
             created_at: '2026-08-01T00:00:00.000Z',
             discipline: DISCIPLINA_CROSSFIT,
             pack: null,
@@ -74,7 +74,7 @@ test.describe('PWA -- Mi Agenda', () => {
             id: 'uc-1',
             user_id: SOCIO_DEMO.id,
             remaining_credits: 5,
-            expires_at: null,
+            expires_at: EN_30_DIAS,
             created_at: '2026-08-01T00:00:00.000Z',
             discipline: DISCIPLINA_CROSSFIT,
             pack: null,
@@ -130,7 +130,7 @@ test.describe('PWA -- Mi Agenda', () => {
             id: 'uc-1',
             user_id: SOCIO_DEMO.id,
             remaining_credits: 5,
-            expires_at: null,
+            expires_at: EN_30_DIAS,
             created_at: '2026-08-01T00:00:00.000Z',
             discipline: DISCIPLINA_CROSSFIT,
             pack: null,
@@ -165,7 +165,7 @@ test.describe('PWA -- Mi Agenda', () => {
           id: 'uc-1',
           user_id: SOCIO_DEMO.id,
           remaining_credits: 5,
-          expires_at: null,
+          expires_at: EN_30_DIAS,
           created_at: '2026-08-01T00:00:00.000Z',
           discipline: DISCIPLINA_CROSSFIT,
           pack: null,
@@ -222,7 +222,7 @@ test.describe('PWA -- Mi Agenda', () => {
               id: 'uc-1',
               user_id: SOCIO_DEMO.id,
               remaining_credits: 5,
-              expires_at: null,
+              expires_at: EN_30_DIAS,
               created_at: '2026-08-01T00:00:00.000Z',
               discipline: DISCIPLINA_CROSSFIT,
               pack: null,
@@ -253,7 +253,7 @@ test.describe('PWA -- Mi Agenda', () => {
               id: 'uc-1',
               user_id: SOCIO_DEMO.id,
               remaining_credits: 5,
-              expires_at: null,
+              expires_at: EN_30_DIAS,
               created_at: '2026-08-01T00:00:00.000Z',
               discipline: DISCIPLINA_CROSSFIT,
               pack: null,
@@ -288,7 +288,7 @@ test.describe('PWA -- Mi Agenda', () => {
             id: 'uc-1',
             user_id: SOCIO_DEMO.id,
             remaining_credits: 5,
-            expires_at: null,
+            expires_at: EN_30_DIAS,
             created_at: '2026-08-01T00:00:00.000Z',
             discipline: DISCIPLINA_CROSSFIT,
             pack: null,

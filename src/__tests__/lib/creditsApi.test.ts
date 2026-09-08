@@ -13,7 +13,7 @@ jest.mock('../../lib/supabase', () => ({
   supabase: { from: (...args: unknown[]) => mockFrom(...args), rpc: (...args: unknown[]) => mockRpc(...args) },
 }));
 
-import { fetchPacks, buildPackSubtitle, creditosOriginalesPara, fetchUserBalances } from '../../lib/creditsApi';
+import { fetchPacks, buildPackSubtitle, formatCreditosDisponibles, fetchUserBalances } from '../../lib/creditsApi';
 import { Pack } from '../../types';
 
 function chainPacks(data: unknown[]) {
@@ -125,16 +125,23 @@ describe('fetchPacks -- combos multi-disciplina', () => {
 describe('fetchUserBalances (single source of truth: el plan actual del admin filtra el ledger)', () => {
   beforeEach(() => jest.clearAllMocks());
 
+  // expires_at en el futuro lejano (no null) -- créditos por lotes exige
+  // una fecha real para que un lote cuente como "activo" (ver el describe
+  // de más abajo); estas 3 filas son de antes de ese cambio y usaban
+  // expires_at:null (ya no representa ningún dato real de producción,
+  // donde acreditar_pack() siempre carga una fecha). Fecha fija muy lejana
+  // (mismo criterio que RankingAdmin.test.jsx) para que el test nunca se
+  // vuelva flaky por el paso del tiempo.
   const FILA_BOXEO = {
-    id: 'uc-boxeo', user_id: 'user-1', remaining_credits: 6, expires_at: null, created_at: '2026-08-10T00:00:00.000Z',
+    id: 'uc-boxeo', user_id: 'user-1', remaining_credits: 6, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-08-10T00:00:00.000Z',
     discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }, pack: null,
   };
   const FILA_KICKSTRIKE = {
-    id: 'uc-kick', user_id: 'user-1', remaining_credits: 9, expires_at: null, created_at: '2026-07-01T00:00:00.000Z',
+    id: 'uc-kick', user_id: 'user-1', remaining_credits: 9, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-07-01T00:00:00.000Z',
     discipline: { id: 'disc-kick', name: 'Kickstrike', kind: 'credits' }, pack: null,
   };
   const FILA_CROSSFIT = {
-    id: 'uc-crossfit', user_id: 'user-1', remaining_credits: 7, expires_at: null, created_at: '2026-06-01T00:00:00.000Z',
+    id: 'uc-crossfit', user_id: 'user-1', remaining_credits: 7, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-06-01T00:00:00.000Z',
     discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
   };
 
@@ -187,6 +194,126 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
   });
 });
 
+// Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
+// antes, fetchUserBalances() se quedaba con "la fila más reciente" por
+// disciplina -- un socio con 2+ compras de la misma disciplina (fechas de
+// vencimiento distintas) veía un balance incompleto. Ahora agrupa TODAS
+// las filas activas y suma.
+describe('fetchUserBalances (créditos por lotes -- suma y desglose real, no "la fila más reciente")', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function mockTablasSinFiltro(userCreditsData: unknown[]) {
+    mockFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'user_credits') return chainPacks(userCreditsData);
+      if (tabla === 'disciplines') return chainPacks([]);
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    // fail-open (sin ficha vinculada) -- no es lo que se está probando acá,
+    // no debe filtrar nada.
+    mockRpc.mockReturnValue({
+      single: jest.fn().mockResolvedValue({ data: { vinculado: false, discipline_ids: null }, error: null }),
+    });
+  }
+
+  const FUTURO_LEJANO = '2099-01-01T00:00:00.000Z';
+  const FUTURO_MAS_LEJANO = '2099-06-01T00:00:00.000Z';
+  const PASADO = '2020-01-01T00:00:00.000Z';
+
+  it('un solo lote activo -- remainingCredits y expiresAt vienen de ese lote, lotes trae esa única entrada', async () => {
+    mockTablasSinFiltro([
+      {
+        id: 'uc-1', user_id: 'user-1', remaining_credits: 4, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+
+    expect(balance.remainingCredits).toBe(4);
+    expect(balance.expiresAt).toBe(FUTURO_LEJANO);
+    expect(balance.lotes).toEqual([{ id: 'uc-1', remainingCredits: 4, expiresAt: FUTURO_LEJANO }]);
+  });
+
+  it('2 lotes activos de la misma disciplina, fechas distintas -- remainingCredits es la SUMA, lotes en orden FIFO (el que vence antes, primero)', async () => {
+    mockTablasSinFiltro([
+      // A propósito el que vence DESPUÉS tiene el created_at más reciente
+      // -- el orden que importa acá es por expires_at, no por creación.
+      {
+        id: 'uc-nuevo', user_id: 'user-1', remaining_credits: 12, expires_at: FUTURO_MAS_LEJANO, created_at: '2026-09-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+      {
+        id: 'uc-viejo', user_id: 'user-1', remaining_credits: 8, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+
+    expect(balance.remainingCredits).toBe(20); // 12 + 8, suma real
+    expect(balance.expiresAt).toBe(FUTURO_LEJANO); // el que vence antes
+    expect(balance.lotes).toEqual([
+      { id: 'uc-viejo', remainingCredits: 8, expiresAt: FUTURO_LEJANO },
+      { id: 'uc-nuevo', remainingCredits: 12, expiresAt: FUTURO_MAS_LEJANO },
+    ]);
+  });
+
+  it('un lote vencido no cuenta -- ni en el total ni en lotes -- pero uno más viejo (por creación) con saldo vigente sí (caso que fallaba con "la fila más reciente")', async () => {
+    mockTablasSinFiltro([
+      // El "más reciente por creación" ya venció.
+      {
+        id: 'uc-nuevo-vencido', user_id: 'user-1', remaining_credits: 5, expires_at: PASADO, created_at: '2026-09-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+      // Uno más viejo, pero todavía vigente con saldo.
+      {
+        id: 'uc-viejo-vigente', user_id: 'user-1', remaining_credits: 3, expires_at: FUTURO_LEJANO, created_at: '2026-06-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+
+    expect(balance.remainingCredits).toBe(3); // solo el vigente
+    expect(balance.lotes).toEqual([{ id: 'uc-viejo-vigente', remainingCredits: 3, expiresAt: FUTURO_LEJANO }]);
+  });
+
+  it('un lote agotado (remaining_credits=0) no cuenta aunque no haya vencido', async () => {
+    mockTablasSinFiltro([
+      {
+        id: 'uc-agotado', user_id: 'user-1', remaining_credits: 0, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+
+    expect(balance.remainingCredits).toBe(0);
+    expect(balance.expiresAt).toBeNull();
+    expect(balance.lotes).toEqual([]);
+  });
+
+  it('Aparatos (membership) sigue devolviendo la fila más reciente tal cual, SIN lotes -- no cambia nada', async () => {
+    mockTablasSinFiltro([
+      {
+        id: 'uc-aparatos-nuevo', user_id: 'user-1', remaining_credits: null, expires_at: FUTURO_MAS_LEJANO, created_at: '2026-09-01T00:00:00.000Z',
+        discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }, pack: null,
+      },
+      {
+        id: 'uc-aparatos-viejo', user_id: 'user-1', remaining_credits: null, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+
+    expect(balance.id).toBe('uc-aparatos-nuevo'); // la más reciente, no la que "vence antes"
+    expect(balance.expiresAt).toBe(FUTURO_MAS_LEJANO);
+    expect(balance.remainingCredits).toBeNull();
+    expect(balance.lotes).toEqual([]);
+  });
+});
+
 describe('buildPackSubtitle', () => {
   it('un combo de 2 disciplinas: "N créditos X + N créditos Y"', () => {
     const pack: Pack = {
@@ -213,25 +340,73 @@ describe('buildPackSubtitle', () => {
   });
 });
 
-describe('creditosOriginalesPara', () => {
-  const pack: Pack = {
-    id: 'p1', name: 'Combo', price: 1, isActive: true, incluyeAparatos: false, diasVigencia: null,
-    creditos: [
-      { disciplineId: 'd-boxeo', disciplineName: 'Boxeo', credits: 8 },
-      { disciplineId: 'd-crossfit', disciplineName: 'CrossFit', credits: 8 },
-    ],
-  };
+// Reemplaza al "X de Y clases restantes" (Y = tamaño del ÚLTIMO pack
+// comprado) -- bug real reportado: confundía a los socios apenas compraban
+// más de un pack en el tiempo, porque el acumulado real (X) y el tamaño de
+// la última compra (Y) no tienen relación entre sí. Ahora se muestra el
+// saldo real + cuándo vence esa vigencia -- y, con créditos por lotes, ya
+// no alcanza una sola fecha si hay 2+ lotes activos con vencimientos
+// distintos (ver `lotes`, `CreditosDisponiblesTexto`).
+describe('formatCreditosDisponibles (reemplaza al "X de Y clases restantes", ahora por lotes)', () => {
+  it('0 lotes activos (agotado/vencido) -- solo el saldo, sin la parte de vencimiento', () => {
+    expect(formatCreditosDisponibles(0, [])).toEqual({ principal: '0 créditos disponibles', desglose: null })
+  })
 
-  it('devuelve los créditos originales de la disciplina puntual dentro del combo', () => {
-    expect(creditosOriginalesPara(pack, 'd-boxeo')).toBe(8);
-  });
+  it('0 lotes pero lotes no provisto (compatibilidad con código/mocks viejos) -- se trata como []', () => {
+    expect(formatCreditosDisponibles(8)).toEqual({ principal: '8 créditos disponibles', desglose: null })
+  })
 
-  it('sin pack (crédito cargado a mano por el admin), devuelve null', () => {
-    expect(creditosOriginalesPara(null, 'd-boxeo')).toBeNull();
-    expect(creditosOriginalesPara(undefined, 'd-boxeo')).toBeNull();
-  });
+  it('1 lote activo -- formato compacto de siempre, todo en `principal`, sin desglose', () => {
+    const lotes = [{ id: 'l1', remainingCredits: 52, expiresAt: '2026-10-05T12:00:00.000Z' }]
+    expect(formatCreditosDisponibles(52, lotes)).toEqual({
+      principal: '52 créditos disponibles · vencen el 05/10/2026',
+      desglose: null,
+    })
+  })
 
-  it('una disciplina que no está en el combo devuelve null', () => {
-    expect(creditosOriginalesPara(pack, 'd-kickstrike')).toBeNull();
-  });
+  it('1 lote con 1 solo crédito, concuerda en singular ("1 crédito disponible", "vence")', () => {
+    const lotes = [{ id: 'l1', remainingCredits: 1, expiresAt: '2026-10-05T12:00:00.000Z' }]
+    expect(formatCreditosDisponibles(1, lotes)).toEqual({
+      principal: '1 crédito disponible · vence el 05/10/2026',
+      desglose: null,
+    })
+  })
+
+  it('2 lotes activos -- `principal` es el TOTAL sin fecha, `desglose` lista cada lote en el orden recibido (FIFO)', () => {
+    const lotes = [
+      { id: 'l-viejo', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+      { id: 'l-nuevo', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(20, lotes)).toEqual({
+      principal: '20 créditos disponibles',
+      desglose: '8 vencen el 20/09/2026 · 12 vencen el 15/10/2026',
+    })
+  })
+
+  it('un lote de 1 solo crédito dentro del desglose concuerda en singular ("1 vence", no "1 vencen")', () => {
+    const lotes = [
+      { id: 'l-viejo', remainingCredits: 1, expiresAt: '2026-09-20T12:00:00.000Z' },
+      { id: 'l-nuevo', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(13, lotes).desglose).toBe('1 vence el 20/09/2026 · 12 vencen el 15/10/2026')
+  })
+
+  it('3+ lotes -- muestra los 2 que vencen antes y resume el resto como "y N más" (no rompe el layout)', () => {
+    const lotes = [
+      { id: 'l1', remainingCredits: 4, expiresAt: '2026-09-10T12:00:00.000Z' },
+      { id: 'l2', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+      { id: 'l3', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(24, lotes)).toEqual({
+      principal: '24 créditos disponibles',
+      desglose: '4 vencen el 10/09/2026 · 8 vencen el 20/09/2026 · y 1 más',
+    })
+  })
+
+  it('ya NO menciona el tamaño del último pack comprado -- no depende de packs.creditos para nada', () => {
+    // No recibe ningún `pack` como parámetro -- a propósito, ya no hay
+    // ningún "de Y" que calcular.
+    const lotes = [{ id: 'l1', remainingCredits: 52, expiresAt: '2026-10-05T12:00:00.000Z' }]
+    expect(formatCreditosDisponibles(52, lotes).principal).not.toMatch(/de \d+/)
+  })
 });

@@ -4,17 +4,8 @@ const DIAS_POR_VENCER = 5;
 
 export type MembershipStatus = 'activo' | 'por_vencer' | 'vencido';
 
-const MESES = [
-  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-];
-
-// "2026-08-16" -> "16 de Agosto, 2026"
-export function formatLongDate(dateStr: string): string {
-  const date = new Date(`${dateStr.slice(0, 10)}T00:00:00`);
-  const mes = MESES[date.getMonth()];
-  return `${date.getDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${date.getFullYear()}`;
-}
+// formatLongDate() se mudó a lib/dateFormat.ts (este archivo es de estado de
+// membresía, no de formateo de fechas) -- importala de ahí.
 
 // Para membresías con vencimiento (Aparatos, Pase Libre).
 // `diasTolerancia` es el mismo valor que "Días de tolerancia de pago" en

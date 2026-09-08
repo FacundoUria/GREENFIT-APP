@@ -17,14 +17,15 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, creditosOriginalesPara } from '../../lib/creditsApi';
+import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, formatCreditosDisponibles } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { showAlert } from '../../lib/crossPlatformAlert';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel } from '../../lib/classTime';
-import { formatLongDate, getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
+import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
+import { formatLongDate } from '../../lib/dateFormat';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
@@ -393,31 +394,33 @@ export default function HomeScreen({ navigation }: any) {
         ) : balances.length === 0 ? (
           <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
         ) : (
-          balancesConEstado.map(({ balance: b, isMembership, status }) => (
-            <View key={b.id} style={styles.heroPlanRow}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.heroPlanName}>
-                  {isMembership ? 'Aparatos' : b.discipline.name}
-                </Text>
-                <Text style={styles.heroPlanDetail}>
-                  {isMembership
-                    ? b.expiresAt
-                      ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
-                      : 'Sin fecha de vencimiento cargada'
-                    : (() => {
-                        // El pack puede ser un combo -- lo que importa acá es
-                        // cuánto le tocaba a ESTA disciplina puntual, no el
-                        // total del combo entero.
-                        const original = creditosOriginalesPara(b.pack, b.discipline.id);
-                        return original
-                          ? `${b.remainingCredits ?? 0} de ${original} clases restantes`
-                          : `${b.remainingCredits ?? 0} clases restantes`;
-                      })()}
-                </Text>
+          balancesConEstado.map(({ balance: b, isMembership, status }) => {
+            const creditosTexto = !isMembership ? formatCreditosDisponibles(b.remainingCredits, b.lotes) : null;
+            return (
+              <View key={b.discipline.id} style={styles.heroPlanRow}>
+                <View style={{ flex: 1, paddingRight: 10 }}>
+                  <Text style={styles.heroPlanName}>
+                    {isMembership ? 'Aparatos' : b.discipline.name}
+                  </Text>
+                  {isMembership ? (
+                    <Text style={styles.heroPlanDetail}>
+                      {b.expiresAt
+                        ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
+                        : 'Sin fecha de vencimiento cargada'}
+                    </Text>
+                  ) : (
+                    <>
+                      <Text style={styles.heroPlanDetail}>{creditosTexto!.principal}</Text>
+                      {!!creditosTexto!.desglose && (
+                        <Text style={styles.heroPlanDetailDesglose}>{creditosTexto!.desglose}</Text>
+                      )}
+                    </>
+                  )}
+                </View>
+                <StatusBadge status={status} />
               </View>
-              <StatusBadge status={status} />
-            </View>
-          ))
+            );
+          })
         )}
 
         {hayVencido ? (
@@ -649,6 +652,9 @@ const styles = StyleSheet.create({
   },
   heroPlanName: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   heroPlanDetail: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
+  // Línea de desglose por lote (2+ tandas activas de la misma disciplina)
+  // -- más chica y más tenue que heroPlanDetail, es información secundaria.
+  heroPlanDetailDesglose: { color: colors.textSecondary, fontSize: 11, marginTop: 1, opacity: 0.75 },
   heroVencidoActions: { flexDirection: 'row', gap: 8, marginTop: 16 },
 
   statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },

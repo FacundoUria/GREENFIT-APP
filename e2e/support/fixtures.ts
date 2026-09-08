@@ -16,6 +16,16 @@ const AYER = new Date(Date.now() - 86_400_000);
 export const HOY_STR = formatFechaISO(HOY);
 export const AYER_STR = formatFechaISO(AYER);
 
+// Vencimiento de un lote de créditos "activo" para fixtures de user_credits
+// -- relativo a HOY (no hardcodeado), mismo criterio que HOY_STR/AYER_STR de
+// arriba, para que la suite nunca quede desalineada con la fecha real. Desde
+// la Fase 2 de créditos por lotes, esta_habilitado_para_disciplina() (SQL) y
+// fetchUserBalances() (JS) exigen expires_at > ahora para contar un lote
+// como activo -- un `expires_at: null` (como usaban estos fixtures antes de
+// que existiera el concepto de vencimiento por lote) ya NO representa un
+// crédito disponible, sino uno excluido.
+export const EN_30_DIAS = new Date(Date.now() + 30 * 86_400_000).toISOString();
+
 export const DISCIPLINA_CROSSFIT = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' };
 export const DISCIPLINA_APARATOS = { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' };
 

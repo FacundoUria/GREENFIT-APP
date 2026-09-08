@@ -74,6 +74,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.
 import { supabase } from '../../lib/supabase';
 import * as ImagePicker from 'expo-image-picker';
 import { checkAvatarDisponible, subirAvatarPerfil } from '../../lib/avatarApi';
+import { fetchUserBalances } from '../../lib/creditsApi';
 import PerfilMobileView from '../../screens/user/PerfilMobileView';
 
 const mockedFrom = supabase.from as jest.Mock;
@@ -142,6 +143,63 @@ describe('PerfilMobileView (Módulo 3)', () => {
     const { getByText } = render(<PerfilMobileView />);
     await waitFor(() => expect(getByText('Pase Libre')).toBeTruthy());
     expect(getByText('Activo')).toBeTruthy();
+  });
+
+  // Créditos por lotes (ver supabase_migration_lotes_creditos_fase1/2.sql):
+  // el mock default de arriba es Aparatos (membership) -- este describe
+  // sobreescribe con mockResolvedValueOnce para probar una disciplina de
+  // créditos con 1 y con 2 lotes activos, con formatCreditosDisponibles()
+  // corriendo real (solo fetchUserBalances está mockeado).
+  describe('plan activo -- créditos por lotes', () => {
+    it('1 solo lote activo -- mismo formato compacto de siempre, con la fecha de vencimiento', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 4,
+          expiresAt: '2026-10-05T12:00:00.000Z',
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+          lotes: [{ id: 'lote-1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }],
+        },
+      ]);
+
+      const { getByText, queryByText } = render(<PerfilMobileView />);
+
+      await waitFor(() => expect(getByText('4 créditos disponibles · vencen el 05/10/2026')).toBeTruthy());
+      expect(queryByText(/y \d+ más/)).toBeNull();
+    });
+
+    it('2 lotes activos de la misma disciplina, fechas distintas -- total grande + desglose por lote en orden FIFO', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-1',
+          userId: 'user-1',
+          remainingCredits: 20,
+          expiresAt: '2026-09-20T12:00:00.000Z',
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
+          pack: null,
+          lotes: [
+            { id: 'lote-viejo', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+            { id: 'lote-nuevo', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
+          ],
+        },
+      ]);
+
+      const { getByText } = render(<PerfilMobileView />);
+
+      await waitFor(() => expect(getByText('20 créditos disponibles')).toBeTruthy());
+      expect(getByText('8 vencen el 20/09/2026 · 12 vencen el 15/10/2026')).toBeTruthy();
+    });
+
+    it('Aparatos (membership) sigue mostrándose exactamente igual -- una sola fecha, sin desglose (usa el mock default del describe raíz)', async () => {
+      const { getByText, queryByText } = render(<PerfilMobileView />);
+
+      await waitFor(() => expect(getByText('Pase Libre')).toBeTruthy());
+      expect(queryByText(/vencen el/)).toBeNull();
+    });
   });
 
   it('navega a "Mis Datos" a través de onNavigate cuando está conectado', async () => {
