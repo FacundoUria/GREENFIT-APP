@@ -410,3 +410,49 @@ describe('formatCreditosDisponibles (reemplaza al "X de Y clases restantes", aho
     expect(formatCreditosDisponibles(52, lotes).principal).not.toMatch(/de \d+/)
   })
 });
+
+// Caso real (Agustina Barbero): 2 lotes de la misma disciplina que vencen
+// el MISMO día calendario en Argentina (típico de datos de antes del fix
+// de zona horaria de la fusión, supabase_migration_fix_zona_horaria_fusion_
+// lotes.sql, que quedaron en 2 filas separadas aunque deberían haber
+// fusionado) se mostraban como líneas redundantes -- "8 vencen el 23/09 ·
+// 4 vencen el 23/09" -- en vez de unificadas. Se agrupan acá, en la
+// presentación, sin tocar ninguna fila real de user_credits.
+describe('formatCreditosDisponibles -- agrupa lotes que vencen el MISMO día calendario en Argentina (fix Agustina Barbero)', () => {
+  it('2 lotes el mismo día -- se unifican en 1 sola línea con la suma (mismo formato "1 lote" de siempre)', () => {
+    // 8 (10:00 UTC) + 4 (18:00 UTC) -- ambos caen en 23/09 hora Argentina
+    // (UTC-3): 07:00 y 15:00 del mismo día, lejos de cualquier borde de
+    // medianoche.
+    const lotes = [
+      { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-23T10:00:00.000Z' },
+      { id: 'l2', remainingCredits: 4, expiresAt: '2026-09-23T18:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(12, lotes)).toEqual({
+      principal: '12 créditos disponibles · vencen el 23/09/2026',
+      desglose: null,
+    })
+  })
+
+  it('lotes en DÍAS DISTINTOS siguen mostrándose separados -- sin cambios respecto de hoy', () => {
+    const lotes = [
+      { id: 'l-viejo', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+      { id: 'l-nuevo', remainingCredits: 4, expiresAt: '2026-09-23T12:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(12, lotes)).toEqual({
+      principal: '12 créditos disponibles',
+      desglose: '8 vencen el 20/09/2026 · 4 vencen el 23/09/2026',
+    })
+  })
+
+  it('3 lotes -- 2 el mismo día + 1 en otro día -- agrupa primero y DESPUÉS aplica el tope de 2 líneas del desglose', () => {
+    const lotes = [
+      { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-23T10:00:00.000Z' },
+      { id: 'l2', remainingCredits: 4, expiresAt: '2026-09-23T18:00:00.000Z' }, // mismo día que l1 -- se funden en "12"
+      { id: 'l3', remainingCredits: 6, expiresAt: '2026-10-15T12:00:00.000Z' },
+    ]
+    expect(formatCreditosDisponibles(18, lotes)).toEqual({
+      principal: '18 créditos disponibles',
+      desglose: '12 vencen el 23/09/2026 · 6 vencen el 15/10/2026',
+    })
+  })
+})

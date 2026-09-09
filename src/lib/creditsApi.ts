@@ -254,6 +254,49 @@ export interface CreditosDisponiblesTexto {
 // (caso poco común, pero posible).
 const MAX_LOTES_EN_DESGLOSE = 2;
 
+// "YYYY-MM-DD" del día calendario en hora Argentina -- mismo criterio que
+// ya usa acreditar_pack() para decidir si dos acreditaciones fusionan en
+// un solo lote (ver supabase_migration_fix_zona_horaria_fusion_lotes.sql).
+// Puramente para AGRUPAR EL TEXTO acá -- no toca ninguna fila real de
+// user_credits.
+function claveDiaArgentina(isoString: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Mendoza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(isoString));
+}
+
+interface LoteAgrupado {
+  remainingCredits: number;
+  expiresAt: string;
+}
+
+// Socios con 2+ lotes que vencen el MISMO día calendario (típico en datos
+// de antes del fix de zona horaria de la fusión, que quedaron en filas
+// separadas aunque deberían haber fusionado) se veían como líneas
+// redundantes -- "8 vencen el 23/09 · 4 vencen el 23/09" en vez de "12
+// vencen el 23/09". Se agrupan acá, en la presentación, ANTES de decidir
+// cuántas líneas hacen falta -- `lotes` ya viene ordenado ascendente por
+// expiresAt (fetchUserBalances), así que agrupar preservando el orden de
+// primera aparición alcanza, sin reordenar nada.
+function agruparLotesPorDiaArgentina(lotes: CreditLote[]): LoteAgrupado[] {
+  const porDia = new Map<string, LoteAgrupado>();
+  const orden: string[] = [];
+  for (const lote of lotes) {
+    const clave = claveDiaArgentina(lote.expiresAt);
+    const existente = porDia.get(clave);
+    if (existente) {
+      existente.remainingCredits += lote.remainingCredits;
+    } else {
+      porDia.set(clave, { remainingCredits: lote.remainingCredits, expiresAt: lote.expiresAt });
+      orden.push(clave);
+    }
+  }
+  return orden.map((clave) => porDia.get(clave)!);
+}
+
 // Texto de saldo de créditos para Home/Perfil -- SIN el "X de Y" del
 // tamaño del último pack comprado (bug real reportado: confundía a los
 // socios -- "52 de 12" no tiene sentido una vez que se compró más de un
@@ -274,21 +317,23 @@ export function formatCreditosDisponibles(remainingCredits: number | null, lotes
   const cantidad = remainingCredits ?? 0;
   const principal = cantidad === 1 ? '1 crédito disponible' : `${cantidad} créditos disponibles`;
 
-  if (lotes.length === 0) {
+  const lotesAgrupados = agruparLotesPorDiaArgentina(lotes);
+
+  if (lotesAgrupados.length === 0) {
     return { principal, desglose: null };
   }
 
-  if (lotes.length === 1) {
+  if (lotesAgrupados.length === 1) {
     const verbo = cantidad === 1 ? 'vence' : 'vencen';
-    return { principal: `${principal} · ${verbo} el ${formatShortDate(lotes[0].expiresAt)}`, desglose: null };
+    return { principal: `${principal} · ${verbo} el ${formatShortDate(lotesAgrupados[0].expiresAt)}`, desglose: null };
   }
 
-  const visibles = lotes.slice(0, MAX_LOTES_EN_DESGLOSE);
+  const visibles = lotesAgrupados.slice(0, MAX_LOTES_EN_DESGLOSE);
   const partes = visibles.map((lote) => {
     const verboLote = lote.remainingCredits === 1 ? 'vence' : 'vencen';
     return `${lote.remainingCredits} ${verboLote} el ${formatShortDate(lote.expiresAt)}`;
   });
-  const restantes = lotes.length - visibles.length;
+  const restantes = lotesAgrupados.length - visibles.length;
   if (restantes > 0) partes.push(`y ${restantes} más`);
 
   return { principal, desglose: partes.join(' · ') };
