@@ -92,37 +92,31 @@ export async function syncMyMembership(): Promise<{ vinculado: boolean; sincroni
   return resultado;
 }
 
-// Set de discipline_id que están en `socios.plan` AHORA MISMO, según el
-// panel Admin -- fuente única de verdad, ver supabase_migration_single_source_of_truth.sql.
-// `null` significa "no filtrar" (socio sin ficha admin vinculada todavía,
-// o la migración de este RPC todavía no se corrió en este ambiente --
-// mismo criterio "fail open" que ya usa syncMyMembership para lo mismo).
-async function fetchDisciplinasDelPlanActual(): Promise<Set<string> | null> {
-  const { data, error } = await supabase.rpc('disciplinas_del_plan_actual').single();
-  if (error) return null;
-  const fila = data as { vinculado: boolean; discipline_ids: string[] | null } | null;
-  if (!fila || !fila.vinculado) return null;
-  return new Set(fila.discipline_ids ?? []);
-}
-
-// El balance del socio para CADA disciplina en la que tenga algo cargado
-// (una entrada por disciplina, no una sola global) -- filtrado a las
-// disciplinas que el panel Admin tiene tildadas HOY para este socio.
-// `user_credits` es un ledger append-only (nunca se borra una fila): si el
-// admin destildó una disciplina, su fila vieja sigue existiendo para la
-// auditoría, pero acá deja de ser VISIBLE apenas se saca del plan -- sin
-// esto, un socio seguía viendo para siempre disciplinas que el admin ya
-// le había sacado (bug real reportado: "figuran activos Boxeo, Kickstrike
-// y CrossFit" en la PWA cuando el Admin solo tenía tildado Boxeo).
+// El balance del socio para CADA disciplina en la que tenga algo REALMENTE
+// vigente hoy (una entrada por disciplina, no una sola global).
+//
+// FIX (modelo de "plan único", acreditar_pack) -- esto filtraba por
+// disciplinas_del_plan_actual()/socios.plan (el checkbox que Seba carga a
+// mano en "Editar Socio"): tenía sentido bajo el modelo de LOTES viejo
+// (arreglaba un bug real: "figuran activos Boxeo, Kickstrike y CrossFit"
+// cuando el Admin solo tenía tildado Boxeo), pero socios.plan no tiene
+// NINGUNA relación con qué acreditó la última compra real bajo el modelo
+// nuevo -- un socio puede tener créditos reales y vigentes en una
+// disciplina que nadie tildó a mano (caso real: Facundo Uria, DNI
+// 44537978, con Kickstrike real pero sin tildar), y al revés, seguir
+// tildado en una disciplina sin nada vigente (Boxeo, mismo socio). Ahora
+// el ÚNICO criterio es directo sobre `user_credits`: ¿hay saldo real,
+// vigente, hoy? -- ver el guard `if (lotesActivos.length === 0) continue`
+// más abajo, que además cierra un segundo bug (una disciplina sin nada
+// activo se seguía empujando al resultado con remainingCredits=0, y se
+// mostraba como "Vencido" en vez de directamente no aparecer).
 //
 // Créditos por LOTES (ver supabase_migration_lotes_creditos_fase1/2.sql):
 // una disciplina de créditos puede tener 2+ filas activas al mismo tiempo
-// (compras distintas, vencimientos distintos) -- antes acá se quedaba con
-// "la fila más reciente" nada más, así que un socio con 2 lotes veía un
-// balance incompleto (le faltaba sumar el otro). Ahora se agrupa TODO lo
-// que tiene esa disciplina y se arma el total + el desglose real.
+// (compras distintas, vencimientos distintos) -- se agrupa TODO lo que
+// tiene esa disciplina y se arma el total + el desglose real.
 export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
-  const [{ data, error }, { data: disciplinasData, error: discError }, disciplinasDelPlan] = await Promise.all([
+  const [{ data, error }, { data: disciplinasData, error: discError }] = await Promise.all([
     supabase
       .from('user_credits')
       .select(
@@ -134,7 +128,6 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
     // de user_credits puntual -- para armar `pack.creditos` con nombres
     // reales (no solo ids) hace falta el catálogo completo de disciplinas.
     supabase.from('disciplines').select('id, name'),
-    fetchDisciplinasDelPlanActual(),
   ]);
   if (error) throw new Error(error.message);
   if (discError) throw new Error(discError.message);
@@ -182,19 +175,11 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
     };
   }
 
-  // Filtro de "plan actual" -- SOLO para créditos, sin cambios ahí. Para
-  // Aparatos (kind='membership') este filtro dejó de aplicar -- ver el fix
-  // de más abajo, que decide si mostrarlo mirando expires_at directo, no
-  // socios.plan.
-  const filasVisibles = (data ?? []).filter((row) => {
-    const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
-    if (discipline.kind === 'membership') return true;
-    return !disciplinasDelPlan || disciplinasDelPlan.has(discipline.id);
-  });
-
-  // Agrupar TODAS las filas por disciplina (ya no solo la más reciente).
+  // Agrupar TODAS las filas por disciplina (ya no solo la más reciente) --
+  // sin filtrar por socios.plan para nada (ni créditos ni Aparatos): lo
+  // que decide qué se muestra es, más abajo, si hay algo realmente vigente.
   const filasPorDisciplina = new Map<string, FilaRaw[]>();
-  for (const row of filasVisibles) {
+  for (const row of data ?? []) {
     const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
     const lista = filasPorDisciplina.get(discipline.id) ?? [];
     lista.push(row);
@@ -243,6 +228,14 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
         (row) => (row.remaining_credits ?? 0) > 0 && !!row.expires_at && new Date(row.expires_at).getTime() > ahora
       )
       .sort((a, b) => new Date(a.expires_at as string).getTime() - new Date(b.expires_at as string).getTime());
+
+    // FIX -- sin ningún lote activo, esta disciplina no se muestra, punto
+    // (mismo criterio que ya tiene la rama de Aparatos arriba). Antes esto
+    // faltaba: se empujaba igual un balance con remainingCredits=0, que
+    // getCreditsStatus() lee como 'vencido' -- una disciplina con solo
+    // residuo viejo (0 créditos reales) se mostraba como "0, Vencido" en
+    // vez de no aparecer (caso real: Boxeo de Facundo Uria, DNI 44537978).
+    if (lotesActivos.length === 0) continue;
 
     const lotes: CreditLote[] = lotesActivos.map((row) => ({
       id: row.id,

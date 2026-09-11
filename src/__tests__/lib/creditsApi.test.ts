@@ -115,35 +115,20 @@ describe('fetchPacks -- combos multi-disciplina', () => {
   });
 });
 
-// Bug crítico reportado (Isa Giurato): el panel Admin decía "solo Boxeo (6
-// créditos)" pero la PWA mostraba Boxeo + Kickstrike + CrossFit -- porque
-// user_credits es un ledger append-only (nunca se borra una fila) y nada
-// invalidaba las disciplinas que el admin ya había destildado. Fix: el
-// plan ACTUAL de `socios` (vía el nuevo RPC disciplinas_del_plan_actual)
-// es la única fuente de verdad -- lo que no está en ese set no se muestra,
-// sin importar qué filas viejas siga teniendo el ledger.
-describe('fetchUserBalances (single source of truth: el plan actual del admin filtra el ledger)', () => {
+// FIX (modelo de "plan único", caso real Facundo Uria DNI 44537978) --
+// esto ANTES filtraba por disciplinas_del_plan_actual()/socios.plan (el
+// checkbox de "Editar Socio"): arreglaba un bug real bajo el modelo de
+// LOTES viejo (caso Isa Giurato -- el panel decía "solo Boxeo" pero la PWA
+// mostraba Boxeo + Kickstrike + CrossFit, porque user_credits es un ledger
+// append-only y nada invalidaba lo que el admin ya había destildado). Pero
+// bajo el modelo nuevo, socios.plan no tiene NINGUNA relación con qué
+// otorgó la última compra real -- fetchUserBalances() ya NO llama a ese
+// RPC para nada, el único criterio es directo sobre user_credits: ¿hay
+// saldo real, vigente, hoy?
+describe('fetchUserBalances (el criterio es directo sobre user_credits, sin importar socios.plan)', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  // expires_at en el futuro lejano (no null) -- créditos por lotes exige
-  // una fecha real para que un lote cuente como "activo" (ver el describe
-  // de más abajo); estas 3 filas son de antes de ese cambio y usaban
-  // expires_at:null (ya no representa ningún dato real de producción,
-  // donde acreditar_pack() siempre carga una fecha). Fecha fija muy lejana
-  // (mismo criterio que RankingAdmin.test.jsx) para que el test nunca se
-  // vuelva flaky por el paso del tiempo.
-  const FILA_BOXEO = {
-    id: 'uc-boxeo', user_id: 'user-1', remaining_credits: 6, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-08-10T00:00:00.000Z',
-    discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }, pack: null,
-  };
-  const FILA_KICKSTRIKE = {
-    id: 'uc-kick', user_id: 'user-1', remaining_credits: 9, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-07-01T00:00:00.000Z',
-    discipline: { id: 'disc-kick', name: 'Kickstrike', kind: 'credits' }, pack: null,
-  };
-  const FILA_CROSSFIT = {
-    id: 'uc-crossfit', user_id: 'user-1', remaining_credits: 7, expires_at: '2099-01-01T00:00:00.000Z', created_at: '2026-06-01T00:00:00.000Z',
-    discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null,
-  };
+  const FUTURO = '2099-01-01T00:00:00.000Z';
 
   function mockTablas(userCreditsData: unknown[]) {
     mockFrom.mockImplementation((tabla: string) => {
@@ -153,44 +138,51 @@ describe('fetchUserBalances (single source of truth: el plan actual del admin fi
     });
   }
 
-  it('caso Isa Giurato: plan actual = solo Boxeo -> la PWA descarta Kickstrike y CrossFit aunque el ledger los tenga', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
-    mockRpc.mockReturnValue({
-      single: jest.fn().mockResolvedValue({ data: { vinculado: true, discipline_ids: ['disc-boxeo'] }, error: null }),
-    });
+  it('disciplina con créditos reales y vigentes, aunque NO esté tildada en socios.plan -- aparece igual (caso Kickstrike de Facundo)', async () => {
+    mockTablas([
+      { id: 'uc-kick', user_id: 'user-1', remaining_credits: 12, expires_at: FUTURO, created_at: '2026-09-01T00:00:00.000Z', discipline: { id: 'disc-kick', name: 'Kickstrike', kind: 'credits' }, pack: null },
+    ]);
 
     const balances = await fetchUserBalances('user-1');
 
     expect(balances).toHaveLength(1);
-    expect(balances[0].discipline.name).toBe('Boxeo');
-    expect(balances[0].remainingCredits).toBe(6);
+    expect(balances[0].discipline.name).toBe('Kickstrike');
+    expect(balances[0].remainingCredits).toBe(12);
+    // No debería haber llamado al RPC viejo para nada -- el filtro ya no depende de él.
+    expect(mockRpc).not.toHaveBeenCalledWith('disciplinas_del_plan_actual');
   });
 
-  it('plan actual vacío (admin destildó todo) -> la PWA no muestra NADA, pese a tener 3 filas en el ledger', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
-    mockRpc.mockReturnValue({
-      single: jest.fn().mockResolvedValue({ data: { vinculado: true, discipline_ids: [] }, error: null }),
-    });
+  it('disciplina tildada en socios.plan pero SIN ningún lote activo -- NO aparece, ni como "Vencido" (caso Boxeo de Facundo)', async () => {
+    mockTablas([
+      // Único registro de Boxeo: agotado hace mucho -- residuo, sin nada vigente.
+      { id: 'uc-boxeo-viejo', user_id: 'user-1', remaining_credits: 0, expires_at: '2020-01-01T00:00:00.000Z', created_at: '2020-01-01T00:00:00.000Z', discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }, pack: null },
+    ]);
 
     expect(await fetchUserBalances('user-1')).toHaveLength(0);
   });
 
-  it('no vinculado (sin ficha en socios todavía) -> no filtra nada, muestra todo (fail open, mismo criterio que syncMyMembership)', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE, FILA_CROSSFIT]);
-    mockRpc.mockReturnValue({
-      single: jest.fn().mockResolvedValue({ data: { vinculado: false, discipline_ids: null }, error: null }),
-    });
+  it('socio con 1 sola disciplina real (CrossFit) -- sin cambios respecto de siempre', async () => {
+    mockTablas([
+      { id: 'uc-cf', user_id: 'user-1', remaining_credits: 12, expires_at: FUTURO, created_at: '2026-09-01T00:00:00.000Z', discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null },
+    ]);
 
-    expect(await fetchUserBalances('user-1')).toHaveLength(3);
+    const [balance] = await fetchUserBalances('user-1');
+    expect(balance.discipline.name).toBe('CrossFit');
+    expect(balance.remainingCredits).toBe(12);
   });
 
-  it('el RPC todavía no está desplegado (PGRST202) -> no filtra nada, mismo fail-open', async () => {
-    mockTablas([FILA_BOXEO, FILA_KICKSTRIKE]);
-    mockRpc.mockReturnValue({
-      single: jest.fn().mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } }),
-    });
+  it('caso completo Facundo Uria -- CrossFit y Kickstrike (12 cada uno) aparecen, Boxeo (residuo sin nada vigente) no aparece', async () => {
+    mockTablas([
+      { id: 'uc-cf', user_id: 'user-1', remaining_credits: 12, expires_at: FUTURO, created_at: '2026-09-01T00:00:00.000Z', discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' }, pack: null },
+      { id: 'uc-kick', user_id: 'user-1', remaining_credits: 12, expires_at: FUTURO, created_at: '2026-09-01T00:00:00.000Z', discipline: { id: 'disc-kick', name: 'Kickstrike', kind: 'credits' }, pack: null },
+      { id: 'uc-boxeo-viejo', user_id: 'user-1', remaining_credits: 0, expires_at: '2020-01-01T00:00:00.000Z', created_at: '2020-01-01T00:00:00.000Z', discipline: { id: 'disc-boxeo', name: 'Boxeo', kind: 'credits' }, pack: null },
+    ]);
 
-    expect(await fetchUserBalances('user-1')).toHaveLength(2);
+    const balances = await fetchUserBalances('user-1');
+
+    expect(balances).toHaveLength(2);
+    expect(balances.map((b) => b.discipline.name).sort()).toEqual(['CrossFit', 'Kickstrike']);
+    expect(balances.every((b) => b.remainingCredits === 12)).toBe(true);
   });
 });
 
@@ -278,7 +270,11 @@ describe('fetchUserBalances (créditos por lotes -- suma y desglose real, no "la
     expect(balance.lotes).toEqual([{ id: 'uc-viejo-vigente', remainingCredits: 3, expiresAt: FUTURO_LEJANO }]);
   });
 
-  it('un lote agotado (remaining_credits=0) no cuenta aunque no haya vencido', async () => {
+  // FIX -- antes esto empujaba igual un balance con remainingCredits=0 (la
+  // disciplina "aparecía" con 0 créditos, mostrándose como "Vencido" en la
+  // Hero Card). Ahora, sin ningún lote activo, la disciplina directamente
+  // no aparece en el resultado -- mismo criterio que ya tenía Aparatos.
+  it('un lote agotado (remaining_credits=0) no cuenta aunque no haya vencido -- la disciplina NO aparece en el resultado', async () => {
     mockTablasSinFiltro([
       {
         id: 'uc-agotado', user_id: 'user-1', remaining_credits: 0, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
@@ -286,11 +282,7 @@ describe('fetchUserBalances (créditos por lotes -- suma y desglose real, no "la
       },
     ]);
 
-    const [balance] = await fetchUserBalances('user-1');
-
-    expect(balance.remainingCredits).toBe(0);
-    expect(balance.expiresAt).toBeNull();
-    expect(balance.lotes).toEqual([]);
+    expect(await fetchUserBalances('user-1')).toHaveLength(0);
   });
 
   it('Aparatos (membership) con 2 filas vigentes -- se queda con la que vence MÁS TARDE, sin lotes', async () => {
