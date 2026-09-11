@@ -182,9 +182,13 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
     };
   }
 
-  // Filtro de "plan actual" -- mismo criterio de siempre, sin cambios.
+  // Filtro de "plan actual" -- SOLO para créditos, sin cambios ahí. Para
+  // Aparatos (kind='membership') este filtro dejó de aplicar -- ver el fix
+  // de más abajo, que decide si mostrarlo mirando expires_at directo, no
+  // socios.plan.
   const filasVisibles = (data ?? []).filter((row) => {
     const discipline = Array.isArray(row.discipline) ? row.discipline[0] : row.discipline;
+    if (discipline.kind === 'membership') return true;
     return !disciplinasDelPlan || disciplinasDelPlan.has(discipline.id);
   });
 
@@ -209,10 +213,25 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
       : filaMasReciente.discipline;
 
     if (discipline.kind === 'membership') {
-      // SIN CAMBIOS -- Aparatos no tiene lotes (es una membresía sin
-      // cantidad, una sola fecha) -- sigue siendo la fila más reciente tal
-      // cual, como antes de esta fase.
-      resultado.push(mapRow(filaMasReciente, []));
+      // FIX -- Aparatos se muestra ÚNICA Y EXCLUSIVAMENTE si hay una fila
+      // realmente vigente (expires_at > ahora), sin importar qué diga
+      // socios.plan (el filtro de arriba ya no aplica acá). Bajo el
+      // modelo de "un solo plan activo" (acreditar_pack), comprar un pack
+      // sin Aparatos apaga cualquier Aparatos anterior -- pero
+      // socios.plan (los checkboxes de "Editar Socio") es un campo
+      // separado que nadie destilda al comprar un pack, así que antes
+      // seguía mostrando Aparatos igual (caso real: Facundo Uria, DNI
+      // 44537978). Se busca la fila vigente entre TODAS las de esta
+      // disciplina (no solo "la más reciente por created_at") -- por las
+      // dudas de que la más reciente no sea la más vigente; con el
+      // modelo nuevo nunca debería haber más de una vigente a la vez,
+      // pero esto no depende de esa garantía para funcionar bien.
+      const filaVigente = filas
+        .filter((row) => !!row.expires_at && new Date(row.expires_at).getTime() > ahora)
+        .sort((a, b) => new Date(b.expires_at as string).getTime() - new Date(a.expires_at as string).getTime())[0];
+      if (filaVigente) {
+        resultado.push(mapRow(filaVigente, []));
+      }
       continue;
     }
 

@@ -293,7 +293,7 @@ describe('fetchUserBalances (créditos por lotes -- suma y desglose real, no "la
     expect(balance.lotes).toEqual([]);
   });
 
-  it('Aparatos (membership) sigue devolviendo la fila más reciente tal cual, SIN lotes -- no cambia nada', async () => {
+  it('Aparatos (membership) con 2 filas vigentes -- se queda con la que vence MÁS TARDE, sin lotes', async () => {
     mockTablasSinFiltro([
       {
         id: 'uc-aparatos-nuevo', user_id: 'user-1', remaining_credits: null, expires_at: FUTURO_MAS_LEJANO, created_at: '2026-09-01T00:00:00.000Z',
@@ -307,10 +307,63 @@ describe('fetchUserBalances (créditos por lotes -- suma y desglose real, no "la
 
     const [balance] = await fetchUserBalances('user-1');
 
-    expect(balance.id).toBe('uc-aparatos-nuevo'); // la más reciente, no la que "vence antes"
+    expect(balance.id).toBe('uc-aparatos-nuevo');
     expect(balance.expiresAt).toBe(FUTURO_MAS_LEJANO);
     expect(balance.remainingCredits).toBeNull();
     expect(balance.lotes).toEqual([]);
+  });
+
+  // FIX (Facundo Uria, DNI 44537978) -- bajo el modelo de "un solo plan
+  // activo" (acreditar_pack), comprar un pack sin Aparatos apaga cualquier
+  // Aparatos anterior (expires_at pasa a ser una fecha ya pasada), pero
+  // socios.plan (el checkbox de "Editar Socio") es un campo aparte que
+  // nadie destilda al comprar un pack -- antes, disciplinas_del_plan_actual()
+  // lo seguía dejando pasar igual. Ahora Aparatos se filtra DIRECTO por
+  // expires_at > ahora, sin mirar socios.plan para nada.
+  it('Aparatos con fecha ya pasada (reseteado por un pack sin Aparatos) -- NO aparece en el balance', async () => {
+    mockTablasSinFiltro([
+      {
+        id: 'uc-aparatos-reseteado', user_id: 'user-1', remaining_credits: null, expires_at: PASADO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }, pack: null,
+      },
+    ]);
+
+    expect(await fetchUserBalances('user-1')).toHaveLength(0);
+  });
+
+  it('Aparatos genuinamente vigente -- sigue apareciendo normal', async () => {
+    mockTablasSinFiltro([
+      {
+        id: 'uc-aparatos-vigente', user_id: 'user-1', remaining_credits: null, expires_at: FUTURO_LEJANO, created_at: '2026-08-01T00:00:00.000Z',
+        discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }, pack: null,
+      },
+    ]);
+
+    const [balance] = await fetchUserBalances('user-1');
+    expect(balance.discipline.name).toBe('Aparatos');
+    expect(balance.expiresAt).toBe(FUTURO_LEJANO);
+  });
+
+  it('Aparatos en socios.plan (disciplinas_del_plan_actual lo incluye) pero SIN ninguna fila vigente -- tampoco aparece', async () => {
+    mockFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'user_credits') {
+        return chainPacks([
+          {
+            id: 'uc-aparatos-reseteado', user_id: 'user-1', remaining_credits: null, expires_at: PASADO, created_at: '2026-08-01T00:00:00.000Z',
+            discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' }, pack: null,
+          },
+        ]);
+      }
+      if (tabla === 'disciplines') return chainPacks([]);
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    // socios.plan SIGUE con Aparatos tildado -- confirma que el filtro ya
+    // no depende de esto para nada.
+    mockRpc.mockReturnValue({
+      single: jest.fn().mockResolvedValue({ data: { vinculado: true, discipline_ids: ['disc-aparatos'] }, error: null }),
+    });
+
+    expect(await fetchUserBalances('user-1')).toHaveLength(0);
   });
 });
 
