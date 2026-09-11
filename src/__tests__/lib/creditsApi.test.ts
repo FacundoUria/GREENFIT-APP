@@ -13,8 +13,8 @@ jest.mock('../../lib/supabase', () => ({
   supabase: { from: (...args: unknown[]) => mockFrom(...args), rpc: (...args: unknown[]) => mockRpc(...args) },
 }));
 
-import { fetchPacks, buildPackSubtitle, formatCreditosDisponibles, fetchUserBalances } from '../../lib/creditsApi';
-import { Pack } from '../../types';
+import { fetchPacks, buildPackSubtitle, formatCreditosDisponibles, fetchUserBalances, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
+import { Pack, UserCredit } from '../../types';
 
 function chainPacks(data: unknown[]) {
   const chain: any = {};
@@ -454,5 +454,146 @@ describe('formatCreditosDisponibles -- agrupa lotes que vencen el MISMO día cal
       principal: '18 créditos disponibles',
       desglose: '12 vencen el 23/09/2026 · 6 vencen el 15/10/2026',
     })
+  })
+})
+
+// Rediseño (agrupar Vencimiento por FECHA, no por disciplina) -- mismo
+// criterio y mismos textos que VencimientoCell del Admin (SociosTabla.jsx):
+// antes, la Hero Card/"Plan actual" mostraban una fila POR DISCIPLINA --
+// si 2 vencían el mismo día, la fecha se repetía en 2 filas separadas en
+// vez de fusionarse. Acá cada fila combina 1+ disciplinas que comparten
+// fecha exacta (día calendario Argentina), con el peor estado entre ellas
+// para el badge.
+function mkMembership(expiresAt: string | null, status: 'activo' | 'por_vencer' | 'vencido' = 'activo'): {
+  balance: UserCredit
+  isMembership: true
+  status: 'activo' | 'por_vencer' | 'vencido'
+} {
+  return {
+    balance: {
+      id: 'uc-aparatos',
+      userId: 'u1',
+      pack: null,
+      discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' },
+      remainingCredits: null,
+      expiresAt,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lotes: [],
+    },
+    isMembership: true,
+    status,
+  }
+}
+
+function mkCreditos(
+  disciplineId: string,
+  disciplineName: string,
+  remainingCredits: number,
+  lotes: { id: string; remainingCredits: number; expiresAt: string }[],
+  status: 'activo' | 'por_vencer' | 'vencido' = 'activo',
+): { balance: UserCredit; isMembership: false; status: 'activo' | 'por_vencer' | 'vencido' } {
+  return {
+    balance: {
+      id: `uc-${disciplineId}`,
+      userId: 'u1',
+      pack: null,
+      discipline: { id: disciplineId, name: disciplineName, kind: 'credits' },
+      remainingCredits,
+      expiresAt: lotes[0]?.expiresAt ?? null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lotes,
+    },
+    isMembership: false,
+    status,
+  }
+}
+
+describe('agruparBalancesPorVencimiento (rediseño -- agrupar por FECHA, mismo criterio que el Admin)', () => {
+  it('1 sola disciplina -- "Vence el dd/mm/yyyy", sin nombres extra', () => {
+    const filas = agruparBalancesPorVencimiento([mkMembership('2026-10-08T12:00:00.000Z')])
+    // key = discipline.id (no el nombre) -- caso trivial de 1 sola
+    // disciplina delega en filaIndividual(), mismo criterio de siempre.
+    expect(filas).toEqual([
+      { key: 'disc-aparatos', nombre: 'Aparatos', status: 'activo', detalle: 'Vence el 08/10/2026', subDetalles: [] },
+    ])
+  })
+
+  it('1 sola disciplina VENCIDA -- conserva "Venció el" (no "Vence el")', () => {
+    const filas = agruparBalancesPorVencimiento([mkMembership('2026-08-01T12:00:00.000Z', 'vencido')])
+    expect(filas[0].detalle).toBe('Venció el 01/08/2026')
+  })
+
+  it('2 disciplinas el MISMO día -- "Ambos vencen el dd/mm/yyyy", una sola fila, badge = peor estado', () => {
+    const filas = agruparBalancesPorVencimiento([
+      mkMembership('2026-10-08T12:00:00.000Z', 'por_vencer'),
+      mkCreditos('disc-crossfit', 'CrossFit', 4, [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }]),
+    ])
+    expect(filas).toHaveLength(1)
+    expect(filas[0].nombre).toBe('Aparatos y CrossFit')
+    expect(filas[0].detalle).toBe('Ambos vencen el 08/10/2026')
+    expect(filas[0].status).toBe('por_vencer') // peor entre por_vencer y activo
+    expect(filas[0].subDetalles).toEqual(['CrossFit: 4 créditos disponibles'])
+  })
+
+  it('2 disciplinas en fechas DISTINTAS -- 2 filas separadas, cada una con su propio texto y badge', () => {
+    const filas = agruparBalancesPorVencimiento([
+      mkMembership('2026-08-10T12:00:00.000Z'),
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-09-23T12:00:00.000Z' }]),
+    ])
+    expect(filas).toHaveLength(2)
+    expect(filas[0]).toMatchObject({ nombre: 'Aparatos', detalle: 'Aparatos vence el 10/08/2026' })
+    expect(filas[1]).toMatchObject({ nombre: 'CrossFit', detalle: 'CrossFit vence el 23/09/2026' })
+  })
+
+  it('3 disciplinas, TODAS el mismo día -- "Las 3 disciplinas vencen el dd/mm/yyyy"', () => {
+    const filas = agruparBalancesPorVencimiento([
+      mkMembership('2026-10-08T12:00:00.000Z'),
+      mkCreditos('disc-crossfit', 'CrossFit', 4, [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }]),
+      mkCreditos('disc-boxeo', 'Boxeo', 2, [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-08T15:00:00.000Z' }]),
+    ])
+    expect(filas).toHaveLength(1)
+    expect(filas[0].detalle).toBe('Las 3 disciplinas vencen el 08/10/2026')
+    expect(filas[0].nombre).toBe('Aparatos, CrossFit y Boxeo')
+  })
+
+  // Caso del ticket -- 3 disciplinas, 2 fechas: Aparatos y CrossFit
+  // comparten un día, Boxeo vence otro día distinto.
+  it('3 disciplinas con 2+1 -- una fila "Aparatos y CrossFit vencen el dd/mm", otra "Boxeo vence el dd/mm"', () => {
+    const filas = agruparBalancesPorVencimiento([
+      mkMembership('2026-10-08T12:00:00.000Z'),
+      mkCreditos('disc-crossfit', 'CrossFit', 4, [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-10-08T12:00:00.000Z' }]),
+      mkCreditos('disc-boxeo', 'Boxeo', 2, [{ id: 'l2', remainingCredits: 2, expiresAt: '2026-10-15T12:00:00.000Z' }]),
+    ])
+    expect(filas).toHaveLength(2)
+    expect(filas[0]).toMatchObject({ nombre: 'Aparatos y CrossFit', detalle: 'Aparatos y CrossFit vencen el 08/10/2026' })
+    expect(filas[1]).toMatchObject({ nombre: 'Boxeo', detalle: 'Boxeo vence el 15/10/2026' })
+  })
+
+  it('una disciplina de créditos con lotes en 2+ días distintos queda AFUERA del agrupamiento -- su propia fila, sin cambios', () => {
+    const filas = agruparBalancesPorVencimiento([
+      mkMembership('2026-10-08T12:00:00.000Z'),
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [
+        { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+        { id: 'l2', remainingCredits: 4, expiresAt: '2026-10-15T12:00:00.000Z' },
+      ]),
+    ])
+    expect(filas).toHaveLength(2)
+    // "Aparatos" queda como grupo de 1 -- pero como CrossFit (multi-fecha)
+    // también está presente en la celda, ya no es "lo único que hay", así
+    // que lleva el verbo explícito (mismo criterio que el Admin cuando hay
+    // 2+ elementos en total).
+    expect(filas[0]).toMatchObject({ nombre: 'Aparatos', detalle: 'Aparatos vence el 08/10/2026' })
+    expect(filas[1]).toMatchObject({
+      nombre: 'CrossFit',
+      detalle: '12 créditos disponibles',
+      subDetalles: ['8 vencen el 20/09/2026 · 4 vencen el 15/10/2026'],
+    })
+  })
+
+  it('sin ninguna fecha (Aparatos sin expiresAt cargado) -- mantiene el mensaje de siempre', () => {
+    const filas = agruparBalancesPorVencimiento([mkMembership(null)])
+    expect(filas).toEqual([
+      { key: 'disc-aparatos', nombre: 'Aparatos', status: 'activo', detalle: 'Sin fecha de vencimiento cargada', subDetalles: [] },
+    ])
   })
 })

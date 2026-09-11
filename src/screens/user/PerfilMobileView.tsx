@@ -5,9 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
-import { fetchUserBalances, formatCreditosDisponibles } from '../../lib/creditsApi';
+import { fetchUserBalances, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
 import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
-import { formatLongDate } from '../../lib/dateFormat';
 import {
   fetchTotalXp,
   calcularResumenXp,
@@ -186,6 +185,14 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
       : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });
+  // Filas listas para "Plan actual" -- agrupadas por FECHA (mismo criterio
+  // y mismos textos que VencimientoCell en el Admin, ver creditsApi.ts):
+  // 2+ disciplinas que vencen el mismo día se fusionan en una sola fila.
+  // Nota: esto usa el nombre genérico de la disciplina (o "Aparatos"), no
+  // `pack.name`, que es lo que esta pantalla mostraba antes -- una fila
+  // fusionada no tiene un único pack al que asociarle un nombre, así que
+  // se unificó el criterio de nombrado con el del Admin en los dos casos.
+  const filasVencimiento = agruparBalancesPorVencimiento(balancesConEstado);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -227,33 +234,22 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         ) : balancesConEstado.length === 0 ? (
           <Text style={styles.planEmptyText}>Todavía no tenés ningún pack activo.</Text>
         ) : (
-          balancesConEstado.map(({ balance: b, isMembership, status }) => {
-            const creditosTexto = !isMembership ? formatCreditosDisponibles(b.remainingCredits, b.lotes) : null;
-            return (
-            <View key={b.discipline.id} style={styles.planRow}>
+          filasVencimiento.map((fila) => (
+            <View key={fila.key} style={styles.planRow}>
               <View style={{ flex: 1, paddingRight: 10 }}>
                 <Text style={styles.planName} numberOfLines={1}>
-                  {b.pack?.name ?? (isMembership ? 'Aparatos' : b.discipline.name)}
+                  {fila.nombre}
                 </Text>
-                {isMembership ? (
-                  <Text style={styles.planDetail}>
-                    {b.expiresAt
-                      ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
-                      : 'Sin fecha de vencimiento cargada'}
+                <Text style={styles.planDetail}>{fila.detalle}</Text>
+                {fila.subDetalles.map((sub) => (
+                  <Text key={sub} style={styles.planDetailDesglose}>
+                    {sub}
                   </Text>
-                ) : (
-                  <>
-                    <Text style={styles.planDetail}>{creditosTexto!.principal}</Text>
-                    {!!creditosTexto!.desglose && (
-                      <Text style={styles.planDetailDesglose}>{creditosTexto!.desglose}</Text>
-                    )}
-                  </>
-                )}
+                ))}
               </View>
-              <StatusBadge status={status} />
+              <StatusBadge status={fila.status} />
             </View>
-            );
-          })
+          ))
         )}
       </View>
 

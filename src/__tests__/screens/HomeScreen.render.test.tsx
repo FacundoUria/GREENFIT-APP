@@ -384,13 +384,22 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
       expect(getByText('8 vencen el 20/09/2026 · 12 vencen el 15/10/2026')).toBeTruthy();
     });
 
+    // Rediseño (agrupar Vencimiento por FECHA, mismo criterio que
+    // VencimientoCell del Admin -- ver creditsApi.ts): el texto pasa de
+    // formatLongDate ("1 de Noviembre, 2026") a formatShortDate
+    // (dd/mm/yyyy), para que el socio vea el mismo formato que Seba.
+    // expiresAt al mediodía UTC (no medianoche) -- mismo criterio que
+    // sincronizarVencimientoPwa en el Admin (nunca escribe medianoche UTC
+    // real): con medianoche UTC, formatShortDate (a diferencia del viejo
+    // formatLongDate, que reconstruía medianoche LOCAL a propósito) puede
+    // mostrar el día anterior en husos horarios detrás de UTC.
     it('Aparatos (membership) sigue mostrándose exactamente igual -- una sola fecha, sin desglose', async () => {
       (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
         {
           id: 'bal-1',
           userId: 'user-1',
           remainingCredits: null,
-          expiresAt: '2026-11-01T00:00:00.000Z',
+          expiresAt: '2026-11-01T12:00:00.000Z',
           createdAt: '2026-01-01',
           discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' },
           pack: null,
@@ -400,7 +409,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
       const { getByText } = render(<HomeScreen navigation={navigation} />);
 
       await waitFor(() => expect(getByText('Aparatos')).toBeTruthy());
-      expect(getByText('Vence el 1 de Noviembre, 2026')).toBeTruthy();
+      expect(getByText('Vence el 01/11/2026')).toBeTruthy();
     });
   });
 

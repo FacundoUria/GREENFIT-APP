@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { Pack, UserCredit, CreditoDePack, CreditLote } from '../types';
 import { formatShortDate } from './dateFormat';
+import { MembershipStatus } from './membershipStatus';
 
 // Un pack ahora es un combo: `creditos` (jsonb en la tabla) trae
 // [{discipline_id, credits}, ...] -- 0 a N disciplinas -- en vez del viejo
@@ -337,4 +338,187 @@ export function formatCreditosDisponibles(remainingCredits: number | null, lotes
   if (restantes > 0) partes.push(`y ${restantes} más`);
 
   return { principal, desglose: partes.join(' · ') };
+}
+
+// ============================================================
+// Agrupamiento de vencimientos por FECHA (no por disciplina) -- mismo
+// criterio y mismos textos que VencimientoCell en el Admin
+// (SociosTabla.jsx): el socio tiene que ver exactamente lo mismo que ve
+// Seba. Usado por la Hero Card de Inicio (HomeScreen.tsx) y "Plan actual"
+// de Mi Perfil (PerfilMobileView.tsx) -- antes cada una tenía su propia
+// fila POR DISCIPLINA (Aparatos + CrossFit venciendo el mismo día se veían
+// como 2 filas repitiendo la fecha).
+// ============================================================
+
+// "A, B y C" -- listado en español sin coma de Oxford (idéntico a
+// SociosTabla.jsx del Admin).
+function listarConY(nombres: string[]): string {
+  if (nombres.length <= 1) return nombres[0] ?? '';
+  return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
+}
+
+const ORDEN_STATUS: MembershipStatus[] = ['vencido', 'por_vencer', 'activo'];
+
+// El estado "peor" entre varios -- para el badge de una fila que combina
+// 2+ disciplinas: si CUALQUIERA está vencida, la fila entera se marca
+// vencida (mejor avisar de más que de menos).
+function peorStatus(estados: MembershipStatus[]): MembershipStatus {
+  for (const candidato of ORDEN_STATUS) {
+    if (estados.includes(candidato)) return candidato;
+  }
+  return 'activo';
+}
+
+export interface BalanceConEstado {
+  balance: UserCredit;
+  isMembership: boolean;
+  status: MembershipStatus;
+}
+
+// Una fila YA lista para renderizar -- puede representar 1 sola disciplina
+// (como hoy) o 2+ fusionadas porque comparten fecha exacta. `subDetalles`
+// son líneas chicas debajo del detalle principal (ej. el balance real de
+// una disciplina de créditos que quedó fusionada en el título con
+// Aparatos, o el desglose de lotes de una disciplina con vencimientos
+// propios en días distintos).
+export interface FilaVencimiento {
+  key: string;
+  nombre: string;
+  status: MembershipStatus;
+  detalle: string;
+  subDetalles: string[];
+}
+
+// Cada disciplina de créditos aporta una fecha al agrupamiento SOLO si sus
+// lotes ya colapsan a un único día (agruparLotesPorDiaArgentina) -- si
+// genuinamente tiene lotes en 2+ días distintos (raro), o no tiene ningún
+// lote activo, o es Aparatos sin fecha cargada, queda afuera del
+// agrupamiento y se muestra en su propia fila, exactamente como hoy.
+export function agruparBalancesPorVencimiento(balancesConEstado: BalanceConEstado[]): FilaVencimiento[] {
+  interface EntradaSimple {
+    nombre: string;
+    fechaISO: string;
+    status: MembershipStatus;
+    sub: string | null;
+    original: BalanceConEstado;
+  }
+  const simples: EntradaSimple[] = [];
+  const individuales: BalanceConEstado[] = [];
+
+  for (const item of balancesConEstado) {
+    const { balance: b, isMembership, status } = item;
+    if (isMembership) {
+      if (b.expiresAt) {
+        simples.push({ nombre: 'Aparatos', fechaISO: b.expiresAt, status, sub: null, original: item });
+      } else {
+        individuales.push(item);
+      }
+      continue;
+    }
+    if (!b.lotes || b.lotes.length === 0) {
+      individuales.push(item);
+      continue;
+    }
+    const agrupados = agruparLotesPorDiaArgentina(b.lotes);
+    if (agrupados.length === 1) {
+      const cantidad = b.remainingCredits ?? 0;
+      const sub = cantidad === 1 ? '1 crédito disponible' : `${cantidad} créditos disponibles`;
+      simples.push({ nombre: b.discipline.name, fechaISO: agrupados[0].expiresAt, status, sub, original: item });
+    } else {
+      individuales.push(item);
+    }
+  }
+
+  // Fila para una disciplina que quedó afuera del agrupamiento -- MISMO
+  // texto que se mostraba antes de este cambio (solo el formato de fecha
+  // pasa de formatLongDate a formatShortDate, para calzar con el Admin).
+  function filaIndividual(item: BalanceConEstado): FilaVencimiento {
+    const { balance: b, isMembership, status } = item;
+    let detalle: string;
+    const subDetalles: string[] = [];
+    if (isMembership) {
+      detalle = b.expiresAt
+        ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatShortDate(b.expiresAt)}`
+        : 'Sin fecha de vencimiento cargada';
+    } else {
+      const texto = formatCreditosDisponibles(b.remainingCredits, b.lotes);
+      detalle = texto.principal;
+      if (texto.desglose) subDetalles.push(texto.desglose);
+    }
+    return { key: b.discipline.id, nombre: isMembership ? 'Aparatos' : b.discipline.name, status, detalle, subDetalles };
+  }
+
+  if (simples.length === 0) {
+    return individuales.map(filaIndividual);
+  }
+
+  // Agrupar las entradas de fecha única por día calendario Argentina.
+  const porDia = new Map<string, { fechaISO: string; entradas: EntradaSimple[] }>();
+  const orden: string[] = [];
+  for (const entrada of simples) {
+    const clave = claveDiaArgentina(entrada.fechaISO);
+    const existente = porDia.get(clave);
+    if (existente) {
+      existente.entradas.push(entrada);
+    } else {
+      porDia.set(clave, { fechaISO: entrada.fechaISO, entradas: [entrada] });
+      orden.push(clave);
+    }
+  }
+  const grupos = orden.map((clave) => porDia.get(clave)!);
+
+  const filas: FilaVencimiento[] = [];
+
+  if (grupos.length === 1 && individuales.length === 0 && grupos[0].entradas.length === 1) {
+    // Caso trivial -- una sola disciplina en total, nada para fusionar.
+    // Delega en filaIndividual() para reproducir EXACTO el texto de
+    // siempre (para créditos, "N créditos disponibles · vence(n) el
+    // dd/mm" en una sola línea vía formatCreditosDisponibles -- armar la
+    // frase acá con `sub` la hubiera partido en 2 líneas redundantes, ej.
+    // "Vence el..." + "CrossFit: N créditos disponibles").
+    filas.push(filaIndividual(grupos[0].entradas[0].original));
+  } else if (grupos.length === 1 && individuales.length === 0) {
+    // TODO cae en una sola fecha, 2+ disciplinas -- "Ambos vencen"/"Las N
+    // disciplinas vencen".
+    const { fechaISO, entradas } = grupos[0];
+    const cantidad = entradas.length;
+    const detalle =
+      cantidad === 2
+        ? `Ambos vencen el ${formatShortDate(fechaISO)}`
+        : `Las ${cantidad} disciplinas vencen el ${formatShortDate(fechaISO)}`;
+    filas.push({
+      key: entradas.map((e) => e.nombre).join('-'),
+      nombre: listarConY(entradas.map((e) => e.nombre)),
+      status: peorStatus(entradas.map((e) => e.status)),
+      detalle,
+      subDetalles: entradas.filter((e) => e.sub).map((e) => `${e.nombre}: ${e.sub}`),
+    });
+  } else {
+    // 2+ fechas distintas -- una FILA por grupo (no una línea de texto por
+    // grupo como en el Admin: acá cada fila ya tiene su propio badge).
+    // Simplificación deliberada: con 2+ nombres en un mismo grupo se usa
+    // siempre "vencen" en presente (sin distinguir "vencieron") -- mezclar
+    // tiempos verbales por disciplina en una sola frase no vale la
+    // complejidad para un caso ya de por sí poco común.
+    for (const { fechaISO, entradas } of grupos) {
+      const verbo =
+        entradas.length === 1 ? (entradas[0].status === 'vencido' ? 'venció' : 'vence') : 'vencen';
+      const nombreGrupo = listarConY(entradas.map((e) => e.nombre));
+      filas.push({
+        key: entradas.map((e) => e.nombre).join('-'),
+        nombre: nombreGrupo,
+        status: peorStatus(entradas.map((e) => e.status)),
+        detalle: `${nombreGrupo} ${verbo} el ${formatShortDate(fechaISO)}`,
+        // Con 1 sola disciplina en el grupo, `detalle` ya la nombra --
+        // repetirla de nuevo acá abajo sería la 3ra vez en la misma fila
+        // (encabezado + detalle + subDetalle).
+        subDetalles: entradas
+          .filter((e) => e.sub)
+          .map((e) => (entradas.length > 1 ? `${e.nombre}: ${e.sub}` : e.sub!)),
+      });
+    }
+    for (const item of individuales) filas.push(filaIndividual(item));
+  }
+
+  return filas;
 }

@@ -39,7 +39,13 @@ jest.mock('../../lib/creditsApi', () => ({
       id: 'bal-1',
       userId: 'user-1',
       remainingCredits: null,
-      expiresAt: '2026-12-31',
+      // Al mediodía UTC (no fecha pelada) -- mismo criterio que
+      // sincronizarVencimientoPwa en el Admin, que nunca escribe una
+      // fecha sin hora: con una fecha pelada, `formatShortDate` (a
+      // diferencia del viejo `formatLongDate`, que reconstruía medianoche
+      // LOCAL a propósito) puede mostrar el día anterior en husos
+      // horarios detrás de UTC.
+      expiresAt: '2026-12-31T12:00:00.000Z',
       createdAt: '2026-01-01',
       discipline: { id: 'disc-1', name: 'Aparatos', kind: 'membership' },
       pack: { id: 'pack-1', name: 'Pase Libre', creditos: [], incluyeAparatos: true, diasVigencia: 30, price: 1000, isActive: true },
@@ -139,9 +145,14 @@ describe('PerfilMobileView (Módulo 3)', () => {
     await waitFor(() => expect(getByText('150 / 500 XP')).toBeTruthy());
   });
 
-  it('muestra el plan activo (Pase Libre) con su badge de estado', async () => {
+  // Rediseño (agrupar Vencimiento por FECHA, mismo criterio que el
+  // Admin): "Plan actual" ya no muestra `pack.name` ("Pase Libre") como
+  // título -- una fila fusionada (2+ disciplinas que comparten fecha) no
+  // tiene un único pack al que asociarle un nombre, así que se unificó al
+  // nombre genérico de la disciplina ("Aparatos") en los dos casos.
+  it('muestra el plan activo (Aparatos) con su badge de estado', async () => {
     const { getByText } = render(<PerfilMobileView />);
-    await waitFor(() => expect(getByText('Pase Libre')).toBeTruthy());
+    await waitFor(() => expect(getByText('Aparatos')).toBeTruthy());
     expect(getByText('Activo')).toBeTruthy();
   });
 
@@ -197,7 +208,7 @@ describe('PerfilMobileView (Módulo 3)', () => {
     it('Aparatos (membership) sigue mostrándose exactamente igual -- una sola fecha, sin desglose (usa el mock default del describe raíz)', async () => {
       const { getByText, queryByText } = render(<PerfilMobileView />);
 
-      await waitFor(() => expect(getByText('Pase Libre')).toBeTruthy());
+      await waitFor(() => expect(getByText('Aparatos')).toBeTruthy());
       expect(queryByText(/vencen el/)).toBeNull();
     });
   });

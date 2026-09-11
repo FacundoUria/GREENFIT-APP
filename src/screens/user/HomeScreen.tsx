@@ -17,7 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, formatCreditosDisponibles } from '../../lib/creditsApi';
+import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { showAlert } from '../../lib/crossPlatformAlert';
 import { createPaymentPreference } from '../../lib/paymentsApi';
@@ -25,7 +25,6 @@ import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel } from '../../lib/classTime';
 import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
-import { formatLongDate } from '../../lib/dateFormat';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
@@ -304,6 +303,12 @@ export default function HomeScreen({ navigation }: any) {
     return { balance: b, isMembership, status };
   });
   const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
+  // Filas listas para la Hero Card -- agrupadas por FECHA (mismo criterio
+  // y mismos textos que VencimientoCell en el Admin, ver creditsApi.ts):
+  // 2+ disciplinas que vencen el mismo día se fusionan en una sola fila en
+  // vez de repetir la fecha. El badge de una fila fusionada es el peor
+  // estado entre las disciplinas que la componen.
+  const filasVencimiento = agruparBalancesPorVencimiento(balancesConEstado);
   const resumenXp = calcularResumenXp(totalXp);
   // Tope diario de "Hoy Entrené" -- mismo criterio "no vencido" que ya usa
   // el resto de esta pantalla (activo O por_vencer cuentan, solo vencido
@@ -394,33 +399,20 @@ export default function HomeScreen({ navigation }: any) {
         ) : balances.length === 0 ? (
           <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
         ) : (
-          balancesConEstado.map(({ balance: b, isMembership, status }) => {
-            const creditosTexto = !isMembership ? formatCreditosDisponibles(b.remainingCredits, b.lotes) : null;
-            return (
-              <View key={b.discipline.id} style={styles.heroPlanRow}>
-                <View style={{ flex: 1, paddingRight: 10 }}>
-                  <Text style={styles.heroPlanName}>
-                    {isMembership ? 'Aparatos' : b.discipline.name}
+          filasVencimiento.map((fila) => (
+            <View key={fila.key} style={styles.heroPlanRow}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.heroPlanName}>{fila.nombre}</Text>
+                <Text style={styles.heroPlanDetail}>{fila.detalle}</Text>
+                {fila.subDetalles.map((sub) => (
+                  <Text key={sub} style={styles.heroPlanDetailDesglose}>
+                    {sub}
                   </Text>
-                  {isMembership ? (
-                    <Text style={styles.heroPlanDetail}>
-                      {b.expiresAt
-                        ? `${status === 'vencido' ? 'Venció el' : 'Vence el'} ${formatLongDate(b.expiresAt)}`
-                        : 'Sin fecha de vencimiento cargada'}
-                    </Text>
-                  ) : (
-                    <>
-                      <Text style={styles.heroPlanDetail}>{creditosTexto!.principal}</Text>
-                      {!!creditosTexto!.desglose && (
-                        <Text style={styles.heroPlanDetailDesglose}>{creditosTexto!.desglose}</Text>
-                      )}
-                    </>
-                  )}
-                </View>
-                <StatusBadge status={status} />
+                ))}
               </View>
-            );
-          })
+              <StatusBadge status={fila.status} />
+            </View>
+          ))
         )}
 
         {hayVencido ? (
