@@ -4,7 +4,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
-import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUserBalances, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
 import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import {
@@ -103,7 +102,6 @@ interface PerfilMobileViewProps {
 
 export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) {
   const { user, updateAvatarUrl, logout } = useAuth();
-  const { configuracion } = useConfiguracion();
 
   const [balances, setBalances] = useState<UserCredit[]>([]);
   const [clasesDelMes, setClasesDelMes] = useState(0);
@@ -181,7 +179,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
     const status: MembershipStatus = isMembership
-      ? getExpiryStatus(b.expiresAt, configuracion.diasTolerancia)
+      ? getExpiryStatus(b.expiresAt)
       : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });

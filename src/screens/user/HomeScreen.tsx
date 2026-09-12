@@ -298,7 +298,7 @@ export default function HomeScreen({ navigation }: any) {
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
     const status = isMembership
-      ? getExpiryStatus(b.expiresAt, configuracion.diasTolerancia)
+      ? getExpiryStatus(b.expiresAt)
       : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });
