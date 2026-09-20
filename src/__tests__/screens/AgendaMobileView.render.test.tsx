@@ -18,8 +18,15 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', dni: '30111222' } }),
 }));
+// jest.fn() (no un objeto fijo) -- algunos tests necesitan un
+// limiteCancelacionMinutos DISTINTO de 120 para confirmar que el mensaje de
+// "no se reintegra el crédito" lee el valor real de Configuración en vez de
+// un texto fijo ("2 horas" hardcodeado, bug real ya arreglado).
+const mockUseConfiguracion = jest.fn(() => ({
+  configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 },
+}));
 jest.mock('../../context/ConfiguracionContext', () => ({
-  useConfiguracion: () => ({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } }),
+  useConfiguracion: () => mockUseConfiguracion(),
 }));
 jest.mock('../../hooks/useTicker', () => ({ useTicker: () => {} }));
 jest.mock('../../lib/closedDaysApi', () => ({ fetchClosedDays: jest.fn().mockResolvedValue([]) }));
@@ -129,6 +136,10 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     jest.clearAllMocks();
     mockedLoadClasses.mockResolvedValue([{ ...CLASE_BASE }]);
     mockedRpc.mockResolvedValue({ data: null, error: null });
+    // Default 120 -- clearAllMocks() NO borra un mockReturnValue puesto por
+    // un test anterior (solo mockReset lo haría), así que se reafirma acá
+    // para que el override puntual de un test no se filtre a los de al lado.
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
   });
 
   it('muestra la clase como Disponible cuando el socio todavía no la reservó', async () => {
@@ -218,7 +229,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     expect(getByText('Te devolvimos el crédito.')).toBeTruthy();
   });
 
-  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el modal avisa que NO se reintegra el crédito', async () => {
+  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el modal avisa que NO se reintegra el crédito (con 120 min configurados, se lee "2 horas")', async () => {
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
       fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
@@ -235,6 +246,53 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
       expect(
         getByText('Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.')
       ).toBeTruthy()
+    );
+  });
+
+  // BUG REAL -- este mensaje decía "2 horas" como texto FIJO, sin leer
+  // configuracion.limite_cancelacion_minutos (a diferencia del aviso PREVIO
+  // del mismo modal, que sí lo leía) -- con el límite configurado en 10
+  // minutos, el socio seguía viendo "2 horas", un dato falso.
+  it('con limite_cancelacion_minutos=10, el mensaje de "no se reintegra" dice "10 minutos", NO "2 horas"', async () => {
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 10 } });
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
+    );
+
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(getByText('Como cancelaste con menos de 10 minutos de anticipación, no se reintegra el crédito.')).toBeTruthy()
+    );
+    expect(queryByText(/2 horas/)).toBeNull();
+  });
+
+  // 90 no es una cantidad entera de horas -- formatLimite() (mismo
+  // formateo que ya usa el aviso PREVIO de este modal) lo lee como "1 hora
+  // 30 min", no como "90 minutos" en crudo. Confirma que se reusa esa
+  // MISMA función, no un formateo propio inventado acá.
+  it('con otro valor configurado (90 minutos), el mensaje refleja ese número real, formateado igual que el aviso previo', async () => {
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 90 } });
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
+    );
+
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(getByText('Como cancelaste con menos de 1 hora 30 min de anticipación, no se reintegra el crédito.')).toBeTruthy()
     );
   });
 

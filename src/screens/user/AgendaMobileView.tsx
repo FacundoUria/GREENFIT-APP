@@ -21,7 +21,7 @@ import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatClassTime, getCountdown } from '../../lib/classTime';
 import { useTicker } from '../../hooks/useTicker';
 import { withTimeout } from '../../lib/withTimeout';
-import CancelBookingModal from '../../components/CancelBookingModal';
+import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
 import DaySelector from '../../components/DaySelector';
 import ReservaConfirmadaModal from '../../components/ReservaConfirmadaModal';
 import BookingConfirmModal from '../../components/BookingConfirmModal';
@@ -343,7 +343,7 @@ export default function AgendaMobileView({ navigation }: any) {
         title: 'Reserva cancelada',
         message: creditoReintegrado
           ? 'Te devolvimos el crédito.'
-          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.',
+          : `Como cancelaste con menos de ${formatLimite(configuracion.limiteCancelacionMinutos)} de anticipación, no se reintegra el crédito.`,
         tone: creditoReintegrado ? 'success' : 'info',
       });
     } catch (err) {

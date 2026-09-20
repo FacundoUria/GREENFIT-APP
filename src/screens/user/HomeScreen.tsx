@@ -26,7 +26,7 @@ import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel } from '../../lib/classTime';
 import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
-import CancelBookingModal from '../../components/CancelBookingModal';
+import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 import XpProgressRing from '../../components/XpProgressRing';
@@ -278,7 +278,7 @@ export default function HomeScreen({ navigation }: any) {
         'Reserva cancelada',
         creditoReintegrado
           ? 'Te devolvimos el crédito.'
-          : 'Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.'
+          : `Como cancelaste con menos de ${formatLimite(configuracion.limiteCancelacionMinutos)} de anticipación, no se reintegra el crédito.`
       );
     } catch (err) {
       showAlert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');

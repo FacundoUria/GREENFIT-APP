@@ -19,7 +19,11 @@ interface CancelBookingModalProps {
 // "3 horas"/"90 minutos"/"1 hora 30 minutos" -- mostramos horas cuando el
 // valor cae justo en una cantidad entera de horas (el caso más común, ej.
 // 180 min) para que el aviso siga leyéndose natural en vez de "180 minutos".
-function formatLimite(minutos: number): string {
+// Exportada -- AgendaMobileView.tsx/HomeScreen.tsx la reusan para el
+// mensaje de RESULTADO tras cancelar (antes tenían "2 horas" fijo ahí, sin
+// leer configuracion.limite_cancelacion_minutos como sí hace el aviso
+// PREVIO de este modal, más abajo).
+export function formatLimite(minutos: number): string {
   if (minutos <= 0) return '0 minutos';
   if (minutos % 60 === 0) {
     const horas = minutos / 60;

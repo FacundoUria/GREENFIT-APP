@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // HomeScreen usa useFocusEffect (no useEffect simple) para el refresh al
@@ -19,17 +19,22 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../../context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', avatarUrl: null } }),
 }));
+// jest.fn() (no un objeto fijo) -- algunos tests necesitan un
+// limiteCancelacionMinutos DISTINTO de 120 para confirmar que el mensaje de
+// "no se reintegra el crédito" lee el valor real de Configuración en vez de
+// un texto fijo ("2 horas" hardcodeado, bug real ya arreglado).
+const mockUseConfiguracion = jest.fn(() => ({
+  configuracion: {
+    diasTolerancia: 5,
+    limiteCancelacionMinutos: 120,
+    aliasCvu: null,
+    titularCuenta: null,
+    alertaActiva: false,
+    alertaMensaje: '',
+  },
+}));
 jest.mock('../../context/ConfiguracionContext', () => ({
-  useConfiguracion: () => ({
-    configuracion: {
-      diasTolerancia: 5,
-      limiteCancelacionMinutos: 120,
-      aliasCvu: null,
-      titularCuenta: null,
-      alertaActiva: false,
-      alertaMensaje: '',
-    },
-  }),
+  useConfiguracion: () => mockUseConfiguracion(),
 }));
 jest.mock('../../hooks/useTicker', () => ({ useTicker: () => {} }));
 jest.mock('../../lib/notificationsBadge', () => ({ fetchUnreadNotificationCount: jest.fn().mockResolvedValue(0) }));
@@ -123,6 +128,19 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
     (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
     (fetchEntrenamientosHoy as jest.Mock).mockResolvedValue(0);
+    // Default 120 -- clearAllMocks() NO borra un mockReturnValue puesto por
+    // un test anterior (solo mockReset lo haría), así que se reafirma acá
+    // para que el override puntual de un test no se filtre a los de al lado.
+    mockUseConfiguracion.mockReturnValue({
+      configuracion: {
+        diasTolerancia: 5,
+        limiteCancelacionMinutos: 120,
+        aliasCvu: null,
+        titularCuenta: null,
+        alertaActiva: false,
+        alertaMensaje: '',
+      },
+    });
   });
 
   it('NO renderiza la tarjeta "Mi Pase / Comprar" (removida -- esa gestión ahora vive en Perfil > Pagos y Facturas)', async () => {
@@ -260,6 +278,54 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     expect(queryByText('Tu próxima clase')).toBeNull();
     expect(queryByText('📅 Reservar próxima clase')).toBeNull();
     expect(getByText('Cancelar')).toBeTruthy();
+  });
+
+  // BUG REAL -- el mensaje de resultado tras cancelar decía "2 horas" como
+  // texto FIJO, sin leer configuracion.limite_cancelacion_minutos (a
+  // diferencia del aviso PREVIO del mismo modal, que sí lo leía). Con 10
+  // minutos configurados, el socio seguía viendo "2 horas", un dato falso.
+  it('cancelar fuera del límite de gracia (10 minutos configurados) -- el aviso dice "10 minutos", NO "2 horas"', async () => {
+    mockUseConfiguracion.mockReturnValue({
+      configuracion: {
+        diasTolerancia: 5,
+        limiteCancelacionMinutos: 10,
+        aliasCvu: null,
+        titularCuenta: null,
+        alertaActiva: false,
+        alertaMensaje: '',
+      },
+    });
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    const mananaStr = manana.toISOString().slice(0, 10);
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            { class_id: 'clase-1', booking_date: mananaStr, classes: { title: 'CrossFit', start_time: '19:00:00' } },
+          ],
+          error: null,
+        });
+      }
+      return makeChain({ data: [], error: null });
+    });
+    (supabase.rpc as jest.Mock).mockResolvedValue({ data: false, error: null }); // fuera del límite -- NO reintegra
+
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Cancelar')).toBeTruthy());
+
+    fireEvent.press(getByText('Cancelar'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'Reserva cancelada',
+        'Como cancelaste con menos de 10 minutos de anticipación, no se reintegra el crédito.'
+      )
+    );
   });
 
   // La reseña de Google se mudó a Mi Perfil (es una acción secundaria) --
