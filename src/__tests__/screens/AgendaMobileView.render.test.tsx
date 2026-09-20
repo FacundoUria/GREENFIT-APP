@@ -62,6 +62,17 @@ const mockedLoadClasses = loadClassesForDate as jest.Mock;
 const mockedFrom = supabase.from as jest.Mock;
 const mockedRpc = supabase.rpc as jest.Mock;
 
+// Relativo a AHORA (no una fecha absoluta fija) -- withinCancelLimit se
+// calcula contra Date.now() real (este archivo no congela el reloj), así
+// que una fecha hardcodeada "vence" apenas el calendario real la deja
+// atrás: exactamente lo que pasó acá (2026-08-10 quedó en el pasado y
+// volvía withinCancelLimit siempre true, deshabilitando "Confirmar
+// cancelación" en TODOS los tests de cancelar -- bug de fixture expuesto
+// por el nuevo bloqueo de cancel_booking(), no causado por él). 3 horas es
+// un margen cómodo por encima de cualquier tiempo de gracia real
+// configurado (120 min por default).
+const EN_3_HORAS = new Date(Date.now() + 3 * 60 * 60 * 1000);
+
 const CLASE_BASE = {
   id: 'class-1',
   title: 'CrossFit',
@@ -73,9 +84,9 @@ const CLASE_BASE = {
   startTime: '19:00:00',
   endTime: '20:00:00',
   bookedCount: 2,
-  occurrenceDate: '2026-08-10',
-  startAt: new Date('2026-08-10T19:00:00').toISOString(),
-  endAt: new Date('2026-08-10T20:00:00').toISOString(),
+  occurrenceDate: EN_3_HORAS.toISOString().slice(0, 10),
+  startAt: EN_3_HORAS.toISOString(),
+  endAt: new Date(EN_3_HORAS.getTime() + 60 * 60 * 1000).toISOString(),
 };
 
 function makeChain(result: any) {
@@ -175,7 +186,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     fireEvent.press(getByText('Confirmar'));
 
     await waitFor(() =>
-      expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
+      expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: CLASE_BASE.occurrenceDate })
     );
     await waitFor(() => expect(getByText('¡Reserva confirmada!')).toBeTruthy());
   });
@@ -196,7 +207,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     await waitFor(() =>
       expect(mockedRpc).toHaveBeenCalledWith('cancel_booking', {
         p_class_id: 'class-1',
-        p_booking_date: '2026-08-10',
+        p_booking_date: CLASE_BASE.occurrenceDate,
         p_reason: null,
       })
     );
@@ -316,6 +327,42 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     expect(queryByText('Reserva cancelada')).toBeNull();
   });
 
+  // BUG REAL, ticket "cancel_booking bloquea dentro del tiempo de gracia" --
+  // cancel_booking() ahora rechaza (en vez de cancelar sin reintegrar) si
+  // faltan menos de limite_cancelacion_minutos para la clase. El gate
+  // cliente (withinCancelLimit, ver CancelBookingModal) ya deshabilita el
+  // botón para este caso normalmente -- este test simula que el SERVIDOR
+  // igual rechaza (reloj del cliente desincronizado, o cualquier otra
+  // carrera) con CLASE_BASE (3hs en el futuro, el cliente la deja pasar):
+  // confirma que se muestra el mensaje REAL del backend (no uno genérico) y
+  // que la reserva NO se toca -- sigue viéndose "Reservada".
+  it('si cancel_booking rechaza por estar dentro de la ventana, muestra el mensaje real del backend y la reserva sigue viéndose (no se borró nada)', async () => {
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking'
+        ? Promise.resolve({
+            data: null,
+            error: { message: 'No podés cancelar esta reserva -- faltan menos de 120 minutos para que empiece la clase.' },
+          })
+        : Promise.resolve({ data: null, error: null })
+    );
+
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() => expect(getByText('No se pudo cancelar')).toBeTruthy());
+    expect(
+      getByText('No podés cancelar esta reserva -- faltan menos de 120 minutos para que empiece la clase.')
+    ).toBeTruthy();
+    expect(queryByText('Reserva cancelada')).toBeNull();
+    // La reserva sigue existiendo -- load() nunca se llamó por el camino de error.
+    expect(getByText('Reservada')).toBeTruthy();
+  });
+
   it('NO muestra el botón flotante "+" (se sacó de Agenda -- ahora es exclusivo de Comunidad, para no confundirlo con "crear publicación")', async () => {
     mockFromDefault({ data: [], error: null });
     const { getByText, queryByLabelText } = render(<AgendaMobileView navigation={navigation} />);
@@ -385,7 +432,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
       fireEvent.press(getByText('Confirmar'));
 
       await waitFor(() =>
-        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
+        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: CLASE_BASE.occurrenceDate })
       );
     });
 
@@ -522,7 +569,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
       fireEvent.press(getByText(CONSENT_TEXT_SHORT));
       fireEvent.press(getByText('Confirmar'));
       await waitFor(() =>
-        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: '2026-08-10' })
+        expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: CLASE_BASE.occurrenceDate })
       );
     });
 

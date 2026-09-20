@@ -328,6 +328,55 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     );
   });
 
+  // BUG REAL, ticket "cancel_booking bloquea dentro del tiempo de gracia" --
+  // ahora rechaza (en vez de cancelar sin reintegrar) si faltan menos de
+  // limite_cancelacion_minutos. Reserva de MAÑANA (el gate cliente la deja
+  // pasar, botón habilitado) pero el RPC mockeado rechaza igual -- simula
+  // que el servidor lo bloqueó (reloj desincronizado u otra carrera):
+  // confirma que se muestra el mensaje REAL del backend, con showAlert (no
+  // Alert.alert nativo directo), y que no se dice "cancelada".
+  it('si cancel_booking rechaza por estar dentro de la ventana, showAlert muestra el mensaje real del backend (no genérico)', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    const mananaStr = manana.toISOString().slice(0, 10);
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'bookings') {
+        return makeChain({
+          data: [
+            { class_id: 'clase-1', booking_date: mananaStr, classes: { title: 'CrossFit', start_time: '19:00:00' } },
+          ],
+          error: null,
+        });
+      }
+      return makeChain({ data: [], error: null });
+    });
+    (supabase.rpc as jest.Mock).mockResolvedValue({
+      data: null,
+      error: { message: 'No podés cancelar esta reserva -- faltan menos de 120 minutos para que empiece la clase.' },
+    });
+
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Cancelar')).toBeTruthy());
+
+    fireEvent.press(getByText('Cancelar'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
+
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith(
+        'No se pudo cancelar',
+        'No podés cancelar esta reserva -- faltan menos de 120 minutos para que empiece la clase.'
+      )
+    );
+    // Alert.alert es un no-op mockeado -- no renderiza nada en el árbol, así
+    // que lo que importa es que nunca se lo llamó con el título de éxito
+    // (queryByText('Reserva cancelada') sería trivialmente null de todos
+    // modos, ya que Alert.alert nunca pinta JSX).
+    expect(Alert.alert).not.toHaveBeenCalledWith('Reserva cancelada', expect.anything());
+  });
+
   // La reseña de Google se mudó a Mi Perfil (es una acción secundaria) --
   // Inicio queda reservado a lo operativo del día a día.
   it('ya NO muestra la tarjeta de reseña de Google -- se mudó a Mi Perfil', async () => {

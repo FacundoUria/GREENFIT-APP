@@ -6,9 +6,15 @@ interface CancelBookingModalProps {
   visible: boolean;
   className: string;
   isSubmitting?: boolean;
-  // true si cancelar AHORA sería dentro de la ventana de configuracion.limite_cancelacion_minutos
-  // previa a la clase (no se reintegra el crédito) — calculado en el cliente
-  // solo para avisar antes de confirmar; la regla real la aplica cancel_booking() en el servidor.
+  // true si cancelar AHORA sería dentro de la ventana de
+  // configuracion.limite_cancelacion_minutos previa a la clase — calculado
+  // en el cliente solo para avisar/deshabilitar antes de confirmar; la
+  // regla real la aplica cancel_booking() en el servidor (rechaza con una
+  // excepción si igual se intenta). Antes esto solo significaba "no se
+  // reintegra el crédito" (la cancelación se dejaba pasar igual) -- ahora
+  // el servidor la bloquea del todo, así que acá también se deshabilita
+  // "Confirmar cancelación" en vez de dejar tocar un botón condenado a
+  // fallar.
   withinCancelLimit?: boolean;
   // Mismo valor que usó withinCancelLimit para su cálculo, solo para mostrarlo en el aviso.
   limiteMinutos?: number;
@@ -66,8 +72,7 @@ export default function CancelBookingModal({
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
           {withinCancelLimit && (
             <Text style={styles.warning}>
-              Estás cancelando con menos de {formatLimite(limiteMinutos)} de anticipación: no se te reintegra el
-              crédito.
+              Faltan menos de {formatLimite(limiteMinutos)} para que empiece la clase: no podés cancelarla.
             </Text>
           )}
           <TextInput
@@ -82,7 +87,12 @@ export default function CancelBookingModal({
             <TouchableOpacity style={styles.secondaryButton} onPress={handleClose} disabled={isSubmitting}>
               <Text style={styles.secondaryButtonText}>Volver</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.dangerButton} onPress={handleConfirm} disabled={isSubmitting}>
+            <TouchableOpacity
+              testID="cancel-booking-confirm"
+              style={[styles.dangerButton, withinCancelLimit && styles.dangerButtonDisabled]}
+              onPress={handleConfirm}
+              disabled={isSubmitting || withinCancelLimit}
+            >
               {isSubmitting ? (
                 <ActivityIndicator color={colors.white} size="small" />
               ) : (
@@ -146,5 +156,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.danger,
   },
+  dangerButtonDisabled: { opacity: 0.5 },
   dangerButtonText: { color: colors.white, fontWeight: '700' },
 });
