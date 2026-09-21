@@ -97,7 +97,29 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   });
   if (classesActivas.length === 0) return [];
 
-  const classIds = classesActivas.map((c) => c.id);
+  // Ocurrencias puntuales canceladas por el gimnasio (Admin > Clases,
+  // "Cancelar") -- class_id + fecha EXACTA, no afecta ningún otro día de la
+  // semana de la misma clase recurrente (ver supabase_migration_cancelar_
+  // clase_puntual.sql). Fail-open a propósito, mismo criterio que el RPC de
+  // bookedCount más abajo: si esta tabla todavía no existe en este
+  // ambiente, mejor mostrar la clase igual que ocultar todo por error.
+  const idsActivos = classesActivas.map((c) => c.id);
+  const { data: canceladas, error: canceladasError } = await supabase
+    .from('class_occurrence_cancellations')
+    .select('class_id')
+    .in('class_id', idsActivos)
+    .eq('occurrence_date', occurrenceDate);
+  if (canceladasError) {
+    console.warn(
+      '[GreenFit] No se pudo confirmar cancelaciones puntuales (¿falta correr supabase_migration_cancelar_clase_puntual.sql?):',
+      canceladasError.message
+    );
+  }
+  const idsCancelados = new Set((canceladas ?? []).map((c) => c.class_id));
+  const classesDisponibles = classesActivas.filter((c) => !idsCancelados.has(c.id));
+  if (classesDisponibles.length === 0) return [];
+
+  const classIds = classesDisponibles.map((c) => c.id);
 
   // Cuenta real de inscriptos por clase para esta fecha puntual -- vía RPC
   // (SECURITY DEFINER), no con un SELECT directo a `bookings`. La policy
@@ -135,7 +157,7 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
     countByClass.set(row.class_id, Number(row.booked_count));
   }
 
-  const withBookings = classesActivas.map((c) => {
+  const withBookings = classesDisponibles.map((c) => {
     const gymClass = mapClass(c);
     return {
       ...gymClass,

@@ -6,9 +6,16 @@ import { createAdminClient, requireAdmin } from '../_shared/adminGuard.ts';
 interface SendPushBody {
   title: string;
   body: string;
-  audience: 'all' | 'class' | 'user' | 'debtors';
+  audience: 'all' | 'class' | 'user' | 'users' | 'debtors';
   targetClassId?: string;
   targetUserId?: string;
+  // 'users' -- lista de destinatarios ya resuelta por el CALLER (ej.
+  // Clases.jsx, después de admin_cancelar_clase_dia(): los socios de la
+  // ocurrencia puntual que se acaba de cancelar). A diferencia de 'class'
+  // (bookings.user_id filtrado SOLO por class_id, sin fecha -- notificaría
+  // a cualquiera que alguna vez se anotó a esa clase recurrente), acá el
+  // caller ya filtró por la fecha exacta antes de llamar.
+  targetUserIds?: string[];
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -29,6 +36,9 @@ async function resolveUserIds(admin: ReturnType<typeof createAdminClient>, body:
   }
   if (body.audience === 'user') {
     return body.targetUserId ? [body.targetUserId] : [];
+  }
+  if (body.audience === 'users') {
+    return [...new Set(body.targetUserIds ?? [])];
   }
   if (body.audience === 'class') {
     if (!body.targetClassId) return [];
@@ -60,7 +70,7 @@ serve(async (req) => {
     if (!body.title?.trim() || !body.body?.trim()) {
       return jsonResponse({ error: 'Falta el título o el mensaje.' }, 400);
     }
-    if (!['all', 'class', 'user', 'debtors'].includes(body.audience)) {
+    if (!['all', 'class', 'user', 'users', 'debtors'].includes(body.audience)) {
       return jsonResponse({ error: 'Audiencia inválida.' }, 400);
     }
 
@@ -69,16 +79,24 @@ serve(async (req) => {
       return jsonResponse({ error: 'No hay destinatarios para esa audiencia.' }, 400);
     }
 
-    const { error: insertError } = await admin.from('notifications').insert({
-      sender_id: sender.id,
-      audience_type: body.audience,
-      target_class_id: body.targetClassId ?? null,
-      target_user_id: body.targetUserId ?? null,
-      title: body.title.trim(),
-      body: body.body.trim(),
-    });
-    if (insertError) {
-      return jsonResponse({ error: insertError.message }, 400);
+    // 'users' es SOLO entrega de Web Push -- el historial in-app ya lo
+    // insertó el caller por su cuenta, una fila por socio (ver
+    // admin_cancelar_clase_dia()), así que hacerlo también acá sería un
+    // duplicado. Además 'users' ni siquiera es un audience_type válido
+    // para la tabla (el CHECK constraint solo permite
+    // 'all'/'class'/'user'/'debtors') -- insertar rompería directo.
+    if (body.audience !== 'users') {
+      const { error: insertError } = await admin.from('notifications').insert({
+        sender_id: sender.id,
+        audience_type: body.audience,
+        target_class_id: body.targetClassId ?? null,
+        target_user_id: body.targetUserId ?? null,
+        title: body.title.trim(),
+        body: body.body.trim(),
+      });
+      if (insertError) {
+        return jsonResponse({ error: insertError.message }, 400);
+      }
     }
 
     // La suscripción viaja entera como jsonb en `subscription`

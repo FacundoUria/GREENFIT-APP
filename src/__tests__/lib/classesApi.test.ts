@@ -70,6 +70,7 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
       if (tabla === 'classes') {
         return makeChain({ data: [claseDe({ is_active: true, show_in_agenda: true })], error: null });
       }
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([]);
@@ -95,6 +96,7 @@ describe('loadClassesForDate -- filtra por is_active Y por show_in_agenda de la 
       if (tabla === 'classes') {
         return makeChain({ data: [claseDe(undefined as any)], error: null });
       }
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([]);
@@ -134,6 +136,7 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
   it('suma correctamente varias reservas activas de la MISMA clase', async () => {
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([{ class_id: 'clase-1', booked_count: 3 }]);
@@ -151,6 +154,7 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
           error: null,
         });
       }
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([
@@ -167,6 +171,7 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
   it('sin ninguna reserva, bookedCount es 0 (no rompe ni deja undefined)', async () => {
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([]);
@@ -189,6 +194,7 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
       // Simula la RLS: un SELECT directo a `bookings` de un socio común no
       // vería las reservas de otros socios.
       if (tabla === 'bookings') return makeChain({ data: [], error: null });
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([{ class_id: 'clase-1', booked_count: 15 }]);
@@ -210,6 +216,7 @@ describe('loadClassesForDate -- bookedCount (cantidad de inscriptos por clase, p
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockedFrom.mockImplementation((tabla: string) => {
       if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockedRpc.mockResolvedValue({ data: null, error: { message: 'function not found in schema cache' } });
@@ -259,6 +266,7 @@ describe('loadClassesForDate -- oculta clases de HOY cuyo horario de inicio ya p
           error: null,
         });
       }
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([]);
@@ -299,6 +307,7 @@ describe('loadClassesForDate -- oculta clases de HOY cuyo horario de inicio ya p
             error: null,
           });
         }
+        if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
         throw new Error(`tabla inesperada: ${tabla}`);
       });
       mockBookingsCount([]);
@@ -322,11 +331,102 @@ describe('loadClassesForDate -- oculta clases de HOY cuyo horario de inicio ya p
       if (tabla === 'classes') {
         return makeChain({ data: [claseDe('clase-1', '07:00:00')], error: null });
       }
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
       throw new Error(`tabla inesperada: ${tabla}`);
     });
     mockBookingsCount([]);
 
     const resultado = await loadClassesForDate(LUNES);
     expect(resultado).toHaveLength(1);
+  });
+});
+
+// Ticket "cancelar clase puntual" -- "Cancelar" en el Admin ya NO borra
+// `classes` (la plantilla recurrente entera) -- marca la OCURRENCIA de un
+// día puntual en class_occurrence_cancellations (ver supabase_migration_
+// cancelar_clase_puntual.sql). La Agenda de la PWA tiene que excluir esa
+// clase SOLO para esa fecha exacta, sin afectar los demás días de la semana
+// de la misma plantilla.
+describe('loadClassesForDate -- excluye ocurrencias con cancelación puntual (class_occurrence_cancellations)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function claseDe(id: string, overrides = {}) {
+    return {
+      id,
+      title: 'CrossFit',
+      discipline_id: 'disc-crossfit',
+      instructor: null,
+      location: null,
+      capacity: 15,
+      days_of_week: [1],
+      start_time: '18:00:00',
+      end_time: '19:00:00',
+      disciplines: { is_active: true, show_in_agenda: true },
+      ...overrides,
+    };
+  }
+
+  it('una clase con cancelación puntual para ESTA fecha exacta no aparece en la Agenda', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'class_occurrence_cancellations') {
+        return makeChain({ data: [{ class_id: 'clase-1' }], error: null });
+      }
+      throw new Error(`no debería consultar ${tabla} sin ninguna clase disponible`);
+    });
+
+    expect(await loadClassesForDate(LUNES)).toEqual([]);
+  });
+
+  it('una cancelación puntual de OTRA clase no afecta a esta -- la clase sin cancelar sigue apareciendo', async () => {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      // Cancelación real, pero de una clase distinta ('clase-2') -- no
+      // tiene que afectar a 'clase-1'.
+      if (tabla === 'class_occurrence_cancellations') {
+        return makeChain({ data: [{ class_id: 'clase-2' }], error: null });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+
+    const resultado = await loadClassesForDate(LUNES);
+    expect(resultado.map((c) => c.id)).toEqual(['clase-1']);
+  });
+
+  it('la MISMA clase, otro día de la semana (sin cancelación para esa fecha), se sigue mostrando -- el bloqueo es por fecha exacta, no por clase entera', async () => {
+    const OTRO_LUNES = new Date('2026-08-17T12:00:00'); // una semana después
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      // La cancelación real quedó guardada para el 2026-08-10 -- acá se
+      // simula la respuesta YA filtrada por occurrence_date=2026-08-17
+      // (como la haría el .eq() real): nada matchea, viene vacía.
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+
+    const resultado = await loadClassesForDate(OTRO_LUNES);
+    expect(resultado.map((c) => c.id)).toEqual(['clase-1']);
+  });
+
+  // Fail-open a propósito, mismo criterio que el RPC de bookedCount de más
+  // arriba: si la tabla todavía no existe en este ambiente (migración sin
+  // correr), mejor mostrar la clase igual que tirar abajo toda la Agenda.
+  it('si la consulta de cancelaciones falla, no rompe la Agenda -- muestra la clase igual', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: [claseDe('clase-1')], error: null });
+      if (tabla === 'class_occurrence_cancellations') {
+        return makeChain({ data: null, error: { message: 'relation does not exist' } });
+      }
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+
+    const resultado = await loadClassesForDate(LUNES);
+    expect(resultado.map((c) => c.id)).toEqual(['clase-1']);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
