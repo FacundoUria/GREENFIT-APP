@@ -13,7 +13,7 @@ jest.mock('../../lib/supabase', () => ({
   supabase: { from: (...args: unknown[]) => mockFrom(...args), rpc: (...args: unknown[]) => mockRpc(...args) },
 }));
 
-import { fetchPacks, buildPackSubtitle, formatCreditosDisponibles, fetchUserBalances, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
+import { fetchPacks, buildPackSubtitle, formatCreditosDisponibles, fetchUserBalances, agruparBalancesPorVencimiento, resolverFechaPlan } from '../../lib/creditsApi';
 import { Pack, UserCredit } from '../../types';
 
 function chainPacks(data: unknown[]) {
@@ -640,5 +640,59 @@ describe('agruparBalancesPorVencimiento (rediseño -- agrupar por FECHA, mismo c
     expect(filas).toEqual([
       { key: 'disc-aparatos', nombre: 'Aparatos', status: 'activo', detalle: 'Sin fecha de vencimiento cargada', subDetalles: [] },
     ])
+  })
+})
+
+// Tarjeta "Vencimiento" de Inicio (rediseño) -- UNA sola fecha, sacada de
+// user_credits (nunca de socios.fecha_vencimiento, que es la fecha de
+// Aparatos y no representa el plan de un socio de solo créditos).
+describe('resolverFechaPlan (fecha única del plan, desde user_credits)', () => {
+  it('sin ningún balance activo -- null (no hay tarjeta de vencimiento)', () => {
+    expect(resolverFechaPlan([])).toBeNull()
+  })
+
+  it('socio de SOLO CRÉDITOS (sin Aparatos): la fecha sale de los lotes -- no depende de ninguna columna de socios', () => {
+    const r = resolverFechaPlan([
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-11-08T12:00:00.000Z' }]).balance,
+    ])
+    expect(r).toEqual({ fechaISO: '2026-11-08T12:00:00.000Z', cantidadFechas: 1 })
+  })
+
+  it('créditos + Aparatos con la MISMA fecha (plan único): una sola fecha, cantidadFechas = 1', () => {
+    const r = resolverFechaPlan([
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-11-08T12:00:00.000Z' }]).balance,
+      mkMembership('2026-11-08T12:00:00.000Z').balance,
+    ])
+    expect(r).toEqual({ fechaISO: '2026-11-08T12:00:00.000Z', cantidadFechas: 1 })
+  })
+
+  it('misma fecha con horas distintas del MISMO día calendario (Argentina) cuenta como 1 sola', () => {
+    const r = resolverFechaPlan([
+      mkCreditos('disc-crossfit', 'CrossFit', 4, [{ id: 'l1', remainingCredits: 4, expiresAt: '2026-11-08T15:00:00.000Z' }]).balance,
+      mkMembership('2026-11-08T21:00:00.000Z').balance,
+    ])
+    expect(r?.cantidadFechas).toBe(1)
+  })
+
+  it('datos viejos con 2 fechas distintas (caso Nicolas/Melisa antes de la limpieza): elige la MÁS LEJANA y avisa cantidadFechas = 2', () => {
+    const r = resolverFechaPlan([
+      mkMembership('2026-10-08T12:00:00.000Z').balance,
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [{ id: 'l1', remainingCredits: 12, expiresAt: '2026-11-08T12:00:00.000Z' }]).balance,
+    ])
+    expect(r).toEqual({ fechaISO: '2026-11-08T12:00:00.000Z', cantidadFechas: 2 })
+  })
+
+  it('una disciplina de créditos con 2 lotes en días distintos: considera TODOS los lotes, no solo el que vence antes', () => {
+    const r = resolverFechaPlan([
+      mkCreditos('disc-crossfit', 'CrossFit', 12, [
+        { id: 'l1', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
+        { id: 'l2', remainingCredits: 4, expiresAt: '2026-10-15T12:00:00.000Z' },
+      ]).balance,
+    ])
+    expect(r).toEqual({ fechaISO: '2026-10-15T12:00:00.000Z', cantidadFechas: 2 })
+  })
+
+  it('Aparatos sin expiresAt cargado y sin nada más: null', () => {
+    expect(resolverFechaPlan([mkMembership(null).balance])).toBeNull()
   })
 })

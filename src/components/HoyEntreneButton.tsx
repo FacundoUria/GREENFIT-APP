@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Text, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { registrarHoyEntrene } from '../lib/xpApi';
 
@@ -70,9 +71,19 @@ export default function HoyEntreneButton({ disciplinasActivas, entrenamientosHoy
         {cargando ? (
           <ActivityIndicator color={colors.onPrimary} size="small" />
         ) : (
-          <Text style={[styles.buttonText, agotado && styles.buttonTextAgotado]}>
-            {agotado ? 'Ya registraste todos tus entrenamientos de hoy' : '💪 Hoy Entrené'}
-          </Text>
+          <View style={styles.fila}>
+            <View style={styles.textos}>
+              <Text style={[styles.buttonText, agotado && styles.buttonTextAgotado]}>
+                {agotado ? 'Ya registraste todos tus entrenamientos de hoy' : '💪 Hoy Entrené'}
+              </Text>
+              {!agotado && <Text style={styles.subtitulo}>Tocá para registrar tu sesión y sumar racha</Text>}
+            </View>
+            {!agotado && (
+              <View style={styles.flecha}>
+                <Ionicons name="arrow-forward" size={18} color={colors.onPrimary} />
+              </View>
+            )}
+          </View>
         )}
       </TouchableOpacity>
       {!!feedback && <Text style={styles.feedback}>{feedback}</Text>}
@@ -84,17 +95,36 @@ const styles = StyleSheet.create({
   wrap: { marginTop: 16 },
   button: {
     backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
+    borderRadius: 20,
+    minHeight: 72,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
     justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 18,
+    elevation: 6,
   },
   buttonAgotado: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
+    shadowOpacity: 0,
+    elevation: 0,
   },
-  buttonText: { color: colors.onPrimary, fontSize: 15, fontWeight: '800' },
-  buttonTextAgotado: { color: colors.textSecondary, fontSize: 13, fontWeight: '700' },
+  fila: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  textos: { flex: 1 },
+  buttonText: { color: colors.onPrimary, fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
+  buttonTextAgotado: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', letterSpacing: 0 },
+  subtitulo: { color: colors.onPrimary, opacity: 0.7, fontSize: 12, fontWeight: '500', marginTop: 2 },
+  flecha: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   feedback: { color: colors.primary, fontSize: 12.5, fontWeight: '700', textAlign: 'center', marginTop: 8 },
 });

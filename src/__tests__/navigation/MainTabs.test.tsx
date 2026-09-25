@@ -57,3 +57,22 @@ describe('MainTabs -- redirección inicial por perfil incompleto', () => {
     expect(queryByText('HomeStackStub')).toBeNull();
   });
 });
+
+describe('MainTabs -- barra flotante: mismas 5 pestañas, mismos nombres', () => {
+  it('muestra Inicio, Agenda, Mi Rutina, Comunidad y Perfil (la ruta de Agenda sigue siendo "Reservas" pero se ve como "Agenda")', async () => {
+    mockUser = { id: 'user-1', perfilCompleto: true };
+    const { getByText, queryByText } = render(
+      <NavigationContainer>
+        <MainTabs />
+      </NavigationContainer>
+    );
+    await waitFor(() => expect(getByText('HomeStackStub')).toBeTruthy());
+    for (const etiqueta of ['Inicio', 'Agenda', 'Mi Rutina', 'Comunidad', 'Perfil']) {
+      expect(getByText(etiqueta)).toBeTruthy();
+    }
+    // Ninguna pestaña de más (ni la vieja "Reservas" como etiqueta visible).
+    expect(queryByText('Reservas')).toBeNull();
+    expect(queryByText('Notificaciones')).toBeNull();
+    expect(queryByText('Progreso')).toBeNull();
+  });
+});

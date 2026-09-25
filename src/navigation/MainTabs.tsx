@@ -1,4 +1,5 @@
 import React from 'react';
+import { View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
@@ -13,6 +14,13 @@ import { useNotificationSubscription } from '../hooks/useNotificationSubscriptio
 import { useAutoRequestWebPush } from '../hooks/usePushPermission';
 
 const Tab = createBottomTabNavigator();
+
+// Fondo de la barra flotante: la barra en sí ocupa todo el ancho con el color
+// de fondo de la app (si no, los márgenes de una barra "flotante" dejan ver el
+// fondo claro por defecto del navegador), y la píldora se dibuja acá adentro.
+function FloatingTabBackground() {
+  return <View style={styles.pill} />;
+}
 
 const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
   Inicio: 'home',
@@ -50,7 +58,21 @@ export default function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.surfaceAlt },
+        // Barra flotante (píldora con márgenes y borde) -- a propósito NO
+        // `position: absolute`: en el flujo normal no tapa el contenido de
+        // Agenda/Rutina/Comunidad/Perfil (esta barra es de TODAS las tabs).
+        tabBarStyle: {
+          backgroundColor: colors.background,
+          borderTopWidth: 0,
+          paddingHorizontal: 22,
+          paddingTop: 12,
+          paddingBottom: 18,
+          height: 84,
+        },
+        tabBarBackground: () => <FloatingTabBackground />,
+        tabBarItemStyle: { borderRadius: 26, marginHorizontal: 2 },
+        tabBarActiveBackgroundColor: `${colors.primary}1A`,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
         tabBarIcon: ({ color, size }) => <Ionicons name={icons[route.name]} size={size} color={color} />,
       })}
     >
@@ -74,3 +96,17 @@ export default function MainTabs() {
     </Tab.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  pill: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    top: 6,
+    bottom: 12,
+    borderRadius: 32,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+});

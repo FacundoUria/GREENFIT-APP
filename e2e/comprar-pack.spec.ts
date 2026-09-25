@@ -229,11 +229,13 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
       },
     });
 
-    await expect(page.getByText('CrossFit')).toBeVisible();
-    // "X de Y clases restantes" se sacó (rediseño de la card de créditos) --
-    // ahora es "N créditos disponibles" + fecha de vencimiento del lote.
-    await expect(page.getByText(/4 créditos disponibles/)).toBeVisible();
-    await expect(page.getByText('Activo', { exact: true })).toBeVisible();
+    // Rediseño de Inicio: tarjeta de CrossFit (nombre + número + "créditos")
+    // y la tarjeta de vencimiento con el badge de estado del plan.
+    const tarjeta = page.getByTestId('credito-card-disc-crossfit');
+    await expect(tarjeta.getByText('CrossFit')).toBeVisible();
+    await expect(tarjeta.getByText('4', { exact: true })).toBeVisible();
+    await expect(tarjeta.getByText('créditos')).toBeVisible();
+    await expect(page.getByText('Activo al día')).toBeVisible();
 
     // El pack recién creado sigue disponible para una PRÓXIMA compra --
     // nada hardcodeado se rompió por haber comprado uno.
@@ -288,20 +290,27 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
       },
     });
 
-    // Réplica EXACTA de formatLongDate() (src/lib/membershipStatus.ts) en vez
-    // de Intl/toLocaleDateString -- evita cualquier diferencia de huso
-    // horario entre el ISO string (UTC) sembrado en el fixture y cómo lo
-    // parsea la propia app (slice a YYYY-MM-DD + medianoche LOCAL).
+    // La tarjeta de vencimiento usa formatLongDate() (src/lib/dateFormat.ts),
+    // que convierte a día calendario Argentina -- se replica ESA conversión
+    // acá (Intl con timeZone Argentina) en vez de una local, para no depender
+    // del huso horario de la máquina que corre la suite.
     const mesesEs = [
       'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
     ];
-    const fechaLocal = new Date(`${membresiaPostCompra.expires_at.slice(0, 10)}T00:00:00`);
-    const mes = mesesEs[fechaLocal.getMonth()];
-    const fechaEsperada = `${fechaLocal.getDate()} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${fechaLocal.getFullYear()}`;
+    const [anio, mesNum, dia] = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Mendoza',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date(membresiaPostCompra.expires_at))
+      .split('-');
+    const mes = mesesEs[Number(mesNum) - 1];
+    const fechaEsperada = `${Number(dia)} de ${mes.charAt(0).toUpperCase()}${mes.slice(1)}, ${anio}`;
 
-    await expect(page.getByText('Aparatos')).toBeVisible();
-    await expect(page.getByText(`Vence el ${fechaEsperada}`)).toBeVisible();
+    await expect(page.getByTestId('credito-card-disc-aparatos').getByText('Aparatos')).toBeVisible();
+    await expect(page.getByTestId('vencimiento-fecha')).toHaveText(fechaEsperada);
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
   });
 
@@ -376,9 +385,11 @@ test.describe('PWA -- flujo de punta a punta: pack nuevo del Admin -> compra apr
       },
     });
 
-    await expect(page.getByText('CrossFit')).toBeVisible();
-    await expect(page.getByText(/12 créditos disponibles/)).toBeVisible();
-    await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/8 créditos disponibles/)).toBeVisible();
+    const crossfit = page.getByTestId('credito-card-disc-crossfit');
+    const boxeo = page.getByTestId('credito-card-disc-boxeo');
+    await expect(crossfit.getByText('CrossFit')).toBeVisible();
+    await expect(crossfit.getByText('12', { exact: true })).toBeVisible();
+    await expect(boxeo.getByText('Boxeo')).toBeVisible();
+    await expect(boxeo.getByText('8', { exact: true })).toBeVisible();
   });
 });

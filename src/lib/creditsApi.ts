@@ -534,3 +534,39 @@ export function agruparBalancesPorVencimiento(balancesConEstado: BalanceConEstad
 
   return filas;
 }
+
+// ============================================================
+// Fecha ÚNICA del plan -- la que muestra la tarjeta "Vencimiento" de Inicio.
+//
+// Sale de `user_credits` (los `balances` que Inicio ya tiene cargados), NO de
+// socios.fecha_vencimiento: esa columna es la fecha de APARATOS (la puerta de
+// esta_habilitado_para_disciplina) y para un socio de solo créditos no
+// representa el plan -- además la PWA no puede leerla (RLS admin-only).
+//
+// Regla: la fecha MÁS LEJANA entre todo lo activo -- mismo criterio que
+// resolver_fecha_plan_actual() del Admin. Bajo el modelo de "plan único"
+// (acreditar_pack) todas las filas activas comparten fecha, así que lo normal
+// es que haya una sola; si por datos viejos hubiera más de un día distinto,
+// se elige la más lejana y se avisa con `cantidadFechas > 1`.
+// ============================================================
+export interface FechaPlan {
+  fechaISO: string;
+  // Días calendario Argentina DISTINTOS entre las filas activas (1 = lo normal).
+  cantidadFechas: number;
+}
+
+export function resolverFechaPlan(balances: UserCredit[]): FechaPlan | null {
+  const fechas: string[] = [];
+  for (const b of balances) {
+    if (b.discipline.kind === 'credits' && b.lotes && b.lotes.length > 0) {
+      for (const lote of b.lotes) if (lote.expiresAt) fechas.push(lote.expiresAt);
+    } else if (b.expiresAt) {
+      fechas.push(b.expiresAt);
+    }
+  }
+  if (fechas.length === 0) return null;
+
+  const masLejana = fechas.reduce((max, f) => (new Date(f).getTime() > new Date(max).getTime() ? f : max));
+  const dias = new Set(fechas.map((f) => claveDiaArgentina(f)));
+  return { fechaISO: masLejana, cantidadFechas: dias.size };
+}

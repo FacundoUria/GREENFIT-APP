@@ -2,26 +2,30 @@ import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
 import { tablasBase, AYER_STR, HOY_STR, DISCIPLINA_CROSSFIT, EN_30_DIAS } from './support/fixtures';
 
-// Cubre el checklist de Home: widget "Progreso Diario" (anillo de XP +
-// "¡Hoy entrené!" + reglas), y la ausencia de la vieja tarjeta "Mi Pase".
+// Cubre el checklist de Home (rediseño): anillo de nivel (solo el número, el
+// arco es el % real de XP) + "¡Hoy entrené!" + reglas, y la ausencia de la
+// vieja tarjeta "Mi Pase".
 test.describe('PWA -- Home / Dashboard', () => {
-  test('muestra el widget Progreso Diario y NO la tarjeta "Mi Pase / Comprar"', async ({ page }) => {
+  test('muestra el anillo de nivel y NO la tarjeta "Mi Pase / Comprar"', async ({ page }) => {
     await loginComoSocio(page, { tables: tablasBase() });
 
-    await expect(page.getByText('Progreso Diario')).toBeVisible();
-    await expect(page.getByText('N3')).toBeVisible(); // 1150 XP -> NIVEL 3
+    await expect(page.getByTestId('nivel-ring')).toBeVisible();
+    await expect(page.getByText('NIVEL', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('nivel-numero')).toHaveText('3'); // 1150 XP -> NIVEL 3
+    // El "150/500" ya no se escribe como texto en Inicio (vive en Mi Perfil).
+    await expect(page.getByText('150/500')).toHaveCount(0);
 
     await expect(page.getByText('Mi Pase')).toHaveCount(0);
     await expect(page.getByText('Comprar')).toHaveCount(0);
   });
 
-  // Rediseño UX de Inicio: el widget "Progreso Diario" se redujo al anillo
-  // solo (Nivel + XP centrados, ver XpProgressRing) -- el estado de
+  // Rediseño UX de Inicio: el bloque de nivel se redujo al anillo solo
+  // (número de nivel centrado, ver XpProgressRing) -- el estado de
   // check-in de hoy ("Esperando..."/"¡Seba registró tu asistencia!") ya NO
   // vive acá (menos carga cognitiva). Ese widget sigue existiendo como
   // componente propio y con su propia cobertura dedicada
   // (AsistenciaHoyStatus.test.tsx), simplemente dejó de montarse en Home.
-  test('el widget "Progreso Diario" ya no muestra el estado de check-in de hoy (se sacó en el rediseño)', async ({
+  test('el anillo de nivel ya no muestra el estado de check-in de hoy (se sacó en el rediseño)', async ({
     page,
   }) => {
     await loginComoSocio(page, {
@@ -35,7 +39,7 @@ test.describe('PWA -- Home / Dashboard', () => {
       },
     });
 
-    await expect(page.getByText('Progreso Diario')).toBeVisible();
+    await expect(page.getByTestId('nivel-ring')).toBeVisible();
     await expect(page.getByText('Esperando check-in en el gimnasio...')).toHaveCount(0);
     await expect(page.getByText('¡Hoy entrené!', { exact: false })).toHaveCount(0);
   });
@@ -52,7 +56,7 @@ test.describe('PWA -- Home / Dashboard', () => {
       },
     });
 
-    await expect(page.getByText('Progreso Diario')).toBeVisible();
+    await expect(page.getByTestId('nivel-ring')).toBeVisible();
     await expect(page.getByText('¡Seba registró tu asistencia! Sumaste +100 XP hoy')).toHaveCount(0);
   });
 
@@ -69,24 +73,28 @@ test.describe('PWA -- Home / Dashboard', () => {
     await expect(page.getByText('Completar una Meta Personal')).toHaveCount(0);
   });
 
-  // Tarjeta de perfil gamificada -- vivía SOLO en Mi Perfil, ahora también
-  // arriba de todo en Inicio (debajo del saludo), con los mismos datos
-  // reales (racha=2, clases del mes=2, 1150 XP -> NIVEL 3).
-  test('muestra la tarjeta de perfil gamificada debajo del saludo, con nivel/racha/clases reales', async ({ page }) => {
+  // Rediseño: la tarjeta de perfil gamificada (barra de XP + racha / miembro
+  // desde / clases del mes) SE SACÓ de Inicio -- sigue viviendo en Mi Perfil
+  // (ver perfil-mobile.spec.ts). Inicio muestra el saludo y, debajo, el
+  // anillo con el nivel real (1150 XP -> NIVEL 3).
+  test('el saludo va arriba del anillo de nivel, y Inicio ya NO muestra racha / miembro desde / clases del mes', async ({
+    page,
+  }) => {
     await loginComoSocio(page, { tables: tablasBase() });
 
     const saludo = page.getByText(/^Hola, /);
     await expect(saludo).toBeVisible();
+    await expect(page.getByTestId('nivel-numero')).toHaveText('3');
 
-    await expect(page.getByText('NIVEL 3')).toBeVisible();
-    await expect(page.getByTestId('stat-racha')).toHaveText('2');
-    await expect(page.getByTestId('stat-clases')).toHaveText('2');
+    await expect(page.getByTestId('stat-racha')).toHaveCount(0);
+    await expect(page.getByTestId('stat-clases')).toHaveCount(0);
+    await expect(page.getByText('Miembro desde')).toHaveCount(0);
+    await expect(page.getByText('NIVEL 3')).toHaveCount(0); // el badge de la tarjeta de perfil
 
-    // Está debajo del saludo (no en cualquier lugar de la pantalla) --
-    // confirma la jerarquía pedida, no solo que el dato exista en algún lado.
+    // Jerarquía: el saludo está arriba del anillo.
     const saludoBox = await saludo.boundingBox();
-    const nivelBox = await page.getByText('NIVEL 3').boundingBox();
-    expect(saludoBox!.y).toBeLessThan(nivelBox!.y);
+    const anilloBox = await page.getByTestId('nivel-ring').boundingBox();
+    expect(saludoBox!.y).toBeLessThan(anilloBox!.y);
   });
 
   // Rediseño UX: con una reserva próxima, el CTA es un "ticket" limpio --

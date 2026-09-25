@@ -17,51 +17,29 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, agruparBalancesPorVencimiento } from '../../lib/creditsApi';
+import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, resolverFechaPlan } from '../../lib/creditsApi';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { showAlert } from '../../lib/crossPlatformAlert';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import { resolvePaymentResultFromUrl } from '../../lib/paymentResult';
 import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel } from '../../lib/classTime';
-import { getCreditsStatus, getExpiryStatus, MembershipStatus } from '../../lib/membershipStatus';
+import { getCreditsStatus, getExpiryStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 import XpProgressRing from '../../components/XpProgressRing';
 import XpInfoModal from '../../components/XpInfoModal';
-import AthleteProfileCard from '../../components/AthleteProfileCard';
+import Avatar from '../../components/Avatar';
+import CreditosCarousel from '../../components/CreditosCarousel';
+import VencimientoCard from '../../components/VencimientoCard';
 import GlobalAlertBanner from '../../components/GlobalAlertBanner';
 import HoyEntreneButton from '../../components/HoyEntreneButton';
-import {
-  fetchTotalXp,
-  calcularResumenXp,
-  fetchFechasAsistencia,
-  calcularRachaDias,
-  fetchClasesDelMes,
-  fetchMiembroDesde,
-  fetchEntrenamientosHoy,
-  XP_POR_NIVEL,
-} from '../../lib/xpApi';
+import { fetchTotalXp, calcularResumenXp, fetchEntrenamientosHoy, XP_POR_NIVEL } from '../../lib/xpApi';
 import { useAvatarUpload } from '../../hooks/useAvatarUpload';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
-
-const STATUS_META: Record<MembershipStatus, { label: string; color: string; bg: string }> = {
-  activo: { label: 'Activo', color: colors.primary, bg: 'rgba(0, 255, 56, 0.15)' },
-  por_vencer: { label: 'Por Vencer', color: colors.warning, bg: 'rgba(224, 185, 83, 0.15)' },
-  vencido: { label: 'Vencido', color: colors.danger, bg: 'rgba(224, 83, 83, 0.15)' },
-};
-
-function StatusBadge({ status }: { status: MembershipStatus }) {
-  const meta = STATUS_META[status];
-  return (
-    <View style={[styles.statusBadge, { backgroundColor: meta.bg }]}>
-      <Text style={[styles.statusBadgeText, { color: meta.color }]}>{meta.label}</Text>
-    </View>
-  );
-}
 
 interface NextBooking {
   classId: string;
@@ -122,12 +100,6 @@ export default function HomeScreen({ navigation }: any) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [totalXp, setTotalXp] = useState(0);
   const [xpInfoVisible, setXpInfoVisible] = useState(false);
-  // Mismos 3 datos que ya mostraba la tarjeta de perfil gamificada en Mi
-  // Perfil (racha/miembro desde/clases del mes) -- ahora también arriba de
-  // todo acá, así que hacen falta también en el load() de esta pantalla.
-  const [racha, setRacha] = useState(0);
-  const [miembroDesde, setMiembroDesde] = useState<string | null>(null);
-  const [clasesDelMes, setClasesDelMes] = useState(0);
   // "Hoy Entrené" -- cuántos autoreportes ya usó hoy (estado inicial de
   // solo lectura, ver fetchEntrenamientosHoy). El tope real (disciplinas
   // activas) se deriva de `balances` más abajo, no hace falta guardarlo
@@ -146,24 +118,17 @@ export default function HomeScreen({ navigation }: any) {
       // correr antes de que la reparación termine de insertar.
       await syncMyMembership();
 
-      const [balancesResult, bookingsResult, packsResult, xpResult, clasesResult, desdeResult, fechasAsistencia, entrenamientosHoyResult] =
-        await Promise.all([
-          fetchUserBalances(user.id),
-          fetchUpcomingBookings(user.id),
-          fetchPacks({ activeOnly: true }),
-          fetchTotalXp(user.id),
-          fetchClasesDelMes(user.id),
-          fetchMiembroDesde(user.id),
-          fetchFechasAsistencia(user.id),
-          fetchEntrenamientosHoy(user.id),
-        ]);
+      const [balancesResult, bookingsResult, packsResult, xpResult, entrenamientosHoyResult] = await Promise.all([
+        fetchUserBalances(user.id),
+        fetchUpcomingBookings(user.id),
+        fetchPacks({ activeOnly: true }),
+        fetchTotalXp(user.id),
+        fetchEntrenamientosHoy(user.id),
+      ]);
       setBalances(balancesResult);
       setUpcomingBookings(bookingsResult);
       setPacks(packsResult);
       setTotalXp(xpResult);
-      setClasesDelMes(clasesResult);
-      setMiembroDesde(desdeResult);
-      setRacha(calcularRachaDias(fechasAsistencia));
       setEntrenamientosHoy(entrenamientosHoyResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cargar tu información.');
@@ -293,29 +258,32 @@ export default function HomeScreen({ navigation }: any) {
 
   // Cada balance se resuelve a su propio estado (una disciplina puede estar
   // vencida mientras otra sigue activa) -- "hayVencido" decide si mostramos
-  // UNA sola vez el bloque de Renovar/Contactar al pie de la Hero Card, en
-  // vez de repetirlo por cada fila.
+  // UNA sola vez el bloque de Renovar/Contactar, en vez de repetirlo por
+  // cada tarjeta.
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
-    const status = isMembership
-      ? getExpiryStatus(b.expiresAt)
-      : getCreditsStatus(b.remainingCredits);
+    const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });
   const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
-  // Filas listas para la Hero Card -- agrupadas por FECHA (mismo criterio
-  // y mismos textos que VencimientoCell en el Admin, ver creditsApi.ts):
-  // 2+ disciplinas que vencen el mismo día se fusionan en una sola fila en
-  // vez de repetir la fecha. El badge de una fila fusionada es el peor
-  // estado entre las disciplinas que la componen.
-  const filasVencimiento = agruparBalancesPorVencimiento(balancesConEstado);
   const resumenXp = calcularResumenXp(totalXp);
   // Tope diario de "Hoy Entrené" -- mismo criterio "no vencido" que ya usa
   // el resto de esta pantalla (activo O por_vencer cuentan, solo vencido
-  // queda afuera), calculado del mismo `balancesConEstado` que ya arma el
-  // Hero Card -- sin fetch aparte. El RPC recalcula esto mismo del lado
-  // servidor antes de otorgar nada, este número es solo para la UI.
+  // queda afuera), calculado del mismo `balancesConEstado` -- sin fetch
+  // aparte. El RPC recalcula esto mismo del lado servidor antes de otorgar
+  // nada, este número es solo para la UI.
   const disciplinasActivas = balancesConEstado.filter((b) => b.status !== 'vencido').length;
+
+  // Fecha ÚNICA del plan (user_credits -- ver resolverFechaPlan): igual para
+  // socios con y sin Aparatos. Con más de una fecha distinta (datos viejos)
+  // se muestra la más lejana y se deja el aviso en consola.
+  const fechaPlan = resolverFechaPlan(balances);
+  const cantidadFechasPlan = fechaPlan?.cantidadFechas ?? 0;
+  useEffect(() => {
+    if (cantidadFechasPlan > 1) {
+      console.warn(`[GreenFit] El socio tiene ${cantidadFechasPlan} fechas de vencimiento activas distintas (se muestra la más lejana).`);
+    }
+  }, [cantidadFechasPlan]);
 
   // Balance en tiempo real: el RPC ya otorgó los 100 XP server-side, esto
   // solo refleja el número en pantalla al instante sin esperar ningún
@@ -329,18 +297,38 @@ export default function HomeScreen({ navigation }: any) {
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ padding: 20 }}
+      contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
     >
+      {/* Header: avatar (toca para cambiar la foto) + saludo + credencial + campanita */}
       <View style={styles.headerRow}>
+        <TouchableOpacity
+          onPress={handleAvatarPress}
+          disabled={isUploadingAvatar}
+          accessibilityLabel="Cambiar foto de perfil"
+          style={styles.avatarTouchable}
+        >
+          <Avatar uri={user?.avatarUrl} name={user?.name ?? ''} size={44} />
+          {isUploadingAvatar && (
+            <View style={styles.avatarLoading}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          )}
+        </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.greeting}>Hola, {user?.name} 👋</Text>
+          <Text style={styles.greeting} numberOfLines={1}>
+            Hola, {user?.name} 👋
+          </Text>
         </View>
         <TouchableOpacity
-          style={styles.bellButton}
-          onPress={() => navigation.navigate('Notifications')}
+          style={styles.iconButton}
+          onPress={() => navigation.navigate('Credential')}
+          aria-label="Ver mi credencial"
         >
-          <Ionicons name="notifications-outline" size={22} color={colors.textPrimary} />
+          <Ionicons name="qr-code" size={19} color={colors.textPrimary} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Notifications')}>
+          <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
           {unreadCount > 0 && (
             <View style={styles.bellBadge}>
               <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
@@ -351,133 +339,63 @@ export default function HomeScreen({ navigation }: any) {
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      {/* Tarjeta de perfil gamificada -- misma que ya vivía en Mi Perfil
-          (avatar, nivel, XP, mascota, racha/miembro desde/clases), ahora
-          también arriba de todo en Inicio. Mi Perfil se deja intacto (sigue
-          teniendo la suya): esto es una segunda vidriera del mismo dato
-          real, no un reemplazo. */}
-      {!!user && (
-        <View style={styles.athleteCardWrap}>
-          <AthleteProfileCard
-            name={user.name}
-            avatarUrl={user.avatarUrl}
-            nivel={resumenXp.nivel}
-            xpEnNivel={resumenXp.xpEnNivel}
-            racha={racha}
-            miembroDesde={miembroDesde}
-            clasesDelMes={clasesDelMes}
-            isUploadingAvatar={isUploadingAvatar}
-            onAvatarPress={handleAvatarPress}
-            onXpInfoPress={() => setXpInfoVisible(true)}
-          />
+      {/* Carrusel de créditos: una tarjeta por disciplina activa */}
+      {isLoading && balances.length === 0 ? (
+        <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
+      ) : balances.length === 0 ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
         </View>
+      ) : (
+        <CreditosCarousel balances={balances} />
       )}
 
-      {/* Hero Card: credencial + estado del pase, todo en un solo lugar en
-          vez de una tarjeta por disciplina repitiendo el mismo borde/padding. */}
-      <View style={styles.heroCard}>
-        <View style={styles.heroTopRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroBrand}>
-              GREEN<Text style={{ color: colors.primary }}>FIT</Text>
-            </Text>
-            <Text style={styles.heroName}>{user?.name}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.heroQrButton}
-            onPress={() => navigation.navigate('Credential')}
-            aria-label="Ver mi credencial"
-          >
-            <Ionicons name="qr-code" size={20} color={colors.background} />
+      {/* Vencimiento: UNA sola fecha (user_credits), badge de membershipStatus.ts */}
+      {fechaPlan && <VencimientoCard fechaISO={fechaPlan.fechaISO} status={getExpiryStatus(fechaPlan.fechaISO)} />}
+
+      {hayVencido ? (
+        <View style={styles.heroVencidoActions}>
+          <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
+            <Text style={styles.renewButtonText}>Renovar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+            <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
+            <Text style={styles.contactButtonText}>Contactar</Text>
           </TouchableOpacity>
         </View>
+      ) : (
+        // Único punto de entrada real para comprar un pack cuando nada
+        // está vencido -- antes esto era invisible: "Renovar" (arriba)
+        // abre este mismo modal pero solo se renderiza con algo vencido,
+        // así que un socio nuevo (0 packs) o uno que ya tiene un pack
+        // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
+        // toda la PWA para llegar a "Elegí tu pack".
+        !isLoading && (
+          <TouchableOpacity style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
+            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+            <Text style={styles.addPackButtonText}>{balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}</Text>
+          </TouchableOpacity>
+        )
+      )}
 
-        <View style={styles.heroDivider} />
-
-        {isLoading && balances.length === 0 ? (
-          <ActivityIndicator color={colors.primary} style={{ marginVertical: 8 }} />
-        ) : balances.length === 0 ? (
-          <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
-        ) : (
-          filasVencimiento.map((fila) => (
-            <View key={fila.key} style={styles.heroPlanRow}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.heroPlanName}>{fila.nombre}</Text>
-                <Text style={styles.heroPlanDetail}>{fila.detalle}</Text>
-                {fila.subDetalles.map((sub) => (
-                  <Text key={sub} style={styles.heroPlanDetailDesglose}>
-                    {sub}
-                  </Text>
-                ))}
-              </View>
-              <StatusBadge status={fila.status} />
-            </View>
-          ))
-        )}
-
-        {hayVencido ? (
-          <View style={styles.heroVencidoActions}>
-            <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
-              <Text style={styles.renewButtonText}>Renovar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
-              <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
-              <Text style={styles.contactButtonText}>Contactar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          // Único punto de entrada real para comprar un pack cuando nada
-          // está vencido -- antes esto era invisible: "Renovar" (arriba)
-          // abre este mismo modal pero solo se renderiza con algo vencido,
-          // así que un socio nuevo (0 packs) o uno que ya tiene un pack
-          // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
-          // toda la PWA para llegar a "Elegí tu pack".
-          !isLoading && (
-            <TouchableOpacity style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
-              <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
-              <Text style={styles.addPackButtonText}>
-                {balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}
-              </Text>
-            </TouchableOpacity>
-          )
-        )}
-      </View>
-
-      {/* Widget "Progreso Diario" -- rediseño minimalista (menos carga
-          cognitiva): únicamente el anillo centrado, con el Nivel y los
-          puntos de XP ya resueltos DENTRO del propio dibujo (XpProgressRing
-          ya los muestra centrados, ver ese componente). Sin texto
-          explicativo ("Te faltan X XP...") ni el estado de check-in de
-          abajo -- el ícono de información sigue siendo la puerta a esa
-          explicación para quien la quiera, sin imponérsela a todos. */}
+      {/* Anillo de nivel: solo el número de nivel; el arco es el % real de XP dentro del nivel */}
       {user && (
-        <View style={styles.progressCard}>
-          <View style={styles.progressHeaderRow}>
-            <Text style={styles.progressTitle}>Progreso Diario</Text>
-            <TouchableOpacity
-              onPress={() => setXpInfoVisible(true)}
-              hitSlop={8}
-              accessibilityLabel="¿Cómo ganar XP?"
-            >
-              <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-          <View style={styles.progressRingRow}>
-            <XpProgressRing
-              xpEnNivel={resumenXp.xpEnNivel}
-              xpParaNivel={XP_POR_NIVEL}
-              nivel={resumenXp.nivel}
-              size={96}
-              strokeWidth={9}
-            />
-          </View>
-          {!isLoading && (
-            <HoyEntreneButton
-              disciplinasActivas={disciplinasActivas}
-              entrenamientosHoy={entrenamientosHoy}
-              onRegistrado={handleHoyEntrenoRegistrado}
-            />
-          )}
+        <View style={styles.ringSection}>
+          <XpProgressRing
+            xpEnNivel={resumenXp.xpEnNivel}
+            xpParaNivel={XP_POR_NIVEL}
+            nivel={resumenXp.nivel}
+            size={208}
+            strokeWidth={7}
+          />
+          <TouchableOpacity
+            style={styles.ringInfo}
+            onPress={() => setXpInfoVisible(true)}
+            hitSlop={8}
+            accessibilityLabel="¿Cómo ganar XP?"
+          >
+            <Ionicons name="information-circle-outline" size={22} color={colors.textSecondary} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -515,6 +433,14 @@ export default function HomeScreen({ navigation }: any) {
             </View>
           ))}
         </View>
+      )}
+
+      {user && !isLoading && (
+        <HoyEntreneButton
+          disciplinasActivas={disciplinasActivas}
+          entrenamientosHoy={entrenamientosHoy}
+          onRegistrado={handleHoyEntrenoRegistrado}
+        />
       )}
 
       <CancelBookingModal
@@ -582,9 +508,18 @@ export default function HomeScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-  greeting: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
-  bellButton: {
+  content: { padding: 20, paddingBottom: 28 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 },
+  avatarTouchable: { position: 'relative' },
+  avatarLoading: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  greeting: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
+  iconButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -612,51 +547,21 @@ const styles = StyleSheet.create({
   error: { color: colors.danger, marginBottom: 12 },
   text: { color: colors.textSecondary, lineHeight: 20 },
 
-  athleteCardWrap: { marginBottom: 16 },
-
-  // Hero Card
-  heroCard: {
+  emptyCard: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: 16,
+    padding: 18,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  heroTopRow: { flexDirection: 'row', alignItems: 'center' },
-  heroBrand: { fontSize: 15, fontWeight: '800', color: colors.textPrimary, letterSpacing: 0.5 },
-  heroName: { fontSize: 18, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },
-  heroQrButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroDivider: { height: 1, backgroundColor: colors.surfaceAlt, marginVertical: 16 },
   heroEmptyText: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
-  heroPlanRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.surfaceAlt,
-  },
-  heroPlanName: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  heroPlanDetail: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
-  // Línea de desglose por lote (2+ tandas activas de la misma disciplina)
-  // -- más chica y más tenue que heroPlanDetail, es información secundaria.
-  heroPlanDetailDesglose: { color: colors.textSecondary, fontSize: 11, marginTop: 1, opacity: 0.75 },
-  heroVencidoActions: { flexDirection: 'row', gap: 8, marginTop: 16 },
 
-  statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  statusBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
-
+  heroVencidoActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
   renewButton: {
     flex: 1,
     backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingVertical: 12,
     alignItems: 'center',
   },
   renewButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
@@ -668,9 +573,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    marginTop: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.primary,
   },
@@ -680,12 +585,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     backgroundColor: 'rgba(37, 211, 102, 0.15)',
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   contactButtonText: { color: colors.textPrimary, fontWeight: '700', fontSize: 13 },
+
+  ringSection: { alignItems: 'center', justifyContent: 'center', marginTop: 22, marginBottom: 6 },
+  ringInfo: { position: 'absolute', top: 4, right: 12 },
 
   banner: {
     flexDirection: 'row',
@@ -701,14 +609,16 @@ const styles = StyleSheet.create({
   // CTA de acción directa cuando no hay ninguna reserva próxima -- grande y
   // claro, reemplaza al viejo bloque de texto gris "Todavía no tenés reservas".
   reserveButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.surface,
     borderRadius: 16,
     paddingVertical: 18,
     marginTop: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
-  reserveButtonText: { color: colors.onPrimary, fontSize: 16, fontWeight: '800' },
+  reserveButtonText: { color: colors.primary, fontSize: 16, fontWeight: '800' },
   bannerIcon: {
     width: 40,
     height: 40,
@@ -732,21 +642,6 @@ const styles = StyleSheet.create({
   upcomingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   upcomingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textSecondary },
   upcomingText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
-
-  progressCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
-  progressHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  progressTitle: { color: colors.textPrimary, fontSize: 14.5, fontWeight: '700' },
-  // Anillo centrado y solo -- sin texto explicativo al lado (rediseño
-  // minimalista: el Nivel y los puntos de XP ya se leen dentro del propio
-  // anillo, ver XpProgressRing).
-  progressRingRow: { alignItems: 'center', justifyContent: 'center', marginTop: 14, marginBottom: 2 },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalSheet: {

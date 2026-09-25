@@ -1,6 +1,6 @@
 import React from 'react';
-import { Alert, Platform } from 'react-native';
-import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { Alert, Platform, RefreshControl } from 'react-native';
+import { render, fireEvent, waitFor, act, screen, within } from '@testing-library/react-native';
 
 // HomeScreen usa useFocusEffect (no useEffect simple) para el refresh al
 // volver de la WebView de pago -- sin un NavigationContainer real alrededor,
@@ -67,19 +67,15 @@ jest.mock('../../lib/supabase', () => ({
   },
 }));
 
-// fetchTotalXp/fetchAsistenciaHoyRegistrada/fetchClasesDelMes/
-// fetchMiembroDesde/fetchFechasAsistencia se mockean (tocan red -- makeChain
-// de abajo no implementa .single()/.maybeSingle(), así que la versión real
-// de fetchMiembroDesde rompería contra ese mock); calcularResumenXp/
-// calcularRachaDias/XP_POR_NIVEL quedan REALES (son lógica pura, ya
-// cubierta aparte en xpApi.test.ts) para no reinventar la fórmula acá.
+// fetchTotalXp/fetchAsistenciaHoyRegistrada/fetchEntrenamientosHoy se mockean
+// (tocan red); calcularResumenXp/XP_POR_NIVEL quedan REALES (son lógica pura,
+// ya cubierta aparte en xpApi.test.ts) para no reinventar la fórmula acá.
+// Inicio ya NO pide racha / miembro desde / clases del mes (viven en Mi
+// Perfil) -- ver el test "no hace las queries de la tarjeta de perfil".
 jest.mock('../../lib/xpApi', () => ({
   ...jest.requireActual('../../lib/xpApi'),
   fetchTotalXp: jest.fn(),
   fetchAsistenciaHoyRegistrada: jest.fn(),
-  fetchClasesDelMes: jest.fn(),
-  fetchMiembroDesde: jest.fn(),
-  fetchFechasAsistencia: jest.fn(),
   fetchEntrenamientosHoy: jest.fn(),
   registrarHoyEntrene: jest.fn(),
 }));
@@ -95,9 +91,6 @@ import { createPaymentPreference } from '../../lib/paymentsApi';
 import {
   fetchTotalXp,
   fetchAsistenciaHoyRegistrada,
-  fetchClasesDelMes,
-  fetchMiembroDesde,
-  fetchFechasAsistencia,
   fetchEntrenamientosHoy,
   registrarHoyEntrene,
 } from '../../lib/xpApi';
@@ -118,15 +111,12 @@ function makeChain(result: any) {
   return chain;
 }
 
-describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pase")', () => {
+describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de nivel)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedFrom.mockImplementation(() => makeChain({ data: [], error: null })); // sin reservas próximas
     (fetchTotalXp as jest.Mock).mockResolvedValue(650); // nivel 2, 150/500 XP, faltan 350
     (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(false);
-    (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
-    (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
-    (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
     (fetchEntrenamientosHoy as jest.Mock).mockResolvedValue(0);
     // Default 120 -- clearAllMocks() NO borra un mockReturnValue puesto por
     // un test anterior (solo mockReset lo haría), así que se reafirma acá
@@ -145,7 +135,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
 
   it('NO renderiza la tarjeta "Mi Pase / Comprar" (removida -- esa gestión ahora vive en Perfil > Pagos y Facturas)', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
     expect(queryByText('Mi Pase')).toBeNull();
     expect(queryByText('Comprar')).toBeNull();
   });
@@ -159,7 +149,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   describe('acceso para comprar un pack (Hero Card) -- antes solo existía "Renovar", oculto salvo con algo vencido', () => {
     it('sin ningún pack activo, muestra "Elegir mi pack" (no "Renovar") y abre "Elegí tu pack" al tocarlo', async () => {
       const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-      await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
 
       expect(queryByText('Renovar')).toBeNull();
       const boton = getByText('Elegir mi pack');
@@ -220,16 +210,43 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
     });
   });
 
-  // Rediseño minimalista (menos carga cognitiva): el widget circular es
-  // AHORA lo único que queda del bloque de Progreso Diario -- Nivel y XP de
-  // progreso siguen siendo reales, pero sin el texto explicativo "Te faltan
-  // X XP..." de al lado (removido a propósito) ni el estado de check-in de
-  // abajo (AsistenciaHoyStatus, ver el test más abajo).
-  it('el widget circular muestra el nivel y el XP de progreso reales, sin el texto explicativo de al lado', async () => {
+  // Anillo de nivel (rediseño): el centro muestra SOLO el número de nivel --
+  // el "150/500" ya no se escribe como texto (vive en Mi Perfil) -- pero el
+  // ARCO sigue siendo el progreso REAL dentro del nivel (xpEnNivel / 500).
+  it('el anillo muestra el número de nivel real, sin texto de XP ("150/500") ni el explicativo "Te faltan"', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('N2')).toBeTruthy());
-    expect(getByText('150/500')).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+    expect(screen.getByTestId('nivel-numero').props.children).toBe(2);
+    expect(getByText('NIVEL')).toBeTruthy();
+    expect(queryByText('150/500')).toBeNull();
+    expect(queryByText(/[/]500/)).toBeNull();
     expect(queryByText(/Te faltan/)).toBeNull();
+  });
+
+  describe('el arco del anillo es el % REAL de XP dentro del nivel (no un valor fijo)', () => {
+    // Misma geometría que XpProgressRing (size 208, strokeWidth 7 en Home).
+    const RADIO = (208 - 7 * 4) / 2;
+    const CIRC = 2 * Math.PI * RADIO;
+    const dashoffset = () => Number(screen.getByTestId('nivel-ring-arco').props.strokeDashoffset);
+
+    it.each([
+      [0, 1, 0],
+      [650, 2, 150 / 500],
+      [1150, 3, 150 / 500],
+      [1249, 3, 249 / 500],
+      [500, 2, 0],
+    ])('con %i XP: nivel %i y arco al %d del recorrido', async (xp, nivelEsperado, progreso) => {
+      (fetchTotalXp as jest.Mock).mockResolvedValue(xp);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText(`Nivel ${nivelEsperado}`)).toBeTruthy());
+      expect(dashoffset()).toBeCloseTo(CIRC * (1 - progreso), 3);
+    });
+
+    it('el pie de accesibilidad expone el progreso sin escribirlo como texto', async () => {
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(screen.getByTestId('nivel-ring').props.accessibilityValue).toEqual({ min: 0, max: 500, now: 150 });
+    });
   });
 
   // AsistenciaHoyStatus ("Esperando check-in...") se sacó de Inicio en el
@@ -237,7 +254,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   // AsistenciaHoyStatus.test.tsx, esto solo confirma que ya NO vive acá.
   it('ya NO muestra el estado de check-in de hoy ("Esperando check-in...") -- se sacó de Inicio en el rediseño', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
     expect(queryByText('Esperando check-in en el gimnasio...')).toBeNull();
     expect(queryByText(/Seba registró tu asistencia/)).toBeNull();
   });
@@ -381,18 +398,17 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   // Inicio queda reservado a lo operativo del día a día.
   it('ya NO muestra la tarjeta de reseña de Google -- se mudó a Mi Perfil', async () => {
     const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
     expect(queryByText('¿Te gusta entrenar en GreenFit?')).toBeNull();
   });
 
   it('el ícono "¿Cómo ganar XP?" abre el modal con la única regla vigente (asistencia acreditada por el Admin)', async () => {
-    const { getByText, getAllByLabelText, queryByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    const { getByText, getByLabelText, queryByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
 
-    // Hay 2 en pantalla ahora (la tarjeta de perfil gamificada de arriba +
-    // el widget de Progreso Diario) -- las dos abren el mismo modal
-    // (mismo estado xpInfoVisible), así que alcanza con tocar cualquiera.
-    fireEvent.press(getAllByLabelText('¿Cómo ganar XP?')[0]);
+    // Un solo ícono ⓘ (junto al anillo) -- la tarjeta de perfil gamificada
+    // ya no está en Inicio.
+    fireEvent.press(getByLabelText('¿Cómo ganar XP?'));
 
     await waitFor(() => expect(getByText('¿Cómo ganar XP?')).toBeTruthy());
     expect(getByText('Asistencia diaria')).toBeTruthy();
@@ -414,7 +430,7 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
   // sin que el socio tenga que navegar a ningún lado.
   it('se suscribe en vivo a cambios de user_credits del propio socio y refresca el balance cuando llega un evento', async () => {
     const { getByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
 
     expect(supabase.channel).toHaveBeenCalledWith('user-credits-user-1');
     expect(mockChannelOn).toHaveBeenCalledWith(
@@ -435,103 +451,395 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
 
   it('al desmontar la pantalla, se da de baja el canal de Realtime (no deja una suscripción huérfana)', async () => {
     const { getByText, unmount } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
 
     unmount();
     expect(supabase.removeChannel).toHaveBeenCalled();
   });
 
-  // TAREA 2: reincorporación del autoreporte "Hoy Entrené" con tope diario
-  // real (disciplinas activas), conectado de punta a punta -- RPC real,
-  // balance de XP en pantalla actualizado al instante, estado del botón
-  // persistido.
-  // Créditos por lotes (ver supabase_migration_lotes_creditos_fase1/2.sql):
-  // la Hero Card de "Mi Plan" ya no puede mostrar una sola fecha de
-  // vencimiento por disciplina de créditos -- puede haber 2+ lotes activos
-  // con fechas distintas. formatCreditosDisponibles() corre REAL acá (solo
-  // fetchUserBalances/fetchPacks están mockeados, ver arriba), así que
-  // estos tests ejercitan el texto tal cual se ve en pantalla.
-  describe('Hero Card "Mi Plan" -- créditos por lotes', () => {
-    it('1 solo lote activo -- mismo formato compacto de siempre, con la fecha de vencimiento', async () => {
+  // ---------------------------------------------------------------------
+  // Carrusel de créditos + tarjeta de Vencimiento (rediseño). Regla de estos
+  // tests: NINGÚN dato sale del mockup -- se usan disciplinas, números y
+  // fechas DISTINTOS a los de ejemplo (Yoga/Pilates/..., no Crossfit 15) para
+  // que un valor escrito a mano en el componente no pase desapercibido.
+  // ---------------------------------------------------------------------
+  const bal = (
+    id: string,
+    name: string,
+    kind: 'credits' | 'membership',
+    remainingCredits: number | null,
+    expiresAt: string | null,
+    lotes?: { id: string; remainingCredits: number; expiresAt: string }[]
+  ) => ({
+    id: `bal-${id}`,
+    userId: 'user-1',
+    remainingCredits,
+    expiresAt,
+    createdAt: '2026-01-01',
+    discipline: { id: `disc-${id}`, name, kind },
+    pack: null,
+    lotes,
+  });
+  const conLote = (id: string, name: string, cantidad: number, expiresAt: string) =>
+    bal(id, name, 'credits', cantidad, expiresAt, [{ id: `lote-${id}`, remainingCredits: cantidad, expiresAt }]);
+
+  describe('carrusel de créditos -- una tarjeta por disciplina activa, todo desde balances', () => {
+    it('5 disciplinas (nombres y cantidades que NO son los del mockup): 5 tarjetas con su nombre y su número reales', async () => {
       (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
-        {
-          id: 'bal-1',
-          userId: 'user-1',
-          remainingCredits: 4,
-          expiresAt: '2026-10-05T12:00:00.000Z',
-          createdAt: '2026-01-01',
-          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
-          pack: null,
-          lotes: [{ id: 'lote-1', remainingCredits: 4, expiresAt: '2026-10-05T12:00:00.000Z' }],
-        },
+        conLote('yoga', 'Yoga', 23, '2026-11-08T12:00:00.000Z'),
+        conLote('pilates', 'Pilates', 6, '2026-11-08T12:00:00.000Z'),
+        conLote('spin', 'Spinning', 11, '2026-11-08T12:00:00.000Z'),
+        conLote('nat', 'Natación', 9, '2026-11-08T12:00:00.000Z'),
+        bal('apar', 'Aparatos', 'membership', null, '2026-11-08T12:00:00.000Z'),
       ]);
 
-      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-yoga')).toBeTruthy());
 
-      await waitFor(() => expect(getByText('4 créditos disponibles · vencen el 05/10/2026')).toBeTruthy());
-      // Con un solo lote no hay nada que desglosar -- no debería aparecer
-      // ninguna línea extra de detalle.
-      expect(queryByText(/y \d+ más/)).toBeNull();
+      for (const [id, nombre, numero] of [
+        ['yoga', 'Yoga', '23'],
+        ['pilates', 'Pilates', '6'],
+        ['spin', 'Spinning', '11'],
+        ['nat', 'Natación', '9'],
+      ]) {
+        const tarjeta = within(screen.getByTestId(`credito-card-disc-${id}`));
+        expect(tarjeta.getByText(nombre)).toBeTruthy();
+        expect(tarjeta.getByText(numero)).toBeTruthy();
+        expect(tarjeta.getByText('créditos')).toBeTruthy();
+      }
+      // 5 tarjetas en total -- ni más ni menos que balances.
+      expect(screen.getByTestId('creditos-carrusel')).toBeTruthy();
+      expect(screen.getAllByTestId(/^credito-card-/)).toHaveLength(5);
     });
 
-    it('2 lotes activos de la misma disciplina, fechas distintas -- total grande + desglose por lote en orden FIFO', async () => {
+    it('con 2 disciplinas se ven 2 tarjetas (no hay una cantidad fija)', async () => {
       (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
-        {
-          id: 'bal-1',
-          userId: 'user-1',
-          remainingCredits: 20,
-          expiresAt: '2026-09-20T12:00:00.000Z',
-          createdAt: '2026-01-01',
-          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
-          pack: null,
-          lotes: [
-            { id: 'lote-viejo', remainingCredits: 8, expiresAt: '2026-09-20T12:00:00.000Z' },
-            { id: 'lote-nuevo', remainingCredits: 12, expiresAt: '2026-10-15T12:00:00.000Z' },
-          ],
-        },
+        conLote('a', 'Escalada', 3, '2026-11-08T12:00:00.000Z'),
+        conLote('b', 'Yoga', 14, '2026-11-08T12:00:00.000Z'),
       ]);
-
-      const { getByText } = render(<HomeScreen navigation={navigation} />);
-
-      // El total grande -- SIN fecha (con 2 lotes, una sola fecha sería ambigua).
-      await waitFor(() => expect(getByText('20 créditos disponibles')).toBeTruthy());
-      // El desglose -- el que vence antes, primero.
-      expect(getByText('8 vencen el 20/09/2026 · 12 vencen el 15/10/2026')).toBeTruthy();
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByText('Escalada')).toBeTruthy());
+      expect(screen.getAllByTestId(/^credito-card-/)).toHaveLength(2);
     });
 
-    // Rediseño (agrupar Vencimiento por FECHA, mismo criterio que
-    // VencimientoCell del Admin -- ver creditsApi.ts): el texto pasa de
-    // formatLongDate ("1 de Noviembre, 2026") a formatShortDate
-    // (dd/mm/yyyy), para que el socio vea el mismo formato que Seba.
-    // expiresAt al mediodía UTC (no medianoche) -- mismo criterio que
-    // sincronizarVencimientoPwa en el Admin (nunca escribe medianoche UTC
-    // real): con medianoche UTC, formatShortDate (a diferencia del viejo
-    // formatLongDate, que reconstruía medianoche LOCAL a propósito) puede
-    // mostrar el día anterior en husos horarios detrás de UTC.
-    it('Aparatos (membership) sigue mostrándose exactamente igual -- una sola fecha, sin desglose', async () => {
+    it('Aparatos (membership): "∞" y "pase libre", SIN ningún número', async () => {
       (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
-        {
-          id: 'bal-1',
-          userId: 'user-1',
-          remainingCredits: null,
-          expiresAt: '2026-11-01T12:00:00.000Z',
-          createdAt: '2026-01-01',
-          discipline: { id: 'disc-aparatos', name: 'Aparatos', kind: 'membership' },
-          pack: null,
-        },
+        bal('apar', 'Aparatos', 'membership', null, '2026-11-01T12:00:00.000Z'),
       ]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-apar')).toBeTruthy());
 
-      const { getByText } = render(<HomeScreen navigation={navigation} />);
+      const tarjeta = within(screen.getByTestId('credito-card-disc-apar'));
+      expect(tarjeta.getByText('Aparatos')).toBeTruthy();
+      expect(tarjeta.getByText('∞')).toBeTruthy();
+      expect(tarjeta.getByText('pase libre')).toBeTruthy();
+      expect(tarjeta.queryByText('créditos')).toBeNull();
+      expect(tarjeta.queryByText(/^\d+$/)).toBeNull();
+    });
 
-      await waitFor(() => expect(getByText('Aparatos')).toBeTruthy());
-      expect(getByText('Vence el 01/11/2026')).toBeTruthy();
+    it('1 solo crédito: la etiqueta va en singular', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([conLote('x', 'Yoga', 1, '2026-11-08T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-x')).toBeTruthy());
+      const tarjeta = within(screen.getByTestId('credito-card-disc-x'));
+      expect(tarjeta.getByText('1')).toBeTruthy();
+      expect(tarjeta.getByText('crédito')).toBeTruthy();
+    });
+
+    it('sin ningún pack activo: no hay carrusel, hay el mensaje vacío + "Elegir mi pack"', async () => {
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByText('Todavía no tenés ningún pack activo.')).toBeTruthy());
+      expect(screen.queryByTestId('creditos-carrusel')).toBeNull();
+      expect(screen.queryByTestId('vencimiento-card')).toBeNull();
+    });
+  });
+
+  describe('tarjeta de Vencimiento -- UNA fecha, desde user_credits (no desde socios.fecha_vencimiento)', () => {
+    it('socio de SOLO CRÉDITOS (sin Aparatos): muestra la fecha del plan con el badge "Activo al día"', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('vencimiento-card')).toBeTruthy());
+
+      expect(within(screen.getByTestId('vencimiento-card')).getByText('19 de Diciembre, 2026')).toBeTruthy();
+      expect(within(screen.getByTestId('vencimiento-card')).getByText('Activo al día')).toBeTruthy();
+      expect(screen.getByText('Vencimiento de cuota')).toBeTruthy();
+    });
+
+    it('créditos + Aparatos con la MISMA fecha: UNA sola tarjeta de vencimiento (no una por disciplina)', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z'),
+        bal('apar', 'Aparatos', 'membership', null, '2026-12-19T12:00:00.000Z'),
+      ]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('vencimiento-card')).toBeTruthy());
+      expect(screen.getAllByTestId('vencimiento-card')).toHaveLength(1);
+      expect(screen.getByText('19 de Diciembre, 2026')).toBeTruthy();
+    });
+
+    it('a 3 días de vencer: el badge dice "Por vencer" (misma lógica de membershipStatus.ts)', async () => {
+      const enTresDias = new Date(Date.now() + 3 * 86_400_000).toISOString();
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([conLote('a', 'Yoga', 5, enTresDias)]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('vencimiento-card')).toBeTruthy());
+      expect(within(screen.getByTestId('vencimiento-card')).getByText('Por vencer')).toBeTruthy();
+      expect(within(screen.getByTestId('vencimiento-card')).queryByText('Activo al día')).toBeNull();
+    });
+
+    it('datos viejos con 2 fechas distintas: muestra la MÁS LEJANA y deja un aviso en consola', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        bal('apar', 'Aparatos', 'membership', null, '2026-10-08T12:00:00.000Z'),
+        conLote('a', 'Yoga', 12, '2026-11-08T12:00:00.000Z'),
+      ]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('vencimiento-card')).toBeTruthy());
+
+      expect(screen.getByText('8 de Noviembre, 2026')).toBeTruthy();
+      expect(screen.queryByText('8 de Octubre, 2026')).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('2 fechas de vencimiento activas distintas'));
+      warn.mockRestore();
+    });
+  });
+
+  describe('header y alcance del rediseño', () => {
+    it('saludo con el nombre real del usuario y acceso a la credencial', async () => {
+      const { getByText, getByLabelText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(getByText(/Hola, Facundo Uria/)).toBeTruthy();
+
+      fireEvent.press(getByLabelText('Ver mi credencial'));
+      expect(navigation.navigate).toHaveBeenCalledWith('Credential');
+    });
+
+    it('la campanita muestra el contador REAL de no leídas (y "9+" si pasa de 9)', async () => {
+      const { fetchUnreadNotificationCount } = require('../../lib/notificationsBadge');
+      (fetchUnreadNotificationCount as jest.Mock).mockResolvedValueOnce(4);
+      const primero = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(primero.getByText('4')).toBeTruthy());
+      primero.unmount();
+
+      (fetchUnreadNotificationCount as jest.Mock).mockResolvedValueOnce(27);
+      const segundo = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(segundo.getByText('9+')).toBeTruthy());
+    });
+
+    it('sin no leídas no aparece ningún badge numérico', async () => {
+      const { queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(queryByText('9+')).toBeNull();
+      expect(queryByText('0')).toBeNull();
+    });
+
+    it('el avatar se puede tocar para cambiar la foto (conserva el comportamiento de antes)', async () => {
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(screen.getByLabelText('Cambiar foto de perfil')).toBeTruthy();
+    });
+
+    it('NO muestra el trío Racha / Miembro desde / Clases (mes) ni la barra de XP: viven solo en Mi Perfil', async () => {
+      const { queryByText, queryByTestId } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(queryByText('Racha')).toBeNull();
+      expect(queryByText('Miembro desde')).toBeNull();
+      expect(queryByText('Clases (mes)')).toBeNull();
+      expect(queryByText(/\d+ \/ 500 XP/)).toBeNull();
+      expect(queryByText(/^NIVEL \d+$/)).toBeNull(); // el badge "NIVEL N" de la tarjeta de perfil
+      expect(queryByTestId('stat-racha')).toBeNull();
+    });
+
+    it('ya no hace las queries de la tarjeta de perfil (racha / miembro desde / clases del mes)', async () => {
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(mockedFrom).not.toHaveBeenCalledWith('profiles'); // fetchMiembroDesde
+      expect(supabase.rpc).not.toHaveBeenCalledWith('mi_dia_corte'); // fetchClasesDelMes
+      expect(mockedFrom).not.toHaveBeenCalledWith('xp_events'); // fetchFechasAsistencia (racha)
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // REACTIVIDAD -- la pantalla YA ABIERTA tiene que reflejar cambios reales
+  // de datos (lo que hace el Admin: -1 crédito, mover la fecha del plan,
+  // agregar/quitar disciplina, dejar al socio sin nada), sin reiniciar la
+  // app. Los dos caminos que refrescan son (1) el evento de Realtime sobre
+  // user_credits, que dispara load(), y (2) el pull-to-refresh -- ambos
+  // vuelven a pedir fetchUserBalances() y reemplazan el estado entero (no
+  // hay ningún caché que conserve el valor viejo). Cada test arma el estado
+  // "antes" y el "después" como dos respuestas sucesivas del backend.
+  // ---------------------------------------------------------------------
+  describe('reactividad: cambios de datos con la pantalla abierta (Realtime -> load())', () => {
+    const disparaRealtime = async () => {
+      // La suscripción se re-registra en cada render (el mock de useAuth
+      // devuelve un `user` nuevo cada vez) -- se usa la más reciente.
+      const llamadas = mockChannelOn.mock.calls;
+      const callback = llamadas[llamadas.length - 1][2] as (payload: unknown) => void;
+      await act(async () => {
+        callback({});
+      });
+    };
+
+    it('1) sacar créditos (-1 desde el Admin o reservar una clase): el número de la tarjeta baja', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')])
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 11, '2026-12-19T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(within(screen.getByTestId('credito-card-disc-a')).getByText('12')).toBeTruthy());
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(within(screen.getByTestId('credito-card-disc-a')).getByText('11')).toBeTruthy());
+      expect(within(screen.getByTestId('credito-card-disc-a')).queryByText('12')).toBeNull();
+    });
+
+    it('2) cambiar la fecha del plan ("Vencimiento del plan"): la tarjeta muestra la fecha NUEVA, no la vieja', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')])
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2027-01-15T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('vencimiento-fecha').props.children).toBe('19 de Diciembre, 2026'));
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(screen.getByTestId('vencimiento-fecha').props.children).toBe('15 de Enero, 2027'));
+      expect(screen.queryByText('19 de Diciembre, 2026')).toBeNull();
+    });
+
+    it('3) agregar una disciplina y Aparatos: aparecen tarjetas nuevas en el carrusel, sin recargar', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')])
+        .mockResolvedValueOnce([
+          conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z'),
+          conLote('b', 'Pilates', 4, '2026-12-19T12:00:00.000Z'),
+          bal('apar', 'Aparatos', 'membership', null, '2026-12-19T12:00:00.000Z'),
+        ]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getAllByTestId(/^credito-card-/)).toHaveLength(1));
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(screen.getAllByTestId(/^credito-card-/)).toHaveLength(3));
+      expect(within(screen.getByTestId('credito-card-disc-b')).getByText('Pilates')).toBeTruthy();
+      expect(within(screen.getByTestId('credito-card-disc-b')).getByText('4')).toBeTruthy();
+      expect(within(screen.getByTestId('credito-card-disc-apar')).getByText('∞')).toBeTruthy();
+      // Sigue habiendo UNA sola tarjeta de vencimiento.
+      expect(screen.getAllByTestId('vencimiento-card')).toHaveLength(1);
+    });
+
+    it('4) quitar una disciplina: su tarjeta desaparece del carrusel y las demás quedan intactas', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([
+          conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z'),
+          conLote('b', 'Pilates', 4, '2026-12-19T12:00:00.000Z'),
+        ])
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-b')).toBeTruthy());
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(screen.queryByTestId('credito-card-disc-b')).toBeNull());
+      expect(screen.getAllByTestId(/^credito-card-/)).toHaveLength(1);
+      expect(within(screen.getByTestId('credito-card-disc-a')).getByText('12')).toBeTruthy();
+    });
+
+    it('5) sin NADA activo: estado vacío con "Elegir mi pack" -- sin carrusel, sin tarjeta de vencimiento, sin tarjetas rotas', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([
+          conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z'),
+          bal('apar', 'Aparatos', 'membership', null, '2026-12-19T12:00:00.000Z'),
+        ])
+        .mockResolvedValueOnce([]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByText('Agregar otro pack')).toBeTruthy());
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(screen.getByText('Todavía no tenés ningún pack activo.')).toBeTruthy());
+      expect(screen.getByText('Elegir mi pack')).toBeTruthy();
+      expect(screen.queryByText('Agregar otro pack')).toBeNull();
+      expect(screen.queryByTestId('creditos-carrusel')).toBeNull();
+      expect(screen.queryByTestId('vencimiento-card')).toBeNull();
+      expect(screen.queryAllByTestId(/^credito-card-/)).toHaveLength(0);
+      // Sin disciplinas activas tampoco se ofrece "Hoy Entrené".
+      expect(screen.queryByText('💪 Hoy Entrené')).toBeNull();
+    });
+
+    it('el pull-to-refresh también trae los datos nuevos (mismo load() que Realtime y que volver a la pestaña)', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')])
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 7, '2026-12-19T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(within(screen.getByTestId('credito-card-disc-a')).getByText('12')).toBeTruthy());
+
+      const refresh = screen.UNSAFE_getByType(RefreshControl);
+      await act(async () => {
+        await refresh.props.onRefresh();
+      });
+
+      await waitFor(() => expect(within(screen.getByTestId('credito-card-disc-a')).getByText('7')).toBeTruthy());
+    });
+
+    it('un cambio de datos NO deja al socio con una tarjeta vieja: cada load() reemplaza el estado completo', async () => {
+      (fetchUserBalances as jest.Mock)
+        .mockResolvedValueOnce([conLote('a', 'Yoga', 12, '2026-12-19T12:00:00.000Z')])
+        .mockResolvedValueOnce([conLote('b', 'Natación', 3, '2026-12-19T12:00:00.000Z')]);
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-a')).toBeTruthy());
+
+      await disparaRealtime();
+
+      await waitFor(() => expect(screen.getByTestId('credito-card-disc-b')).toBeTruthy());
+      expect(screen.queryByTestId('credito-card-disc-a')).toBeNull();
+    });
+  });
+
+  describe('6) el anillo de nivel se mueve con el XP real', () => {
+    const CIRC = 2 * Math.PI * ((208 - 7 * 4) / 2);
+    const dashoffset = () => Number(screen.getByTestId('nivel-ring-arco').props.strokeDashoffset);
+
+    it('"Hoy Entrené" cruzando de nivel (450/500 -> 550): sube a NIVEL 3 y el arco vuelve a 10%', async () => {
+      (fetchTotalXp as jest.Mock).mockResolvedValue(950); // nivel 2, 450/500
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([conLote('a', 'Yoga', 5, '2026-12-19T12:00:00.000Z')]);
+      (registrarHoyEntrene as jest.Mock).mockResolvedValue({
+        otorgado: true,
+        xpOtorgado: 100,
+        entrenamientosHoy: 1,
+        entrenamientosMaximos: 3,
+      });
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(dashoffset()).toBeCloseTo(CIRC * (1 - 450 / 500), 3);
+
+      fireEvent.press(screen.getByText('💪 Hoy Entrené'));
+
+      await waitFor(() => expect(screen.getByLabelText('Nivel 3')).toBeTruthy());
+      expect(dashoffset()).toBeCloseTo(CIRC * (1 - 50 / 500), 3);
+    });
+
+    it('cuando el RPC no otorga nada (tope diario), el arco NO se mueve', async () => {
+      (fetchTotalXp as jest.Mock).mockResolvedValue(650);
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([conLote('a', 'Yoga', 5, '2026-12-19T12:00:00.000Z')]);
+      (registrarHoyEntrene as jest.Mock).mockResolvedValue({
+        otorgado: false,
+        xpOtorgado: 0,
+        entrenamientosHoy: 1,
+        entrenamientosMaximos: 1,
+      });
+      render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      const antes = dashoffset();
+
+      fireEvent.press(screen.getByText('💪 Hoy Entrené'));
+
+      // El texto aparece dos veces (botón agotado + mensaje de feedback).
+      await waitFor(() => expect(screen.getAllByText('Ya registraste todos tus entrenamientos de hoy').length).toBeGreaterThan(0));
+      expect(dashoffset()).toBeCloseTo(antes, 6);
     });
   });
 
   describe('botón "Hoy Entrené" (autoreporte con tope = disciplinas activas)', () => {
     it('sin ninguna disciplina activa (balances vacío, default), no muestra el botón', async () => {
       const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
-      await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
       expect(queryByText('💪 Hoy Entrené')).toBeNull();
     });
 
@@ -555,14 +863,17 @@ describe('HomeScreen (Dashboard -- widget de Progreso Diario reemplaza a "Mi Pas
       });
 
       const { getByText } = render(<HomeScreen navigation={navigation} />);
-      // 650 XP (mock del beforeEach) -> nivel 2, 150/500.
-      await waitFor(() => expect(getByText('150/500')).toBeTruthy());
+      // 650 XP (mock del beforeEach) -> nivel 2, 150/500 -> el arco queda al 30%.
+      const CIRC = 2 * Math.PI * ((208 - 7 * 4) / 2);
+      const dashoffset = () => Number(screen.getByTestId('nivel-ring-arco').props.strokeDashoffset);
+      await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
+      expect(dashoffset()).toBeCloseTo(CIRC * (1 - 150 / 500), 3);
 
       fireEvent.press(getByText('💪 Hoy Entrené'));
 
-      // 650 + 100 = 750 -> sigue nivel 2, 250/500 -- el ring se actualiza
+      // 650 + 100 = 750 -> sigue nivel 2, 250/500 -- el arco se actualiza
       // solo con la respuesta del RPC, sin volver a llamar fetchTotalXp.
-      await waitFor(() => expect(getByText('250/500')).toBeTruthy());
+      await waitFor(() => expect(dashoffset()).toBeCloseTo(CIRC * (1 - 250 / 500), 3));
       expect(getByText('Ya registraste todos tus entrenamientos de hoy')).toBeTruthy();
       // fetchTotalXp: 1 vez en el load() inicial nomás -- el +100 de acá
       // fue 100% optimista/local, no un refetch.
@@ -666,9 +977,6 @@ describe('HomeScreen -- Web/PWA: detecta la vuelta de Mercado Pago desde la URL'
     mockedFrom.mockImplementation(() => makeChain({ data: [], error: null }));
     (fetchTotalXp as jest.Mock).mockResolvedValue(650);
     (fetchAsistenciaHoyRegistrada as jest.Mock).mockResolvedValue(false);
-    (fetchClasesDelMes as jest.Mock).mockResolvedValue(0);
-    (fetchMiembroDesde as jest.Mock).mockResolvedValue(null);
-    (fetchFechasAsistencia as jest.Mock).mockResolvedValue([]);
     (fetchEntrenamientosHoy as jest.Mock).mockResolvedValue(0);
   });
 
@@ -701,7 +1009,7 @@ describe('HomeScreen -- Web/PWA: detecta la vuelta de Mercado Pago desde la URL'
     };
 
     const { getByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
     expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
   });
 
@@ -713,7 +1021,7 @@ describe('HomeScreen -- Web/PWA: detecta la vuelta de Mercado Pago desde la URL'
     };
 
     const { getByText } = render(<HomeScreen navigation={navigation} />);
-    await waitFor(() => expect(getByText('Progreso Diario')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('Nivel 2')).toBeTruthy());
     expect(navigation.navigate).not.toHaveBeenCalledWith('PaymentWebView', expect.anything());
   });
 });

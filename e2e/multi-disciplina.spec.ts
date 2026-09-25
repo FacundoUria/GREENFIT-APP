@@ -53,9 +53,13 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
       },
     });
 
-    await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
-    await expect(page.getByText('Activo', { exact: true })).toBeVisible();
+    // Rediseño de Inicio: una tarjeta por disciplina (nombre + número + "créditos")
+    // y UNA sola tarjeta de vencimiento con el badge de estado del plan.
+    const tarjeta = page.getByTestId('credito-card-disc-boxeo');
+    await expect(tarjeta.getByText('Boxeo')).toBeVisible();
+    await expect(tarjeta.getByText('6', { exact: true })).toBeVisible();
+    await expect(tarjeta.getByText('créditos')).toBeVisible();
+    await expect(page.getByText('Activo al día')).toBeVisible();
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
   });
 
@@ -78,20 +82,26 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
     await irATab(page, 'Inicio'); // ya arranca ahí, pero deja el estado explícito
 
     // Las 3 disciplinas visibles -- ninguna se "pierde" ni se omite por
-    // tener más de una fila en user_credits.
-    await expect(page.getByText('Aparatos')).toBeVisible();
-    await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText('CrossFit')).toBeVisible();
+    // tener más de una fila en user_credits: 3 tarjetas en el carrusel.
+    await expect(page.getByTestId(/^credito-card-/)).toHaveCount(3);
+    const aparatos = page.getByTestId('credito-card-disc-aparatos');
+    const boxeo = page.getByTestId('credito-card-disc-boxeo');
+    const crossfit = page.getByTestId('credito-card-disc-crossfit');
+    await expect(aparatos.getByText('Aparatos')).toBeVisible();
+    await expect(boxeo.getByText('Boxeo')).toBeVisible();
+    await expect(crossfit.getByText('CrossFit')).toBeVisible();
 
-    // Cada una con su balance EXACTO -- ninguna quedó en "0 clases" por
-    // pisarse con las otras filas de user_credits.
-    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
-    await expect(page.getByText(/3 créditos disponibles/)).toBeVisible();
+    // Cada una con su balance EXACTO -- ninguna quedó en "0" por pisarse con
+    // las otras filas de user_credits. Aparatos es pase libre: "∞", sin número.
+    await expect(boxeo.getByText('6', { exact: true })).toBeVisible();
+    await expect(crossfit.getByText('3', { exact: true })).toBeVisible();
+    await expect(aparatos.getByText('∞')).toBeVisible();
+    await expect(aparatos.getByText('pase libre')).toBeVisible();
 
-    // Las 3 activas (membresía vigente + créditos > 0 en ambas) -- CERO
-    // "Vencido" de más, y el badge "Activo" aparece 3 veces (uno por fila).
+    // UNA sola tarjeta de vencimiento (el plan tiene una sola fecha), activa.
+    await expect(page.getByTestId('vencimiento-card')).toHaveCount(1);
     await expect(page.getByText('Vencido', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('Activo', { exact: true })).toHaveCount(3);
+    await expect(page.getByText('Activo al día')).toHaveCount(1);
   });
 
   // Reproduce EXACTO el bug crítico de sincronización reportado (2026-08-07):
@@ -106,7 +116,7 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
   // PWA tiene que mostrar CrossFit ACTIVO con 6 clases -- sin importar que
   // Boxeo, la otra disciplina de créditos del mismo socio, esté en 0/VENCIDO
   // al mismo tiempo (una no debe "contaminar" el estado de la otra).
-  test('dos disciplinas de créditos del mismo socio, una ACTIVA y la otra en 0: cada una con su propio estado, sin contaminarse entre sí', async ({
+  test('dos disciplinas de créditos del mismo socio, una ACTIVA y la otra en 0: solo aparece la activa (la de 0 no es una disciplina activa)', async ({
     page,
   }) => {
     const DISCIPLINA_CROSSFIT = { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' };
@@ -118,14 +128,14 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
       },
     });
 
-    await expect(page.getByText('CrossFit')).toBeVisible();
-    await expect(page.getByText('Boxeo')).toBeVisible();
-    await expect(page.getByText(/6 créditos disponibles/)).toBeVisible();
-    await expect(page.getByText(/0 créditos disponibles/)).toBeVisible();
-    // Exactamente una Activo (CrossFit) y una Vencido (Boxeo) -- ninguna de
-    // las dos se "pisa" con el estado de la otra.
-    await expect(page.getByText('Activo', { exact: true })).toHaveCount(1);
-    await expect(page.getByText('Vencido', { exact: true })).toHaveCount(1);
+    // fetchUserBalances solo devuelve disciplinas con algo REALMENTE activo:
+    // Boxeo (0 créditos) no tiene tarjeta -- y no "contamina" a CrossFit.
+    const crossfit = page.getByTestId('credito-card-disc-crossfit');
+    await expect(crossfit.getByText('CrossFit')).toBeVisible();
+    await expect(crossfit.getByText('6', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('credito-card-disc-boxeo')).toHaveCount(0);
+    await expect(page.getByTestId(/^credito-card-/)).toHaveCount(1);
+    await expect(page.getByText('Activo al día')).toHaveCount(1);
   });
 
   test('cuenta con membresía por vencimiento (Aparatos) VIGENTE: Activo, sin "clases restantes"', async ({ page }) => {
@@ -133,21 +143,26 @@ test.describe('PWA -- Contrato de créditos/vencimiento Admin -> Socio (todos lo
       tables: { ...tablasBase(), user_credits: [membresiaRow('uc-aparatos', EN_10_DIAS)] },
     });
 
-    await expect(page.getByText('Aparatos')).toBeVisible();
-    await expect(page.getByText('Activo', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Vence el/)).toBeVisible();
+    const aparatos = page.getByTestId('credito-card-disc-aparatos');
+    await expect(aparatos.getByText('Aparatos')).toBeVisible();
+    await expect(aparatos.getByText('∞')).toBeVisible();
+    await expect(page.getByText('Activo al día')).toBeVisible();
+    // La fecha del plan sale de user_credits: tarjeta de vencimiento con fecha real.
+    await expect(page.getByTestId('vencimiento-fecha')).toBeVisible();
   });
 
-  test('cuenta con membresía por vencimiento (Aparatos) VENCIDA: Vencido en rojo, respeta fecha_vencimiento exacta', async ({
+  test('cuenta con membresía por vencimiento (Aparatos) VENCIDA: no hay nada activo -- sin tarjeta ni carrusel, con acceso a elegir un pack', async ({
     page,
   }) => {
     await loginComoSocio(page, {
       tables: { ...tablasBase(), user_credits: [membresiaRow('uc-aparatos', HACE_15_DIAS)] },
     });
 
-    await expect(page.getByText('Aparatos')).toBeVisible();
-    await expect(page.getByText('Vencido', { exact: true })).toBeVisible();
-    await expect(page.getByText(/Venció el/)).toBeVisible();
+    // fetchUserBalances no devuelve lo vencido: Inicio muestra el estado vacío.
+    await expect(page.getByText('Todavía no tenés ningún pack activo.')).toBeVisible();
+    await expect(page.getByTestId('credito-card-disc-aparatos')).toHaveCount(0);
+    await expect(page.getByTestId('vencimiento-card')).toHaveCount(0);
+    await expect(page.getByText('Elegir mi pack', { exact: true })).toBeVisible();
   });
 
   test('Mi Perfil muestra la MISMA cuenta multidisciplina que Inicio (misma fuente, sin desfase entre pantallas)', async ({
