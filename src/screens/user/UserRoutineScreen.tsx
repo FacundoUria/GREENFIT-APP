@@ -23,6 +23,10 @@ import {
   unmarkExerciseCompleted,
   getUserExerciseWeights,
   saveExerciseWeight,
+  finalizarEntrenamiento,
+  getRoutineHistory,
+  DiaHistorial,
+  SesionHistorial,
 } from '../../lib/routinesApi';
 import { formatDateOnly } from '../../lib/classesApi';
 import { Routine, RoutineExercise } from '../../types';
@@ -30,6 +34,36 @@ import VideoModal from '../../components/VideoModal';
 import RoutineCompleteModal from '../../components/RoutineCompleteModal';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
+
+const ZONA_ARGENTINA = 'America/Argentina/Mendoza';
+const MESES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+// "2026-09-26" -> "26 de septiembre" (con año solo si no es el año en curso).
+// `fecha` ya viene calculada en horario de Mendoza por el servidor, así que
+// se lee tal cual, sin pasar por Date (evita el corrimiento de día por UTC).
+export function formatFechaHistorial(fecha: string, hoy: Date = new Date()): string {
+  const [anio, mes, dia] = fecha.split('-').map(Number);
+  const anioActual = Number(new Intl.DateTimeFormat('en-CA', { timeZone: ZONA_ARGENTINA, year: 'numeric' }).format(hoy));
+  const base = `${dia} de ${MESES[mes - 1]}`;
+  return anio === anioActual ? base : `${base} de ${anio}`;
+}
+
+// Instante ISO -> "18:42", siempre en horario de Argentina.
+export function formatHoraArgentina(iso: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: ZONA_ARGENTINA,
+  }).format(new Date(iso));
+}
+
+function resumenSesion(s: SesionHistorial): string {
+  return s.completo ? 'Completo' : `${s.ejercicios.length} de ${s.totalEjercicios} ejercicios`;
+}
 
 // Chip chico con ícono para un dato de la sub-línea (Series x Reps / Carga /
 // Descanso) -- reemplaza la grilla rígida de 4 rectángulos: acá son solo
@@ -178,8 +212,119 @@ function ExerciseRow({
   );
 }
 
+// Una entrada del historial (un "Finalizar Entrenamiento"): hora + día de la
+// rutina + si quedó completo, y la lista de lo que hizo con el peso que
+// tenía en ese momento.
+function SesionCard({ sesion }: { sesion: SesionHistorial }) {
+  return (
+    <View style={styles.sesionCard}>
+      <View style={styles.sesionHeader}>
+        <View style={styles.sesionHeaderText}>
+          <Text style={styles.sesionHora}>{formatHoraArgentina(sesion.creadoEn)} hs</Text>
+          {!!sesion.tituloDia && (
+            <Text style={styles.sesionTitulo} numberOfLines={1}>
+              {sesion.tituloDia}
+            </Text>
+          )}
+        </View>
+        <View style={[styles.sesionBadge, sesion.completo ? styles.sesionBadgeCompleto : styles.sesionBadgeParcial]}>
+          <Ionicons
+            name={sesion.completo ? 'checkmark-circle' : 'ellipse-outline'}
+            size={13}
+            color={sesion.completo ? colors.primary : colors.textSecondary}
+          />
+          <Text style={[styles.sesionBadgeText, sesion.completo && styles.sesionBadgeTextCompleto]}>
+            {resumenSesion(sesion)}
+          </Text>
+        </View>
+      </View>
+
+      {sesion.ejercicios.map((e) => (
+        <View key={e.id} style={styles.historialEjercicio}>
+          <Text style={styles.historialEjercicioNombre}>{e.nombre}</Text>
+          <View style={styles.metaLine}>
+            <MetaChip icon="repeat-outline" text={`${e.series ?? '-'} × ${e.repeticiones || '-'}`} />
+            <MetaChip icon="barbell-outline" text={e.peso || 'Sin carga'} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// Pestaña "Historial": un bloque desplegable por día (más reciente arriba).
+// Si ese día finalizó más de una vez (mañana y tarde), cada entrada se ve
+// por separado con su hora. Solo lectura: no hay nada para editar acá.
+function HistorialView({ dias, cargando, error }: { dias: DiaHistorial[]; cargando: boolean; error: string | null }) {
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+
+  // El día más reciente arranca abierto -- lo más probable es que sea lo
+  // que el socio quiere ver.
+  const masReciente = dias[0]?.fecha;
+  useEffect(() => {
+    if (masReciente) setAbiertos((prev) => (prev.size === 0 ? new Set([masReciente]) : prev));
+  }, [masReciente]);
+
+  function toggle(fecha: string) {
+    setAbiertos((prev) => {
+      const next = new Set(prev);
+      if (next.has(fecha)) next.delete(fecha);
+      else next.add(fecha);
+      return next;
+    });
+  }
+
+  if (cargando && dias.length === 0) return <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />;
+  if (error) return <Text style={styles.error}>{error}</Text>;
+
+  if (dias.length === 0) {
+    return (
+      <View style={styles.emptyCard}>
+        <View style={styles.emptyIconCircle}>
+          <Ionicons name="calendar-outline" size={32} color={colors.primary} />
+        </View>
+        <Text style={styles.emptyTitle}>Todavía no hay entrenamientos</Text>
+        <Text style={styles.emptyText}>
+          Cada vez que toques "Finalizar Entrenamiento" en Rutina de hoy, lo que hiciste queda guardado acá.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      {dias.map((dia) => {
+        const abierto = abiertos.has(dia.fecha);
+        const resumen =
+          dia.sesiones.length > 1 ? `${dia.sesiones.length} entrenamientos` : resumenSesion(dia.sesiones[0]);
+        const incompleto = dia.sesiones.length === 1 && !dia.sesiones[0].completo;
+        return (
+          <View key={dia.fecha} style={styles.diaCard}>
+            <TouchableOpacity
+              style={styles.diaHeader}
+              onPress={() => toggle(dia.fecha)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: abierto }}
+            >
+              <View style={styles.sesionHeaderText}>
+                <Text style={styles.diaFecha}>{formatFechaHistorial(dia.fecha)}</Text>
+                <Text style={[styles.diaResumen, incompleto && styles.diaResumenIncompleto]}>{resumen}</Text>
+              </View>
+              <Ionicons name={abierto ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+            {abierto && dia.sesiones.map((s) => <SesionCard key={s.sesionId} sesion={s} />)}
+          </View>
+        );
+      })}
+    </>
+  );
+}
+
+type Vista = 'hoy' | 'historial';
+
 // La rutina asignada al socio logueado (la más reciente), organizada por
-// días con checklist de ejercicios completados hoy.
+// días con checklist de ejercicios completados hoy, más la pestaña
+// "Historial" con los entrenamientos finalizados.
 export default function UserRoutineScreen() {
   const { user } = useAuth();
   const [routine, setRoutine] = useState<Routine | null>(null);
@@ -194,6 +339,14 @@ export default function UserRoutineScreen() {
   // suya -- en ese caso se muestra la sugerencia del entrenador como valor
   // por defecto (ver `pesoDe` más abajo), sin que eso cuente como "guardado".
   const [pesos, setPesos] = useState<Map<string, string>>(new Map());
+  const [vista, setVista] = useState<Vista>('hoy');
+  const [finalizando, setFinalizando] = useState(false);
+  // Aviso inline debajo del botón (0 marcados / cooldown / error) -- visible
+  // también en web, donde Alert.alert es un no-op.
+  const [avisoFinal, setAvisoFinal] = useState<string | null>(null);
+  const [historial, setHistorial] = useState<DiaHistorial[]>([]);
+  const [historialCargando, setHistorialCargando] = useState(false);
+  const [historialError, setHistorialError] = useState<string | null>(null);
 
   const todayStr = useMemo(() => formatDateOnly(new Date()), []);
 
@@ -221,6 +374,25 @@ export default function UserRoutineScreen() {
     load();
   }, [load]);
 
+  const loadHistorial = useCallback(async () => {
+    if (!user) return;
+    setHistorialError(null);
+    setHistorialCargando(true);
+    try {
+      setHistorial(await getRoutineHistory(user.id));
+    } catch (err) {
+      setHistorialError(err instanceof Error ? err.message : 'No se pudo cargar tu historial.');
+    } finally {
+      setHistorialCargando(false);
+    }
+  }, [user]);
+
+  // Se relee cada vez que se abre la pestaña: así una finalización recién
+  // hecha ya aparece sin tener que tirar para refrescar.
+  useEffect(() => {
+    if (vista === 'historial') loadHistorial();
+  }, [vista, loadHistorial]);
+
   const diaActual = routine?.days[selectedDayIdx] ?? null;
   const totalDia = diaActual?.exercises.length ?? 0;
   const completadosDia = diaActual ? diaActual.exercises.filter((e) => completados.has(e.id)).length : 0;
@@ -247,6 +419,7 @@ export default function UserRoutineScreen() {
   async function handleToggle(routineExerciseId: string) {
     if (!user) return;
     const yaCompletado = completados.has(routineExerciseId);
+    setAvisoFinal(null);
 
     // Optimista: la app responde al toque de inmediato, se corrige sola si
     // la escritura falla.
@@ -306,122 +479,211 @@ export default function UserRoutineScreen() {
     }
   }
 
+  // "Finalizar Entrenamiento": guarda en el historial una foto de los
+  // ejercicios MARCADOS del día que se está viendo, con el peso que muestra
+  // la pantalla en este momento. Parcial = completo=false (lo decide el
+  // servidor comparando contra el total del día). El cooldown de 1 hora lo
+  // valida el servidor; acá solo se muestra su respuesta.
+  async function handleFinalizar() {
+    if (!user || !diaActual || finalizando) return;
+    setAvisoFinal(null);
+
+    const marcados = diaActual.exercises.filter((e) => completados.has(e.id));
+    if (marcados.length === 0) {
+      setAvisoFinal('Marcá al menos un ejercicio para finalizar el entrenamiento.');
+      return;
+    }
+
+    setFinalizando(true);
+    try {
+      const resultado = await finalizarEntrenamiento(
+        diaActual.title?.trim() || null,
+        diaActual.exercises.length,
+        marcados.map((e) => ({
+          nombre: e.exercise.name,
+          grupo: e.exercise.muscleGroup || null,
+          series: e.sets ?? null,
+          repeticiones: e.reps || null,
+          peso: pesoDe(e).trim() || null,
+        }))
+      );
+      if (resultado.estado === 'cooldown') {
+        setAvisoFinal(
+          `Ya registraste un entrenamiento hace poco. Podés volver a finalizar a partir de las ${formatHoraArgentina(
+            resultado.disponibleDesde
+          )}.`
+        );
+        return;
+      }
+      setModalFinalVisible(true);
+    } catch (err) {
+      setAvisoFinal(
+        `No se pudo guardar el entrenamiento: ${err instanceof Error ? err.message : 'intentá de nuevo.'}`
+      );
+    } finally {
+      setFinalizando(false);
+    }
+  }
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={vista === 'hoy' ? isLoading : historialCargando}
+          onRefresh={vista === 'hoy' ? load : loadHistorial}
+          tintColor={colors.primary}
+        />
+      }
     >
-      {isLoading && !routine && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
-      {error && <Text style={styles.error}>{error}</Text>}
+      <View style={styles.vistaTabs} accessibilityRole="tablist">
+        {(
+          [
+            ['hoy', 'Rutina de hoy'],
+            ['historial', 'Historial'],
+          ] as const
+        ).map(([clave, etiqueta]) => {
+          const activa = vista === clave;
+          return (
+            <TouchableOpacity
+              key={clave}
+              onPress={() => setVista(clave)}
+              style={[styles.vistaTab, activa && styles.vistaTabActiva]}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activa }}
+            >
+              <Text style={[styles.vistaTabText, activa && styles.vistaTabTextActiva]}>{etiqueta}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
-      {!isLoading && !error && !routine && (
-        <View style={styles.emptyCard}>
-          <View style={styles.emptyIconCircle}>
-            <Ionicons name="barbell-outline" size={32} color={colors.primary} />
-          </View>
-          <Text style={styles.emptyTitle}>Todavía no tenés una rutina</Text>
-          <Text style={styles.emptyText}>
-            Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
-          </Text>
-          <TouchableOpacity style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
-            <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
-            <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {routine && diaActual && (
+      {vista === 'historial' ? (
+        <HistorialView dias={historial} cargando={historialCargando} error={historialError} />
+      ) : (
         <>
-          {/* Header tipo "ficha de entrenamiento": ícono temático + título
-              personalizado, badge de Día/enfoque debajo, y a la derecha un
-              indicador de progreso en pill (sin barra de porcentaje --
-              "2 de 5 completados" se lee más rápido, sobre todo para
-              adultos mayores). */}
-          <View style={styles.heroCard}>
-            <View style={styles.heroTopRow}>
-              <View style={styles.heroTitleGroup}>
-                <View style={styles.heroIconCircle}>
-                  <Text style={styles.heroIconEmoji}>🏋️‍♂️</Text>
-                </View>
-                <View style={styles.heroTitleTextGroup}>
-                  <Text style={styles.heroTitle} numberOfLines={2}>
-                    Rutina de {(user?.name || 'vos').split(' ')[0]}
-                  </Text>
-                  <View style={styles.heroFocusPill}>
-                    <Text style={styles.heroFocusPillText} numberOfLines={1}>
-                      {diaActual.title?.trim() || 'Entrenamiento de Hoy'}
+          {isLoading && !routine && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          {!isLoading && !error && !routine && (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="barbell-outline" size={32} color={colors.primary} />
+              </View>
+              <Text style={styles.emptyTitle}>Todavía no tenés una rutina</Text>
+              <Text style={styles.emptyText}>
+                Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
+              </Text>
+              <TouchableOpacity style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+                <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
+                <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {routine && diaActual && (
+            <>
+              {/* Header tipo "ficha de entrenamiento": ícono temático + título
+                  personalizado, badge de Día/enfoque debajo, y a la derecha un
+                  indicador de progreso en pill (sin barra de porcentaje --
+                  "2 de 5 completados" se lee más rápido, sobre todo para
+                  adultos mayores). */}
+              <View style={styles.heroCard}>
+                <View style={styles.heroTopRow}>
+                  <View style={styles.heroTitleGroup}>
+                    <View style={styles.heroIconCircle}>
+                      <Text style={styles.heroIconEmoji}>🏋️‍♂️</Text>
+                    </View>
+                    <View style={styles.heroTitleTextGroup}>
+                      <Text style={styles.heroTitle} numberOfLines={2}>
+                        Rutina de {(user?.name || 'vos').split(' ')[0]}
+                      </Text>
+                      <View style={styles.heroFocusPill}>
+                        <Text style={styles.heroFocusPillText} numberOfLines={1}>
+                          {diaActual.title?.trim() || 'Entrenamiento de Hoy'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={[styles.progressPill, diaCompleto && styles.progressPillDone]}>
+                    <Ionicons
+                      name={diaCompleto ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text style={styles.progressPillText}>
+                      {totalDia > 0 ? `${completadosDia}/${totalDia} completados` : '0/0'}
                     </Text>
                   </View>
                 </View>
               </View>
 
-              <View style={[styles.progressPill, diaCompleto && styles.progressPillDone]}>
-                <Ionicons
-                  name={diaCompleto ? 'checkmark-circle' : 'ellipse-outline'}
-                  size={14}
-                  color={colors.primary}
-                />
-                <Text style={styles.progressPillText}>
-                  {totalDia > 0 ? `${completadosDia}/${totalDia} completados` : '0/0'}
-                </Text>
-              </View>
-            </View>
-          </View>
+              {/* Selector de días */}
+              {routine.days.length > 1 && (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.dayTabsRow}
+                  style={styles.dayTabsScroll}
+                >
+                  {routine.days.map((d, idx) => {
+                    const seleccionado = idx === selectedDayIdx;
+                    return (
+                      <TouchableOpacity
+                        key={d.id}
+                        onPress={() => {
+                          setSelectedDayIdx(idx);
+                          setAvisoFinal(null);
+                        }}
+                        style={[styles.dayTab, seleccionado && styles.dayTabSelected]}
+                      >
+                        <Text style={[styles.dayTabText, seleccionado && styles.dayTabTextSelected]} numberOfLines={1}>
+                          {d.title}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
 
-          {/* Selector de días */}
-          {routine.days.length > 1 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.dayTabsRow}
-              style={styles.dayTabsScroll}
-            >
-              {routine.days.map((d, idx) => {
-                const seleccionado = idx === selectedDayIdx;
-                return (
-                  <TouchableOpacity
-                    key={d.id}
-                    onPress={() => setSelectedDayIdx(idx)}
-                    style={[styles.dayTab, seleccionado && styles.dayTabSelected]}
-                  >
-                    <Text style={[styles.dayTabText, seleccionado && styles.dayTabTextSelected]} numberOfLines={1}>
-                      {d.title}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+              {diaActual.exercises.length === 0 ? (
+                <Text style={styles.empty}>Este día todavía no tiene ejercicios cargados.</Text>
+              ) : (
+                gruposDelDia.map(({ grupo, ejercicios }) => (
+                  <View key={grupo} style={styles.groupBlock}>
+                    <GroupHeader grupo={grupo} />
+                    {ejercicios.map((bloque) => (
+                      <ExerciseRow
+                        key={bloque.id}
+                        bloque={bloque}
+                        completado={completados.has(bloque.id)}
+                        peso={pesoDe(bloque)}
+                        onToggle={() => handleToggle(bloque.id)}
+                        onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.id, nuevoValor)}
+                        onVerDemo={setVideoUrl}
+                      />
+                    ))}
+                  </View>
+                ))
+              )}
+
+              <TouchableOpacity
+                style={[styles.finishButton, diaCompleto && styles.finishButtonDone, finalizando && styles.finishButtonBusy]}
+                onPress={handleFinalizar}
+                disabled={finalizando}
+                activeOpacity={0.85}
+              >
+                {finalizando ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text style={styles.finishButtonText}>🔥 Finalizar Entrenamiento</Text>
+                )}
+              </TouchableOpacity>
+              {!!avisoFinal && <Text style={styles.avisoFinal}>{avisoFinal}</Text>}
+            </>
           )}
-
-          {diaActual.exercises.length === 0 ? (
-            <Text style={styles.empty}>Este día todavía no tiene ejercicios cargados.</Text>
-          ) : (
-            gruposDelDia.map(({ grupo, ejercicios }) => (
-              <View key={grupo} style={styles.groupBlock}>
-                <GroupHeader grupo={grupo} />
-                {ejercicios.map((bloque) => (
-                  <ExerciseRow
-                    key={bloque.id}
-                    bloque={bloque}
-                    completado={completados.has(bloque.id)}
-                    peso={pesoDe(bloque)}
-                    onToggle={() => handleToggle(bloque.id)}
-                    onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.id, nuevoValor)}
-                    onVerDemo={setVideoUrl}
-                  />
-                ))}
-              </View>
-            ))
-          )}
-
-          <TouchableOpacity
-            style={[styles.finishButton, diaCompleto && styles.finishButtonDone]}
-            onPress={() => setModalFinalVisible(true)}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.finishButtonText}>🔥 Finalizar Entrenamiento</Text>
-          </TouchableOpacity>
         </>
       )}
 
@@ -641,5 +903,68 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   finishButtonDone: { backgroundColor: colors.primaryDark },
+  finishButtonBusy: { opacity: 0.7 },
   finishButtonText: { color: colors.onPrimary, fontWeight: '800', fontSize: 16 },
+  avisoFinal: {
+    color: colors.textSecondary,
+    fontSize: 13.5,
+    textAlign: 'center',
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+
+  // Tabs "Rutina de hoy" / "Historial" -- control segmentado arriba de todo.
+  vistaTabs: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+  },
+  vistaTab: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10 },
+  vistaTabActiva: { backgroundColor: colors.primary },
+  vistaTabText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700' },
+  vistaTabTextActiva: { color: colors.onPrimary },
+
+  diaCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.surfaceAlt,
+    overflow: 'hidden',
+  },
+  diaHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  diaFecha: { color: colors.textPrimary, fontSize: 17, fontWeight: '800' },
+  diaResumen: { color: colors.primary, fontSize: 12.5, fontWeight: '700', marginTop: 3 },
+  diaResumenIncompleto: { color: colors.textSecondary },
+
+  sesionCard: {
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceAlt,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  sesionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 6 },
+  sesionHeaderText: { flex: 1, minWidth: 0 },
+  sesionHora: { color: colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  sesionTitulo: { color: colors.textSecondary, fontSize: 12.5, marginTop: 2 },
+  sesionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  sesionBadgeCompleto: { borderColor: colors.primary, backgroundColor: 'rgba(0, 255, 56, 0.1)' },
+  sesionBadgeParcial: { borderColor: colors.surfaceAlt, backgroundColor: colors.background },
+  sesionBadgeText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+  sesionBadgeTextCompleto: { color: colors.primary },
+
+  historialEjercicio: { paddingVertical: 8 },
+  historialEjercicioNombre: { color: colors.textPrimary, fontSize: 15, fontWeight: '700' },
 });

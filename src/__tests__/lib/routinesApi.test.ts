@@ -1,17 +1,24 @@
 jest.mock('../../lib/supabase', () => ({
-  supabase: { from: jest.fn() },
+  supabase: { from: jest.fn(), rpc: jest.fn() },
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { supabase } from '../../lib/supabase';
-import { getUserExerciseWeights, saveExerciseWeight } from '../../lib/routinesApi';
+import {
+  getUserExerciseWeights,
+  saveExerciseWeight,
+  finalizarEntrenamiento,
+  getRoutineHistory,
+  agruparHistorial,
+} from '../../lib/routinesApi';
 
 const mockedFrom = supabase.from as jest.Mock;
+const mockedRpc = supabase.rpc as jest.Mock;
 
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'upsert'].forEach((m) => {
+  ['select', 'eq', 'upsert', 'order', 'limit'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
@@ -70,5 +77,116 @@ describe('saveExerciseWeight (upsert por socio+ejercicio)', () => {
     mockedFrom.mockImplementation(() => makeChain({ error: { code: '42P01', message: 'undefined_table' } }));
 
     await expect(saveExerciseWeight('user-1', 're-1', '65kg')).resolves.toBeUndefined();
+  });
+});
+
+describe('finalizarEntrenamiento (RPC con cooldown de 1 hora en el servidor)', () => {
+  const items = [{ nombre: 'Sentadilla', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '60kg' }];
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('manda título del día, total y los ejercicios marcados al RPC', async () => {
+    mockedRpc.mockResolvedValue({
+      data: { registrado: true, sesion_id: 's-1', disponible_desde: '2026-09-27T19:00:00Z' },
+      error: null,
+    });
+
+    const r = await finalizarEntrenamiento('Día 1 - Tren Inferior', 5, items);
+
+    expect(r).toEqual({ estado: 'registrado' });
+    expect(mockedRpc).toHaveBeenCalledWith('finalizar_entrenamiento', {
+      p_titulo_dia: 'Día 1 - Tren Inferior',
+      p_total_ejercicios: 5,
+      p_items: items,
+    });
+  });
+
+  it('si el servidor responde registrado=false, devuelve cooldown con la hora a partir de la cual puede volver', async () => {
+    mockedRpc.mockResolvedValue({
+      data: { registrado: false, sesion_id: null, disponible_desde: '2026-09-27T21:42:00Z' },
+      error: null,
+    });
+
+    const r = await finalizarEntrenamiento('Día 1', 5, items);
+    expect(r).toEqual({ estado: 'cooldown', disponibleDesde: '2026-09-27T21:42:00Z' });
+  });
+
+  it('si la función todavía no existe (migración sin correr), devuelve no_disponible sin romper', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
+
+    const r = await finalizarEntrenamiento('Día 1', 5, items);
+    expect(r).toEqual({ estado: 'no_disponible' });
+    warn.mockRestore();
+  });
+
+  it('un error real se propaga', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { message: 'No autenticado' } });
+    await expect(finalizarEntrenamiento('Día 1', 5, items)).rejects.toThrow('No autenticado');
+  });
+});
+
+function fila(overrides: Record<string, unknown>) {
+  return {
+    id: 'h',
+    sesion_id: 's-1',
+    fecha: '2026-09-26',
+    titulo_dia: 'Día 1',
+    nombre_ejercicio: 'Sentadilla',
+    grupo_muscular: 'Piernas',
+    series: 4,
+    repeticiones: '10',
+    peso: '60kg',
+    orden: 0,
+    total_ejercicios: 2,
+    completo: false,
+    created_at: '2026-09-26T12:00:00Z',
+    ...overrides,
+  } as any;
+}
+
+describe('agruparHistorial (filas planas -> días -> sesiones -> ejercicios)', () => {
+  it('agrupa por día (más reciente primero) y separa dos finalizaciones del mismo día', () => {
+    const dias = agruparHistorial([
+      fila({ id: 'a', sesion_id: 'manana', created_at: '2026-09-26T11:00:00Z' }),
+      fila({ id: 'b', sesion_id: 'tarde', created_at: '2026-09-26T21:00:00Z' }),
+      fila({ id: 'c', sesion_id: 'ayer', fecha: '2026-09-25', created_at: '2026-09-25T20:00:00Z' }),
+    ]);
+
+    expect(dias.map((d) => d.fecha)).toEqual(['2026-09-26', '2026-09-25']);
+    expect(dias[0].sesiones.map((s) => s.sesionId)).toEqual(['tarde', 'manana']);
+    expect(dias[1].sesiones).toHaveLength(1);
+  });
+
+  it('respeta el orden de la rutina dentro de cada sesión y conserva total/completo', () => {
+    const [dia] = agruparHistorial([
+      fila({ id: 'b', nombre_ejercicio: 'Estocadas', orden: 1 }),
+      fila({ id: 'a', nombre_ejercicio: 'Sentadilla', orden: 0 }),
+    ]);
+
+    const sesion = dia.sesiones[0];
+    expect(sesion.ejercicios.map((e) => e.nombre)).toEqual(['Sentadilla', 'Estocadas']);
+    expect(sesion.totalEjercicios).toBe(2);
+    expect(sesion.completo).toBe(false);
+    expect(sesion.tituloDia).toBe('Día 1');
+  });
+});
+
+describe('getRoutineHistory (solo lectura)', () => {
+  it('lee solo las filas del socio, ordenadas por created_at desc', async () => {
+    const chain = makeChain({ data: [fila({})], error: null });
+    mockedFrom.mockImplementation(() => chain);
+
+    const dias = await getRoutineHistory('user-1');
+
+    expect(mockedFrom).toHaveBeenCalledWith('routine_history');
+    expect(chain.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(chain.order).toHaveBeenCalledWith('created_at', { ascending: false });
+    expect(dias).toHaveLength(1);
+  });
+
+  it('si la tabla todavía no existe, devuelve un historial vacío', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ data: null, error: { code: '42P01', message: 'undefined_table' } }));
+    await expect(getRoutineHistory('user-1')).resolves.toEqual([]);
   });
 });

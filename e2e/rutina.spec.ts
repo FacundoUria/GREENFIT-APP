@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase } from './support/fixtures';
+import { tablasBase, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
 
 // Rutina de 1 día, 2 ejercicios en 2 grupos musculares distintos -- alcanza
@@ -144,5 +144,95 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
 
     await irATab(page, 'Mi Rutina');
     await expect(page.getByLabel('Carga (kg) usada en este ejercicio').first()).toHaveValue('25kg');
+  });
+});
+
+test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
+  test('Finalizar guarda lo marcado (con el peso actual) y aparece en la pestaña Historial', async ({ page }) => {
+    const tablas = {
+      ...tablasBase(),
+      routines: [ROUTINE],
+      routine_days: [DAY_1],
+      routine_completions: [],
+      routine_exercise_weights: [],
+      routine_history: [] as any[],
+    };
+    const llamadas: any[] = [];
+    // Emula finalizar_entrenamiento(): inserta una fila por ejercicio
+    // marcado, todas con el mismo sesion_id -- así el GET posterior de la
+    // pestaña Historial lee lo que se acaba de guardar.
+    const rpc = {
+      finalizar_entrenamiento: (request: any) => {
+        const body = request.postDataJSON();
+        llamadas.push(body);
+        const ahora = new Date().toISOString();
+        body.p_items.forEach((item: any, i: number) =>
+          tablas.routine_history.push({
+            id: `h-${i}`,
+            user_id: SOCIO_DEMO.id,
+            sesion_id: 'sesion-e2e-1',
+            fecha: HOY_STR,
+            titulo_dia: body.p_titulo_dia,
+            nombre_ejercicio: item.nombre,
+            grupo_muscular: item.grupo,
+            series: item.series,
+            repeticiones: item.repeticiones,
+            peso: item.peso,
+            orden: i,
+            total_ejercicios: body.p_total_ejercicios,
+            completo: body.p_items.length === body.p_total_ejercicios,
+            created_at: ahora,
+          })
+        );
+        return { registrado: true, sesion_id: 'sesion-e2e-1', disponible_desde: ahora };
+      },
+    };
+    await loginComoSocio(page, { tables: tablas, rpc });
+    await irATab(page, 'Mi Rutina');
+
+    // 0 marcados -> bloquea sin llamar al servidor.
+    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await expect(page.getByText('Marcá al menos un ejercicio para finalizar el entrenamiento.')).toBeVisible();
+    expect(llamadas).toHaveLength(0);
+
+    // Cambia la carga de Press de banca y marca solo ese (1 de 2).
+    const carga = page.getByLabel('Carga (kg) usada en este ejercicio').first();
+    await carga.fill('25kg');
+    await carga.blur();
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+
+    await expect(page.getByText('¡Buen entrenamiento! 💪')).toBeVisible();
+    expect(llamadas).toHaveLength(1);
+    expect(llamadas[0]).toEqual({
+      p_titulo_dia: 'Día 1',
+      p_total_ejercicios: 2,
+      p_items: [{ nombre: 'Press de banca', grupo: 'Pecho', series: 4, repeticiones: '10-12', peso: '25kg' }],
+    });
+    await page.getByText('Genial', { exact: true }).click();
+
+    await page.getByText('Historial', { exact: true }).click();
+    await expect(page.getByText('Press de banca')).toBeVisible();
+    await expect(page.getByText('25kg')).toBeVisible();
+    await expect(page.getByText('4 × 10-12')).toBeVisible();
+    // Parcial: resumen del día + badge de la sesión.
+    await expect(page.getByText('1 de 2 ejercicios').first()).toBeVisible();
+    // No se ve el ejercicio que NO se marcó.
+    await expect(page.getByText('Fondos en banco')).toHaveCount(0);
+  });
+
+  test('si ya finalizó hace menos de 1 hora, avisa y no muestra el festejo', async ({ page }) => {
+    const disponibleDesde = new Date(Date.now() + 40 * 60_000).toISOString();
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), routines: [ROUTINE], routine_days: [DAY_1], routine_completions: [] },
+      rpc: { finalizar_entrenamiento: { registrado: false, sesion_id: null, disponible_desde: disponibleDesde } },
+    });
+    await irATab(page, 'Mi Rutina');
+
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+
+    await expect(page.getByText(/Ya registraste un entrenamiento hace poco\. Podés volver a finalizar a partir de las \d{2}:\d{2}\./)).toBeVisible();
+    await expect(page.getByText('¡Buen entrenamiento! 💪')).toHaveCount(0);
   });
 });

@@ -6,9 +6,11 @@ import { Exercise, Routine, RoutineDay } from '../types';
 // `routine_exercise_weights` (backend/supabase_migration_routine_weights.sql)
 // todavía no se desplegó en este ambiente, la carga real simplemente no se
 // precarga/guarda todavía, sin romper el resto de la pantalla.
+// Mismo criterio para `finalizar_entrenamiento` (42883 = undefined_function,
+// PGRST202 = PostgREST no encuentra la función).
 function isMissingRelationError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
-  if (error.code === '42P01' || error.code === 'PGRST205') return true;
+  if (['42P01', 'PGRST205', '42883', 'PGRST202'].includes(error.code ?? '')) return true;
   const msg = (error.message ?? '').toLowerCase();
   return msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('could not find');
 }
@@ -158,4 +160,162 @@ export async function saveExerciseWeight(userId: string, routineExerciseId: stri
     { onConflict: 'user_id,routine_exercise_id' }
   );
   if (error && !isMissingRelationError(error)) throw new Error(error.message);
+}
+
+// -- Historial de entrenamientos (pestaña "Historial" de Mi Rutina) --
+//
+// Tabla `routine_history` (backend/supabase_migration_routine_history.sql):
+// una FOTO de cada "Finalizar Entrenamiento", independiente de la rutina
+// vigente (nombre/series/reps/peso copiados como texto, sin FK a
+// routine_exercises) para que sobreviva a que el entrenador la edite. Solo
+// se escribe vía el RPC `finalizar_entrenamiento`, que además aplica el
+// cooldown de 1 hora del lado del servidor. Cambiar un peso sin finalizar
+// NO pasa por acá (eso sigue siendo saveExerciseWeight, de arriba).
+
+export interface ItemEntrenamiento {
+  nombre: string;
+  grupo: string | null;
+  series: number | null;
+  repeticiones: string | null;
+  peso: string | null;
+}
+
+export type ResultadoFinalizar =
+  | { estado: 'registrado' }
+  // Ya finalizó hace menos de 1 hora -- `disponibleDesde` es el instante
+  // (ISO) a partir del cual puede volver a finalizar.
+  | { estado: 'cooldown'; disponibleDesde: string }
+  // La migración todavía no corrió en este ambiente: el socio igual ve el
+  // cierre, simplemente no queda en el historial.
+  | { estado: 'no_disponible' };
+
+export async function finalizarEntrenamiento(
+  tituloDia: string | null,
+  totalEjercicios: number,
+  items: ItemEntrenamiento[]
+): Promise<ResultadoFinalizar> {
+  const { data, error } = await supabase.rpc('finalizar_entrenamiento', {
+    p_titulo_dia: tituloDia,
+    p_total_ejercicios: totalEjercicios,
+    p_items: items,
+  });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      console.warn(
+        '[GreenFit] Historial de rutina no disponible (¿falta correr supabase_migration_routine_history.sql?):',
+        error.message
+      );
+      return { estado: 'no_disponible' };
+    }
+    throw new Error(error.message);
+  }
+  const resultado = data as { registrado: boolean; disponible_desde: string | null } | null;
+  if (resultado && resultado.registrado === false && resultado.disponible_desde) {
+    return { estado: 'cooldown', disponibleDesde: resultado.disponible_desde };
+  }
+  return { estado: 'registrado' };
+}
+
+export interface EjercicioHistorial {
+  id: string;
+  nombre: string;
+  grupo: string | null;
+  series: number | null;
+  repeticiones: string | null;
+  peso: string | null;
+}
+
+export interface SesionHistorial {
+  sesionId: string;
+  creadoEn: string; // timestamptz ISO -- la hora de la entrada
+  tituloDia: string | null;
+  totalEjercicios: number;
+  completo: boolean;
+  ejercicios: EjercicioHistorial[];
+}
+
+export interface DiaHistorial {
+  fecha: string; // YYYY-MM-DD (día en horario de Mendoza, calculado por el servidor)
+  sesiones: SesionHistorial[];
+}
+
+interface FilaHistorial {
+  id: string;
+  sesion_id: string;
+  fecha: string;
+  titulo_dia: string | null;
+  nombre_ejercicio: string;
+  grupo_muscular: string | null;
+  series: number | null;
+  repeticiones: string | null;
+  peso: string | null;
+  orden: number;
+  total_ejercicios: number;
+  completo: boolean;
+  created_at: string;
+}
+
+// Filas planas -> días (más reciente primero) -> sesiones (más reciente
+// primero) -> ejercicios (en el orden en que estaban en la rutina). No
+// depende del orden en que lleguen las filas.
+export function agruparHistorial(filas: FilaHistorial[]): DiaHistorial[] {
+  const sesiones = new Map<string, SesionHistorial & { fecha: string; ordenes: number[] }>();
+  for (const f of filas) {
+    let s = sesiones.get(f.sesion_id);
+    if (!s) {
+      s = {
+        sesionId: f.sesion_id,
+        fecha: f.fecha,
+        creadoEn: f.created_at,
+        tituloDia: f.titulo_dia,
+        totalEjercicios: f.total_ejercicios,
+        completo: f.completo,
+        ejercicios: [],
+        ordenes: [],
+      };
+      sesiones.set(f.sesion_id, s);
+    }
+    s.ejercicios.push({
+      id: f.id,
+      nombre: f.nombre_ejercicio,
+      grupo: f.grupo_muscular,
+      series: f.series,
+      repeticiones: f.repeticiones,
+      peso: f.peso,
+    });
+    s.ordenes.push(f.orden);
+  }
+
+  const ordenadas = Array.from(sesiones.values()).sort(
+    (a, b) => new Date(b.creadoEn).getTime() - new Date(a.creadoEn).getTime()
+  );
+
+  const dias: DiaHistorial[] = [];
+  for (const { fecha, ordenes, ...sesion } of ordenadas) {
+    const indices = sesion.ejercicios.map((_, i) => i).sort((a, b) => ordenes[a] - ordenes[b]);
+    sesion.ejercicios = indices.map((i) => sesion.ejercicios[i]);
+
+    const ultimo = dias[dias.length - 1];
+    if (ultimo && ultimo.fecha === fecha) ultimo.sesiones.push(sesion);
+    else dias.push({ fecha, sesiones: [sesion] });
+  }
+  return dias;
+}
+
+// Solo lectura. Si la tabla todavía no existe, devuelve un historial vacío
+// en vez de romper la pantalla.
+export async function getRoutineHistory(userId: string): Promise<DiaHistorial[]> {
+  const { data, error } = await supabase
+    .from('routine_history')
+    .select(
+      'id, sesion_id, fecha, titulo_dia, nombre_ejercicio, grupo_muscular, series, repeticiones, peso, orden, total_ejercicios, completo, created_at'
+    )
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1000);
+  if (error) {
+    if (isMissingRelationError(error)) return [];
+    throw new Error(error.message);
+  }
+  return agruparHistorial((data ?? []) as FilaHistorial[]);
 }
