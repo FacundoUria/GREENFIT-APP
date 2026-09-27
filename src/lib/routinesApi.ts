@@ -168,9 +168,11 @@ export async function saveExerciseWeight(userId: string, routineExerciseId: stri
 // una FOTO de cada "Finalizar Entrenamiento", independiente de la rutina
 // vigente (nombre/series/reps/peso copiados como texto, sin FK a
 // routine_exercises) para que sobreviva a que el entrenador la edite. Solo
-// se escribe vía el RPC `finalizar_entrenamiento`, que además aplica el
-// cooldown de 1 hora del lado del servidor. Cambiar un peso sin finalizar
-// NO pasa por acá (eso sigue siendo saveExerciseWeight, de arriba).
+// se escribe vía RPCs (supabase_migration_routine_history_v2.sql):
+// `finalizar_entrenamiento` (ventana anti doble-toque de 10 s + tope de 20
+// por día, del lado del servidor) y `eliminar_sesion_historial` (borra una
+// sesión completa, nunca parcial). Cambiar un peso sin finalizar NO pasa por
+// acá (eso sigue siendo saveExerciseWeight, de arriba).
 
 export interface ItemEntrenamiento {
   nombre: string;
@@ -182,9 +184,11 @@ export interface ItemEntrenamiento {
 
 export type ResultadoFinalizar =
   | { estado: 'registrado' }
-  // Ya finalizó hace menos de 1 hora -- `disponibleDesde` es el instante
-  // (ISO) a partir del cual puede volver a finalizar.
-  | { estado: 'cooldown'; disponibleDesde: string }
+  // Ya finalizó hace menos de 10 segundos (doble toque, reintento, otro
+  // dispositivo): no se guardó de nuevo.
+  | { estado: 'reciente' }
+  // Ya registró 20 entrenamientos hoy.
+  | { estado: 'tope_diario' }
   // La migración todavía no corrió en este ambiente: el socio igual ve el
   // cierre, simplemente no queda en el historial.
   | { estado: 'no_disponible' };
@@ -209,11 +213,27 @@ export async function finalizarEntrenamiento(
     }
     throw new Error(error.message);
   }
-  const resultado = data as { registrado: boolean; disponible_desde: string | null } | null;
-  if (resultado && resultado.registrado === false && resultado.disponible_desde) {
-    return { estado: 'cooldown', disponibleDesde: resultado.disponible_desde };
+  const resultado = data as { registrado: boolean; motivo?: string | null } | null;
+  if (resultado && resultado.registrado === false) {
+    // Sin `motivo` = versión vieja de la función (cooldown de 1 hora, antes
+    // de correr la v2): se trata igual que "reciente".
+    return resultado.motivo === 'tope_diario' ? { estado: 'tope_diario' } : { estado: 'reciente' };
   }
   return { estado: 'registrado' };
+}
+
+// Borra una sesión COMPLETA del historial (todas sus filas). El servidor
+// solo borra si es del socio que llama; devuelve cuántas filas borró (0 =
+// no existía o ya se había borrado).
+export async function eliminarSesionHistorial(sesionId: string): Promise<number> {
+  const { data, error } = await supabase.rpc('eliminar_sesion_historial', { p_sesion_id: sesionId });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      throw new Error('Todavía no se puede eliminar del historial (falta actualizar el servidor).');
+    }
+    throw new Error(error.message);
+  }
+  return typeof data === 'number' ? data : 0;
 }
 
 export interface EjercicioHistorial {

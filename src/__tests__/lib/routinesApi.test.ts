@@ -9,6 +9,7 @@ import {
   saveExerciseWeight,
   finalizarEntrenamiento,
   getRoutineHistory,
+  eliminarSesionHistorial,
   agruparHistorial,
 } from '../../lib/routinesApi';
 
@@ -80,7 +81,39 @@ describe('saveExerciseWeight (upsert por socio+ejercicio)', () => {
   });
 });
 
-describe('finalizarEntrenamiento (RPC con cooldown de 1 hora en el servidor)', () => {
+describe('eliminarSesionHistorial (RPC: borra la sesión completa, solo del dueño)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('llama al RPC con el sesion_id y devuelve cuántas filas borró', async () => {
+    mockedRpc.mockResolvedValue({ data: 3, error: null });
+
+    await expect(eliminarSesionHistorial('s-1')).resolves.toBe(3);
+    expect(mockedRpc).toHaveBeenCalledWith('eliminar_sesion_historial', { p_sesion_id: 's-1' });
+  });
+
+  it('0 filas (no existía / no era suya) no es un error', async () => {
+    mockedRpc.mockResolvedValue({ data: 0, error: null });
+    await expect(eliminarSesionHistorial('s-x')).resolves.toBe(0);
+  });
+
+  it('nunca borra directo sobre la tabla (sin policy de delete, todo pasa por el RPC)', async () => {
+    mockedRpc.mockResolvedValue({ data: 1, error: null });
+    await eliminarSesionHistorial('s-1');
+    expect(mockedFrom).not.toHaveBeenCalled();
+  });
+
+  it('si la función todavía no existe (v2 sin correr), avisa con un error claro', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
+    await expect(eliminarSesionHistorial('s-1')).rejects.toThrow('falta actualizar el servidor');
+  });
+
+  it('un error real se propaga', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { message: 'No autenticado' } });
+    await expect(eliminarSesionHistorial('s-1')).rejects.toThrow('No autenticado');
+  });
+});
+
+describe('finalizarEntrenamiento (RPC con ventana de 10 s y tope diario en el servidor)', () => {
   const items = [{ nombre: 'Sentadilla', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '60kg' }];
 
   beforeEach(() => jest.clearAllMocks());
@@ -101,14 +134,34 @@ describe('finalizarEntrenamiento (RPC con cooldown de 1 hora en el servidor)', (
     });
   });
 
-  it('si el servidor responde registrado=false, devuelve cooldown con la hora a partir de la cual puede volver', async () => {
+  it('motivo "reciente" (ventana de 10 s del servidor) -> estado reciente', async () => {
+    mockedRpc.mockResolvedValue({
+      data: { registrado: false, sesion_id: null, motivo: 'reciente', disponible_desde: '2026-09-27T21:42:10Z' },
+      error: null,
+    });
+
+    const r = await finalizarEntrenamiento('Día 1', 5, items);
+    expect(r).toEqual({ estado: 'reciente' });
+  });
+
+  it('motivo "tope_diario" (20 por día) -> estado tope_diario', async () => {
+    mockedRpc.mockResolvedValue({
+      data: { registrado: false, sesion_id: null, motivo: 'tope_diario', disponible_desde: null },
+      error: null,
+    });
+
+    const r = await finalizarEntrenamiento('Día 1', 5, items);
+    expect(r).toEqual({ estado: 'tope_diario' });
+  });
+
+  it('registrado=false SIN motivo (función vieja, antes de correr la v2) se trata como "reciente"', async () => {
     mockedRpc.mockResolvedValue({
       data: { registrado: false, sesion_id: null, disponible_desde: '2026-09-27T21:42:00Z' },
       error: null,
     });
 
     const r = await finalizarEntrenamiento('Día 1', 5, items);
-    expect(r).toEqual({ estado: 'cooldown', disponibleDesde: '2026-09-27T21:42:00Z' });
+    expect(r).toEqual({ estado: 'reciente' });
   });
 
   it('si la función todavía no existe (migración sin correr), devuelve no_disponible sin romper', async () => {

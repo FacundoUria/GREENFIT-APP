@@ -53,29 +53,30 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
 
     await irATab(page, 'Mi Rutina');
 
-    // Header tipo "ficha de entrenamiento": título personalizado + badge
-    // con SOLO el nombre del día (sin repetir "Rutina de..." adentro).
-    await expect(page.getByText('Rutina de Facundo')).toBeVisible();
+    // Header HUD: avatar + primer nombre real del socio (sin "MODO ATLETA"); la barra de
+    // sesión muestra el nombre del día.
+    await expect(page.getByText('MODO ATLETA', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Facundo', { exact: true })).toBeVisible();
     await expect(page.getByText('Día 1', { exact: true })).toBeVisible();
-    // Encabezados por grupo muscular -- de un vistazo se ve qué se entrena.
-    await expect(page.getByText('PECHO')).toBeVisible();
-    await expect(page.getByText('TRÍCEPS')).toBeVisible();
+    // Cada tarjeta lleva número + grupo muscular ("01 • PECHO").
+    await expect(page.getByText('01 • PECHO', { exact: true })).toBeVisible();
+    await expect(page.getByText('02 • TRÍCEPS', { exact: true })).toBeVisible();
     await expect(page.getByText('Press de banca')).toBeVisible();
     await expect(page.getByText('Fondos en banco')).toBeVisible();
 
-    // Sin barra de porcentaje -- el indicador pill arranca en 0/2.
-    await expect(page.getByText('0/2 completados')).toBeVisible();
+    // Contador X/Y de la barra de sesión (junto a la barra de progreso).
+    await expect(page.getByText('0/2', { exact: true })).toBeVisible();
 
     await page.getByLabel('Marcar Press de banca como completado').click();
-    await expect(page.getByText('1/2 completados')).toBeVisible();
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible();
     await expect(page.getByLabel('Press de banca, completado')).toBeVisible();
 
     await page.getByLabel('Marcar Fondos en banco como completado').click();
-    await expect(page.getByText('2/2 completados')).toBeVisible();
+    await expect(page.getByText('2/2', { exact: true })).toBeVisible();
 
     // Botón de cierre -- gatilla el modal gratificante en vez del
     // Alert.alert() anterior (no-op mudo en react-native-web).
-    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
     await expect(page.getByText('¡Rutina completa! 🔥')).toBeVisible();
     await expect(page.getByText('Genial')).toBeVisible();
   });
@@ -87,9 +88,9 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
 
     await irATab(page, 'Mi Rutina');
     await page.getByLabel('Marcar Press de banca como completado').click();
-    await expect(page.getByText('1/2 completados')).toBeVisible();
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible();
 
-    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
     await expect(page.getByText('¡Buen entrenamiento! 💪')).toBeVisible();
     await expect(page.getByText('Llevás 1 de 2 ejercicios de hoy -- lo que sumaste ya cuenta.')).toBeVisible();
   });
@@ -191,7 +192,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await irATab(page, 'Mi Rutina');
 
     // 0 marcados -> bloquea sin llamar al servidor.
-    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
     await expect(page.getByText('Marcá al menos un ejercicio para finalizar el entrenamiento.')).toBeVisible();
     expect(llamadas).toHaveLength(0);
 
@@ -200,7 +201,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await carga.fill('25kg');
     await carga.blur();
     await page.getByLabel('Marcar Press de banca como completado').click();
-    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
 
     await expect(page.getByText('¡Buen entrenamiento! 💪')).toBeVisible();
     expect(llamadas).toHaveLength(1);
@@ -221,18 +222,157 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await expect(page.getByText('Fondos en banco')).toHaveCount(0);
   });
 
-  test('si ya finalizó hace menos de 1 hora, avisa y no muestra el festejo', async ({ page }) => {
-    const disponibleDesde = new Date(Date.now() + 40 * 60_000).toISOString();
+  test('si el servidor responde "reciente" (ventana de 10 s), avisa y no muestra el festejo', async ({ page }) => {
     await loginComoSocio(page, {
       tables: { ...tablasBase(), routines: [ROUTINE], routine_days: [DAY_1], routine_completions: [] },
-      rpc: { finalizar_entrenamiento: { registrado: false, sesion_id: null, disponible_desde: disponibleDesde } },
+      rpc: {
+        finalizar_entrenamiento: {
+          registrado: false,
+          sesion_id: null,
+          motivo: 'reciente',
+          disponible_desde: new Date(Date.now() + 10_000).toISOString(),
+        },
+      },
     });
     await irATab(page, 'Mi Rutina');
 
     await page.getByLabel('Marcar Press de banca como completado').click();
-    await page.getByText('🔥 Finalizar Entrenamiento', { exact: true }).click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
 
-    await expect(page.getByText(/Ya registraste un entrenamiento hace poco\. Podés volver a finalizar a partir de las \d{2}:\d{2}\./)).toBeVisible();
+    await expect(page.getByText('Ya registraste este entrenamiento recién.', { exact: true })).toBeVisible();
     await expect(page.getByText('¡Buen entrenamiento! 💪')).toHaveCount(0);
+  });
+
+  test('si el servidor responde "tope_diario", avisa del máximo de 20 por día', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), routines: [ROUTINE], routine_days: [DAY_1], routine_completions: [] },
+      rpc: {
+        finalizar_entrenamiento: { registrado: false, sesion_id: null, motivo: 'tope_diario', disponible_desde: null },
+      },
+    });
+    await irATab(page, 'Mi Rutina');
+
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    await page.getByText('Finalizar Entrenamiento', { exact: true }).click();
+
+    await expect(
+      page.getByText('Llegaste al máximo de 20 entrenamientos registrados por hoy.', { exact: true })
+    ).toBeVisible();
+  });
+
+  test('Historial: "Eliminar" pide confirmación y borra la sesión completa por el RPC', async ({ page }) => {
+    const fila = (overrides: Record<string, unknown>) => ({
+      user_id: SOCIO_DEMO.id,
+      fecha: HOY_STR,
+      titulo_dia: 'Día 1',
+      grupo_muscular: 'Pecho',
+      series: 4,
+      repeticiones: '10-12',
+      orden: 0,
+      total_ejercicios: 2,
+      ...overrides,
+    });
+    const tablas = {
+      ...tablasBase(),
+      routines: [ROUTINE],
+      routine_days: [DAY_1],
+      routine_completions: [],
+      routine_history: [
+        fila({ id: 'h-1', sesion_id: 's-dup', nombre_ejercicio: 'Press de banca', peso: '22kg', completo: false, created_at: `${HOY_STR}T12:05:00.000Z` }),
+        fila({ id: 'h-2', sesion_id: 's-ok', nombre_ejercicio: 'Press de banca', peso: '24kg', completo: true, created_at: `${HOY_STR}T21:40:00.000Z` }),
+        fila({ id: 'h-3', sesion_id: 's-ok', nombre_ejercicio: 'Fondos en banco', peso: null, orden: 1, completo: true, created_at: `${HOY_STR}T21:40:00.000Z` }),
+      ] as any[],
+    };
+    const llamadas: any[] = [];
+    // Emula eliminar_sesion_historial(): borra TODAS las filas de esa sesión del socio.
+    const rpc = {
+      eliminar_sesion_historial: (request: any) => {
+        const { p_sesion_id } = request.postDataJSON();
+        llamadas.push(p_sesion_id);
+        const antes = tablas.routine_history.length;
+        tablas.routine_history = tablas.routine_history.filter((f) => f.sesion_id !== p_sesion_id);
+        return antes - tablas.routine_history.length;
+      },
+    };
+    await loginComoSocio(page, { tables: tablas, rpc });
+    await irATab(page, 'Mi Rutina');
+    await page.getByText('Historial', { exact: true }).click();
+    await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
+
+    // La de las 09:05 (12:05 UTC) quedó duplicada/errónea: se elimina.
+    await page.getByLabel(/Eliminar entrenamiento del .* a las 09:05/).click();
+    await expect(page.getByText('¿Eliminar este entrenamiento?', { exact: true })).toBeVisible();
+
+    // Cancelar no borra nada.
+    await page.getByText('Cancelar', { exact: true }).click();
+    await expect(page.getByText('¿Eliminar este entrenamiento?', { exact: true })).toHaveCount(0);
+    expect(llamadas).toHaveLength(0);
+
+    await page.getByLabel(/Eliminar entrenamiento del .* a las 09:05/).click();
+    await page.getByLabel('Confirmar eliminar entrenamiento').click();
+
+    await expect(page.getByText('1 registrado', { exact: true })).toBeVisible();
+    expect(llamadas).toEqual(['s-dup']);
+    await expect(page.getByText('22kg', { exact: true })).toHaveCount(0);
+    // La otra sesión sigue entera.
+    await expect(page.getByText('24kg', { exact: true })).toBeVisible();
+    await expect(page.getByText('Fondos en banco')).toBeVisible();
+  });
+
+  test('Historial: dos entrenamientos del mismo día son dos tarjetas separadas, con series, reps y peso', async ({
+    page,
+  }) => {
+    const fila = (overrides: Record<string, unknown>) => ({
+      user_id: SOCIO_DEMO.id,
+      fecha: HOY_STR,
+      grupo_muscular: 'Pecho',
+      orden: 0,
+      ...overrides,
+    });
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        routines: [ROUTINE],
+        routine_days: [DAY_1],
+        routine_completions: [],
+        routine_history: [
+          // Mañana: incompleta (1 de 2).
+          fila({
+            id: 'h-1', sesion_id: 's-manana', titulo_dia: 'Día 1', nombre_ejercicio: 'Press de banca',
+            series: 4, repeticiones: '10-12', peso: '22kg', total_ejercicios: 2, completo: false,
+            created_at: `${HOY_STR}T12:05:00.000Z`,
+          }),
+          // Tarde: completa (2 de 2).
+          fila({
+            id: 'h-2', sesion_id: 's-tarde', titulo_dia: 'Día 1', nombre_ejercicio: 'Press de banca',
+            series: 4, repeticiones: '10-12', peso: '24kg', total_ejercicios: 2, completo: true,
+            created_at: `${HOY_STR}T21:40:00.000Z`,
+          }),
+          fila({
+            id: 'h-3', sesion_id: 's-tarde', titulo_dia: 'Día 1', nombre_ejercicio: 'Fondos en banco',
+            grupo_muscular: 'Tríceps', series: 3, repeticiones: '12', peso: null, orden: 1,
+            total_ejercicios: 2, completo: true, created_at: `${HOY_STR}T21:40:00.000Z`,
+          }),
+        ],
+      },
+    });
+    await irATab(page, 'Mi Rutina');
+    await page.getByText('Historial', { exact: true }).click();
+
+    await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
+    // Una hora por tarjeta (09:05 y 18:40 en Argentina).
+    await expect(page.getByText('09:05 hs', { exact: true })).toBeVisible();
+    await expect(page.getByText('18:40 hs', { exact: true })).toBeVisible();
+    // Cada ejercicio: nombre + series × reps + peso.
+    await expect(page.getByText('22kg', { exact: true })).toBeVisible();
+    await expect(page.getByText('24kg', { exact: true })).toBeVisible();
+    await expect(page.getByText('4 × 10-12', { exact: true })).toHaveCount(2);
+    await expect(page.getByText('3 × 12', { exact: true })).toBeVisible();
+    await expect(page.getByText('Sin carga', { exact: true })).toBeVisible();
+    // La de la mañana quedó incompleta; la de la tarde, completa.
+    await expect(page.getByText('1 de 2 ejercicios', { exact: true })).toBeVisible();
+    await expect(page.getByText('Completo', { exact: true })).toBeVisible();
+    // Solo lectura: nada de "Repetir" ni favoritos.
+    await expect(page.getByText(/Repetir|Favorita/)).toHaveCount(0);
   });
 });

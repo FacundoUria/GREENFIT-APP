@@ -1,14 +1,19 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // Historial de rutina: "Finalizar Entrenamiento" guarda una foto de los
 // ejercicios MARCADOS del día que se está viendo (con el peso de ese
-// momento), bloquea con 0 marcados, respeta el cooldown de 1 hora que
-// devuelve el servidor, y la pestaña "Historial" muestra lo guardado por día
-// y por hora.
+// momento), bloquea con 0 marcados, muestra lo que responde el servidor
+// (ventana de 10 s / tope diario), y la pestaña "Historial" muestra lo
+// guardado, una tarjeta por sesión, con la opción de eliminar una sesión
+// completa (con confirmación).
 
+// Mismo objeto `user` en cada render, como en la app real (AuthContext lo
+// guarda en estado) -- si no, `load` cambia de identidad en cada render y el
+// useEffect vuelve a pedir la rutina, pisando los tildes recién hechos.
+const mockAuth = { user: { id: 'user-1', name: 'Facundo Uria' } };
 jest.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria' } }),
+  useAuth: () => mockAuth,
 }));
 
 // VideoModal trae react-native-webview (módulo nativo, no existe en Jest).
@@ -23,10 +28,16 @@ jest.mock('../../lib/routinesApi', () => ({
   saveExerciseWeight: jest.fn(),
   finalizarEntrenamiento: jest.fn(),
   getRoutineHistory: jest.fn(),
+  eliminarSesionHistorial: jest.fn(),
 }));
 
 import * as api from '../../lib/routinesApi';
-import UserRoutineScreen, { formatFechaHistorial, formatHoraArgentina } from '../../screens/user/UserRoutineScreen';
+import UserRoutineScreen, {
+  formatFechaHistorial,
+  formatHoraArgentina,
+  diaInicial,
+  BLOQUEO_FINALIZAR_MS,
+} from '../../screens/user/UserRoutineScreen';
 
 const m = api as jest.Mocked<typeof api>;
 
@@ -90,7 +101,7 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
   it('con 0 ejercicios marcados, bloquea sin llamar al servidor', async () => {
     const { getByText } = await renderPantalla();
 
-    fireEvent.press(getByText('🔥 Finalizar Entrenamiento'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
 
     expect(getByText('Marcá al menos un ejercicio para finalizar el entrenamiento.')).toBeTruthy();
     expect(m.finalizarEntrenamiento).not.toHaveBeenCalled();
@@ -102,7 +113,7 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
 
     fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
     fireEvent.press(getByLabelText('Marcar Estocadas como completado'));
-    fireEvent.press(getByText('🔥 Finalizar Entrenamiento'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
 
     await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1));
     expect(m.finalizarEntrenamiento).toHaveBeenCalledWith('Día 1 - Tren Inferior', 3, [
@@ -113,25 +124,29 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     await waitFor(() => expect(getByText('¡Buen entrenamiento! 💪')).toBeTruthy());
   });
 
-  it('si el servidor responde cooldown, muestra el mensaje con la hora y NO el festejo', async () => {
-    const disponibleDesde = '2026-09-27T21:42:00Z';
-    m.finalizarEntrenamiento.mockResolvedValue({ estado: 'cooldown', disponibleDesde });
+  it('si el servidor responde "reciente" (ventana de 10 s), avisa y NO muestra el festejo', async () => {
+    m.finalizarEntrenamiento.mockResolvedValue({ estado: 'reciente' });
     const { getByText, getByLabelText, queryByText } = await renderPantalla();
 
     fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
-    fireEvent.press(getByText('🔥 Finalizar Entrenamiento'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
 
-    await waitFor(() =>
-      expect(
-        getByText(
-          `Ya registraste un entrenamiento hace poco. Podés volver a finalizar a partir de las ${formatHoraArgentina(
-            disponibleDesde
-          )}.`
-        )
-      ).toBeTruthy()
-    );
+    await waitFor(() => expect(getByText('Ya registraste este entrenamiento recién.')).toBeTruthy());
     expect(queryByText('¡Buen entrenamiento! 💪')).toBeNull();
     expect(queryByText('¡Rutina completa! 🔥')).toBeNull();
+  });
+
+  it('si el servidor responde "tope_diario", avisa del máximo de 20 por día y NO festeja', async () => {
+    m.finalizarEntrenamiento.mockResolvedValue({ estado: 'tope_diario' });
+    const { getByText, getByLabelText, queryByText } = await renderPantalla();
+
+    fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+
+    await waitFor(() =>
+      expect(getByText('Llegaste al máximo de 20 entrenamientos registrados por hoy.')).toBeTruthy()
+    );
+    expect(queryByText('¡Buen entrenamiento! 💪')).toBeNull();
   });
 
   it('si el guardado falla, avisa con el error real', async () => {
@@ -139,13 +154,49 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     const { getByText, getByLabelText } = await renderPantalla();
 
     fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
-    fireEvent.press(getByText('🔥 Finalizar Entrenamiento'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
 
     await waitFor(() => expect(getByText('No se pudo guardar el entrenamiento: Network error')).toBeTruthy());
   });
 });
+describe('Mi Rutina -- estilo HUD de "Rutina de hoy" (misma lógica)', () => {
+  it('header con el nombre real del socio, barra de sesión con el día y el contador X/Y', async () => {
+    const { getByText, getAllByText, queryByText } = await renderPantalla();
 
-describe('Mi Rutina -- pestaña Historial', () => {
+    expect(queryByText('MODO ATLETA')).toBeNull(); // se sacó: header = avatar + nombre
+    expect(getByText('Facundo')).toBeTruthy(); // primer nombre de useAuth, no escrito a mano
+    expect(getByText('SESIÓN DE HOY')).toBeTruthy();
+    // Título del día en la barra de sesión + en el selector de días.
+    expect(getAllByText('Día 1 - Tren Inferior')).toHaveLength(2);
+    expect(getByText('0/3')).toBeTruthy();
+  });
+
+  it('cada tarjeta lleva su número y grupo ("01 • PIERNAS"), y el contador sube al tildar', async () => {
+    m.markExerciseCompleted.mockResolvedValue();
+    const { getByText, getByLabelText } = await renderPantalla();
+
+    expect(getByText('01 • PIERNAS')).toBeTruthy();
+    expect(getByText('02 • PIERNAS')).toBeTruthy();
+    expect(getByText('03 • PIERNAS')).toBeTruthy();
+
+    fireEvent.press(getByLabelText('Marcar Estocadas como completado'));
+    await waitFor(() => expect(getByText('1/3')).toBeTruthy());
+    expect(getByLabelText('Estocadas, completado')).toBeTruthy();
+    expect(m.markExerciseCompleted).toHaveBeenCalledWith('user-1', 're-2', expect.any(String));
+  });
+
+  it('las dos pestañas se llaman "Rutina de hoy" e "Historial" (no los nombres del mockup)', async () => {
+    const { getByText, queryByText } = await renderPantalla();
+
+    expect(getByText('Rutina de hoy')).toBeTruthy();
+    expect(getByText('Historial')).toBeTruthy();
+    expect(queryByText(/Entrenar Ahora/i)).toBeNull();
+    expect(queryByText(/Rutinas Guardadas/i)).toBeNull();
+    expect(queryByText(/Favorita/i)).toBeNull();
+  });
+});
+
+describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
   const HISTORIAL: api.DiaHistorial[] = [
     {
       fecha: '2026-09-26',
@@ -177,58 +228,137 @@ describe('Mi Rutina -- pestaña Historial', () => {
         {
           sesionId: 'ayer',
           creadoEn: '2026-09-25T20:00:00Z',
-          tituloDia: 'Día 1 - Tren Inferior',
-          totalEjercicios: 5,
-          completo: false,
-          ejercicios: [
-            { id: 'h4', nombre: 'Gemelos', grupo: 'Piernas', series: 4, repeticiones: '15', peso: '30kg' },
-            { id: 'h5', nombre: 'Prensa', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '100kg' },
-            { id: 'h6', nombre: 'Camilla', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '25kg' },
-            { id: 'h7', nombre: 'Sillón', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '25kg' },
-          ],
+          tituloDia: null,
+          totalEjercicios: 1,
+          completo: true,
+          ejercicios: [{ id: 'h4', nombre: 'Gemelos', grupo: 'Piernas', series: 4, repeticiones: '15', peso: '30kg' }],
         },
       ],
     },
   ];
 
-  it('lista los días, con dos finalizaciones del mismo día por separado (cada una con su hora)', async () => {
+  async function abrirHistorial() {
     m.getRoutineHistory.mockResolvedValue(HISTORIAL);
-    const { getByText, queryByText } = await renderPantalla();
+    const utils = await renderPantalla();
+    fireEvent.press(utils.getByText('Historial'));
+    await waitFor(() => expect(utils.getByText('HISTORIAL DE ENTRENAMIENTOS')).toBeTruthy());
+    return utils;
+  }
 
-    fireEvent.press(getByText('Historial'));
+  function hora(iso: string) {
+    return `${formatHoraArgentina(iso)} hs`;
+  }
 
-    await waitFor(() => expect(getByText(formatFechaHistorial('2026-09-26'))).toBeTruthy());
-    expect(getByText(formatFechaHistorial('2026-09-25'))).toBeTruthy();
-    expect(getByText('2 entrenamientos')).toBeTruthy();
+  it('dos sesiones del mismo día = dos tarjetas separadas, cada una con su fecha, hora y título', async () => {
+    const { getAllByText, getByText } = await abrirHistorial();
 
-    // El más reciente arranca abierto: se ven las dos sesiones con su hora.
-    expect(getByText(`${formatHoraArgentina('2026-09-26T21:30:00Z')} hs`)).toBeTruthy();
-    expect(getByText(`${formatHoraArgentina('2026-09-26T11:15:00Z')} hs`)).toBeTruthy();
+    expect(getByText('3 registrados')).toBeTruthy();
+    // La fecha del 26 aparece una vez POR TARJETA (mañana y tarde), no mezcladas.
+    expect(getAllByText(formatFechaHistorial('2026-09-26'))).toHaveLength(2);
+    expect(getByText(hora('2026-09-26T21:30:00Z'))).toBeTruthy();
+    expect(getByText(hora('2026-09-26T11:15:00Z'))).toBeTruthy();
     expect(getByText('Día 2 - Tren Superior')).toBeTruthy();
-    expect(getByText('Completo')).toBeTruthy();
-    expect(getByText('2 de 5 ejercicios')).toBeTruthy();
-    expect(getByText('4 × 10')).toBeTruthy();
-    expect(getByText('60kg')).toBeTruthy();
-    expect(getByText('Sin carga')).toBeTruthy();
-
-    // El día anterior está cerrado hasta tocarlo.
-    expect(queryByText('Gemelos')).toBeNull();
-    expect(getByText('4 de 5 ejercicios')).toBeTruthy(); // resumen del día incompleto
+    expect(getByText('Día 1 - Tren Inferior')).toBeTruthy();
+    // Sin título guardado -> "Entrenamiento".
+    expect(getByText('Entrenamiento')).toBeTruthy();
   });
 
-  it('un día se despliega y se pliega al tocarlo', async () => {
-    m.getRoutineHistory.mockResolvedValue(HISTORIAL);
-    const { getByText, queryByText } = await renderPantalla();
+  it('las tarjetas van de la más reciente a la más vieja', async () => {
+    const { getAllByText } = await abrirHistorial();
 
-    fireEvent.press(getByText('Historial'));
-    await waitFor(() => expect(getByText(formatFechaHistorial('2026-09-25'))).toBeTruthy());
+    const horas = getAllByText(/^\d{2}:\d{2} hs$/).map((n) => {
+      const c = n.props.children;
+      return Array.isArray(c) ? c.join('') : String(c);
+    });
+    expect(horas).toEqual([hora('2026-09-26T21:30:00Z'), hora('2026-09-26T11:15:00Z'), hora('2026-09-25T20:00:00Z')]);
+  });
 
-    fireEvent.press(getByText(formatFechaHistorial('2026-09-25')));
-    expect(getByText('Gemelos')).toBeTruthy();
-    expect(getByText('100kg')).toBeTruthy();
+  it('cada ejercicio muestra nombre, series × repeticiones Y peso (o "Sin carga")', async () => {
+    const { getByText } = await abrirHistorial();
 
-    fireEvent.press(getByText(formatFechaHistorial('2026-09-25')));
-    expect(queryByText('Gemelos')).toBeNull();
+    expect(getByText('Sentadilla')).toBeTruthy();
+    expect(getByText('4 × 10')).toBeTruthy();
+    expect(getByText('60kg')).toBeTruthy();
+
+    expect(getByText('Estocadas')).toBeTruthy();
+    expect(getByText('3 × 12')).toBeTruthy();
+    expect(getByText('Sin carga')).toBeTruthy();
+
+    expect(getByText('Press de banca')).toBeTruthy();
+    expect(getByText('4 × 8')).toBeTruthy();
+    expect(getByText('50kg')).toBeTruthy();
+  });
+
+  it('una sesión incompleta muestra "N de M ejercicios"; una completa, "Completo"', async () => {
+    const { getByText, getAllByText } = await abrirHistorial();
+
+    expect(getByText('2 de 5 ejercicios')).toBeTruthy();
+    expect(getAllByText('Completo')).toHaveLength(2);
+  });
+
+  it('no hay "Repetir" ni "Guardar como Rutina Favorita"; la única acción es "Eliminar" (una por tarjeta)', async () => {
+    const { queryByText, getAllByText } = await abrirHistorial();
+
+    expect(queryByText(/Repetir/i)).toBeNull();
+    expect(queryByText(/Favorita/i)).toBeNull();
+    expect(getAllByText('Eliminar')).toHaveLength(3);
+  });
+
+  const labelEliminarManana = () =>
+    `Eliminar entrenamiento del ${formatFechaHistorial('2026-09-26')} a las ${formatHoraArgentina('2026-09-26T11:15:00Z')}`;
+
+  it('"Eliminar" pide confirmación; "Cancelar" no borra nada', async () => {
+    const { getByLabelText, getByText, queryByText } = await abrirHistorial();
+
+    fireEvent.press(getByLabelText(labelEliminarManana()));
+    expect(getByText('¿Eliminar este entrenamiento?')).toBeTruthy();
+    expect(getByText(/Se borran los 2 ejercicios de esta sesión\. No se puede deshacer\./)).toBeTruthy();
+
+    fireEvent.press(getByText('Cancelar'));
+    expect(queryByText('¿Eliminar este entrenamiento?')).toBeNull();
+    expect(m.eliminarSesionHistorial).not.toHaveBeenCalled();
+  });
+
+  it('confirmar borra la sesión COMPLETA (por sesion_id) y relee el historial del servidor', async () => {
+    m.eliminarSesionHistorial.mockResolvedValue(2);
+    const { getByLabelText, queryByText } = await abrirHistorial();
+    // Lo que devuelve el servidor después del borrado: ya sin la sesión de la mañana.
+    m.getRoutineHistory.mockResolvedValue([
+      { fecha: '2026-09-26', sesiones: [HISTORIAL[0].sesiones[0]] },
+      HISTORIAL[1],
+    ]);
+
+    fireEvent.press(getByLabelText(labelEliminarManana()));
+    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+
+    // Espera la relectura del historial y recién ahí verifica lo que se ve.
+    await waitFor(() => expect(m.getRoutineHistory).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(queryByText('2 de 5 ejercicios')).toBeNull());
+    expect(m.eliminarSesionHistorial).toHaveBeenCalledTimes(1);
+    expect(m.eliminarSesionHistorial).toHaveBeenCalledWith('manana');
+    expect(queryByText('Sentadilla')).toBeNull();
+    expect(queryByText('¿Eliminar este entrenamiento?')).toBeNull();
+  });
+
+  it('si el servidor no borra nada (0 filas), avisa que ya no estaba', async () => {
+    m.eliminarSesionHistorial.mockResolvedValue(0);
+    const { getByLabelText, getByText } = await abrirHistorial();
+
+    fireEvent.press(getByLabelText(labelEliminarManana()));
+    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+
+    await waitFor(() => expect(getByText('Ese entrenamiento ya no estaba en tu historial.')).toBeTruthy());
+  });
+
+  it('si el borrado falla, avisa con el error real y la sesión sigue ahí', async () => {
+    m.eliminarSesionHistorial.mockRejectedValue(new Error('Network error'));
+    const { getByLabelText, getByText } = await abrirHistorial();
+
+    fireEvent.press(getByLabelText(labelEliminarManana()));
+    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+
+    await waitFor(() => expect(getByText('No se pudo eliminar: Network error')).toBeTruthy());
+    expect(getByText('2 de 5 ejercicios')).toBeTruthy();
   });
 
   it('sin entrenamientos guardados, muestra el estado vacío', async () => {
@@ -251,11 +381,107 @@ describe('Mi Rutina -- pestaña Historial', () => {
   });
 });
 
+describe('Mi Rutina -- día que arranca seleccionado', () => {
+  it('sin tildes hoy, arranca en el primer día (order_index)', async () => {
+    const { getByText } = await renderPantalla();
+    expect(getByText('0/3')).toBeTruthy(); // Día 1 tiene 3 ejercicios
+  });
+
+  it('si hoy ya hay ejercicios tildados en otro día, arranca en ese día', async () => {
+    m.getTodayCompletions.mockResolvedValue(new Set(['re-4'])); // re-4 = Press de banca, Día 2
+    const { getByText, getByLabelText, queryByText } = await render(<UserRoutineScreen />);
+
+    await waitFor(() => expect(getByText('Press de banca')).toBeTruthy());
+    expect(getByText('1/1')).toBeTruthy();
+    expect(getByLabelText('Press de banca, completado')).toBeTruthy();
+    expect(queryByText('Sentadilla')).toBeNull();
+  });
+
+  it('diaInicial: primer día con tildes; si el socio ya eligió uno a mano, se respeta', () => {
+    const r = ROUTINE as any;
+    expect(diaInicial(r, new Set(), null)).toBe(0);
+    expect(diaInicial(r, new Set(['re-4']), null)).toBe(1);
+    // Tildes en los dos días -> el primero en el orden del entrenador.
+    expect(diaInicial(r, new Set(['re-4', 're-2']), null)).toBe(0);
+    // Ya eligió el Día 2 a mano: al refrescar no se lo cambia por los tildes.
+    expect(diaInicial(r, new Set(['re-2']), 1)).toBe(1);
+    // Eligió un día que ya no existe (el entrenador sacó días) -> el primero.
+    expect(diaInicial(r, new Set(), 5)).toBe(0);
+    expect(diaInicial(null, new Set(), null)).toBe(0);
+  });
+});
+
+describe('Mi Rutina -- bloqueo de Finalizar contra el doble toque', () => {
+  afterEach(() => jest.useRealTimers());
+
+  async function tildarYFinalizar() {
+    const utils = await renderPantalla();
+    fireEvent.press(utils.getByLabelText('Marcar Sentadilla como completado'));
+    return utils;
+  }
+
+  it(`un segundo toque dentro de los ${BLOQUEO_FINALIZAR_MS / 1000}s no vuelve a llamar al servidor; pasado el bloqueo, sí`, async () => {
+    m.finalizarEntrenamiento.mockResolvedValue({ estado: 'registrado' });
+    const { getByText } = await tildarYFinalizar();
+    jest.useFakeTimers();
+
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1));
+    fireEvent.press(getByText('Genial')); // cierra el festejo
+
+    // Ya respondió el servidor, pero todavía no pasó la ventana: sigue bloqueado.
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      jest.advanceTimersByTime(BLOQUEO_FINALIZAR_MS);
+    });
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(2));
+  });
+
+  it('si el servidor tarda MÁS que la ventana, el botón sigue bloqueado hasta que responde', async () => {
+    let responder: (v: api.ResultadoFinalizar) => void = () => {};
+    m.finalizarEntrenamiento.mockImplementation(() => new Promise((res) => (responder = res)));
+    const { getByText, queryByText } = await tildarYFinalizar();
+    jest.useFakeTimers();
+
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    await act(async () => {
+      jest.advanceTimersByTime(BLOQUEO_FINALIZAR_MS + 5000);
+    });
+    // Sigue esperando (spinner, sin texto) y un toque no dispara otra llamada.
+    expect(queryByText('Finalizar Entrenamiento')).toBeNull();
+    expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      responder({ estado: 'registrado' });
+    });
+    // Respondió después de la ventana -> se habilita enseguida.
+    fireEvent.press(getByText('Genial'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(2));
+  });
+
+  it('el toque con 0 marcados NO bloquea el botón (no hubo ningún envío)', async () => {
+    m.finalizarEntrenamiento.mockResolvedValue({ estado: 'registrado' });
+    const { getByText, getByLabelText } = await renderPantalla();
+
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    expect(getByText('Marcá al menos un ejercicio para finalizar el entrenamiento.')).toBeTruthy();
+
+    fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+    await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('formatos de fecha/hora del historial', () => {
-  it('fecha: "26 de septiembre", con año solo si no es el año en curso', () => {
+  it('fecha: "Sábado 26 de septiembre", con año solo si no es el año en curso', () => {
     const hoy = new Date('2026-09-27T15:00:00Z');
-    expect(formatFechaHistorial('2026-09-26', hoy)).toBe('26 de septiembre');
-    expect(formatFechaHistorial('2025-12-31', hoy)).toBe('31 de diciembre de 2025');
+    expect(formatFechaHistorial('2026-09-26', hoy)).toBe('Sábado 26 de septiembre');
+    expect(formatFechaHistorial('2026-09-21', hoy)).toBe('Lunes 21 de septiembre');
+    expect(formatFechaHistorial('2025-12-31', hoy)).toBe('Miércoles 31 de diciembre de 2025');
   });
 
   it('hora: siempre en horario de Argentina (UTC-3), formato 24 hs', () => {
