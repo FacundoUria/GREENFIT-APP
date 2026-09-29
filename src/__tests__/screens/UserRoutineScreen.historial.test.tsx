@@ -19,6 +19,9 @@ jest.mock('../../context/AuthContext', () => ({
 // VideoModal trae react-native-webview (módulo nativo, no existe en Jest).
 jest.mock('../../components/VideoModal', () => () => null);
 
+// showAlert = Alert.alert en nativo / window.alert en web -- acá se espía.
+jest.mock('../../lib/crossPlatformAlert', () => ({ showAlert: jest.fn() }));
+
 jest.mock('../../lib/routinesApi', () => ({
   getUserRoutine: jest.fn(),
   getTodayCompletions: jest.fn(),
@@ -32,6 +35,9 @@ jest.mock('../../lib/routinesApi', () => ({
 }));
 
 import * as api from '../../lib/routinesApi';
+import { showAlert } from '../../lib/crossPlatformAlert';
+
+const mockShowAlert = showAlert as jest.Mock;
 import UserRoutineScreen, {
   formatFechaHistorial,
   formatHoraArgentina,
@@ -86,7 +92,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   m.getUserRoutine.mockResolvedValue(ROUTINE as any);
   m.getTodayCompletions.mockResolvedValue(new Set());
-  m.getUserExerciseWeights.mockResolvedValue(new Map([['re-2', '20kg']]));
+  // Por exercise_id (Estocadas = ex-re-2), no por la fila de la rutina.
+  m.getUserExerciseWeights.mockResolvedValue(new Map([['ex-re-2', '20kg']]));
   m.markExerciseCompleted.mockResolvedValue();
   m.getRoutineHistory.mockResolvedValue([]);
 });
@@ -378,6 +385,114 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     fireEvent.press(getByText('Rutina de hoy'));
 
     expect(getByText('Sentadilla')).toBeTruthy();
+  });
+});
+
+describe('Mi Rutina -- guardado de la carga nunca en silencio', () => {
+  // Regresión real (2026-09-29): en producción la tabla de cargas no existía y
+  // el socio escribía su peso, lo veía en pantalla y nunca se guardaba.
+  it('si guardar la carga falla, el socio ve el aviso y el campo vuelve al valor anterior', async () => {
+    m.saveExerciseWeight.mockRejectedValue(
+      new Error('El guardado de cargas todavía no está activado en el servidor. Avisale al gimnasio.')
+    );
+    const { getAllByLabelText } = await renderPantalla();
+
+    const carga = getAllByLabelText('Carga (kg) usada en este ejercicio')[0]; // Sentadilla, sugerencia 40kg
+    expect(carga.props.value).toBe('40kg');
+    fireEvent.changeText(carga, '45kg');
+    fireEvent(carga, 'blur');
+
+    await waitFor(() =>
+      expect(mockShowAlert).toHaveBeenCalledWith(
+        'No se pudo guardar la carga',
+        'El guardado de cargas todavía no está activado en el servidor. Avisale al gimnasio.'
+      )
+    );
+    expect(m.saveExerciseWeight).toHaveBeenCalledWith('user-1', 'ex-re-1', '45kg');
+    await waitFor(() => expect(getAllByLabelText('Carga (kg) usada en este ejercicio')[0].props.value).toBe('40kg'));
+  });
+
+  it('la carga está atada al EJERCICIO: si Seba re-guarda la rutina (filas con ids nuevos, mismo ejercicio), se sigue viendo', async () => {
+    // Mismo ejercicio (ex-re-2 = Estocadas) pero la fila de la rutina es otra,
+    // como queda después de que el panel borra y recrea los días.
+    const reGuardada = {
+      ...ROUTINE,
+      days: [
+        {
+          ...ROUTINE.days[0],
+          id: 'd-1-nuevo',
+          exercises: ROUTINE.days[0].exercises.map((e) => ({ ...e, id: `${e.id}-nuevo` })),
+        },
+      ],
+    };
+    m.getUserRoutine.mockResolvedValue(reGuardada as any);
+    const { getAllByLabelText } = await renderPantalla();
+
+    const cargas = getAllByLabelText('Carga (kg) usada en este ejercicio');
+    expect(cargas[1].props.value).toBe('20kg'); // Estocadas: su carga guardada, no la sugerencia
+    expect(cargas[0].props.value).toBe('40kg'); // Sentadilla: sin carga propia -> sugerencia
+  });
+
+  it('un ejercicio repetido en la rutina comparte la carga: se guarda UNA vez por exercise_id y se ve en los dos', async () => {
+    m.saveExerciseWeight.mockResolvedValue();
+    const conRepetido = {
+      ...ROUTINE,
+      days: [
+        {
+          ...ROUTINE.days[0],
+          exercises: [
+            ...ROUTINE.days[0].exercises,
+            // Otra fila con el MISMO ejercicio que Sentadilla (ex-re-1).
+            { ...ROUTINE.days[0].exercises[0], id: 're-1-bis', orderIndex: 3 },
+          ],
+        },
+      ],
+    };
+    m.getUserRoutine.mockResolvedValue(conRepetido as any);
+    // (Sentadilla aparece dos veces: no sirve el getByText de renderPantalla.)
+    const { getAllByLabelText, getAllByText } = render(<UserRoutineScreen />);
+    await waitFor(() => expect(getAllByText('Sentadilla')).toHaveLength(2));
+
+    fireEvent.changeText(getAllByLabelText('Carga (kg) usada en este ejercicio')[0], '50kg');
+    fireEvent(getAllByLabelText('Carga (kg) usada en este ejercicio')[0], 'blur');
+
+    await waitFor(() => expect(m.saveExerciseWeight).toHaveBeenCalledWith('user-1', 'ex-re-1', '50kg'));
+    expect(m.saveExerciseWeight).toHaveBeenCalledTimes(1);
+    const cargas = getAllByLabelText('Carga (kg) usada en este ejercicio');
+    expect(cargas[0].props.value).toBe('50kg');
+    expect(cargas[3].props.value).toBe('50kg'); // la fila repetida muestra la misma carga
+  });
+
+  it('si guardar la carga anda, no hay ningún aviso y el valor queda', async () => {
+    m.saveExerciseWeight.mockResolvedValue();
+    const { getAllByLabelText } = await renderPantalla();
+
+    const carga = getAllByLabelText('Carga (kg) usada en este ejercicio')[0];
+    fireEvent.changeText(carga, '45kg');
+    fireEvent(carga, 'blur');
+
+    await waitFor(() => expect(m.saveExerciseWeight).toHaveBeenCalledWith('user-1', 'ex-re-1', '45kg'));
+    expect(mockShowAlert).not.toHaveBeenCalled();
+    expect(getAllByLabelText('Carga (kg) usada en este ejercicio')[0].props.value).toBe('45kg');
+  });
+
+  it('si Finalizar falla porque falta el historial en el servidor, avisa y NO festeja', async () => {
+    m.finalizarEntrenamiento.mockRejectedValue(
+      new Error('El historial de entrenamientos todavía no está activado en el servidor. Avisale al gimnasio.')
+    );
+    const { getByText, getByLabelText, queryByText } = await renderPantalla();
+
+    fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
+    fireEvent.press(getByText('Finalizar Entrenamiento'));
+
+    await waitFor(() =>
+      expect(
+        getByText(
+          'No se pudo guardar el entrenamiento: El historial de entrenamientos todavía no está activado en el servidor. Avisale al gimnasio.'
+        )
+      ).toBeTruthy()
+    );
+    expect(queryByText('¡Buen entrenamiento! 💪')).toBeNull();
   });
 });
 

@@ -23,9 +23,16 @@ function isMissingBucketError(error: { message?: string; statusCode?: string } |
   return msg.includes('bucket not found') || error.statusCode === '404';
 }
 
+// Lectura: si falta la columna, la pantalla oculta la opción de foto sin
+// romper -- pero queda registrado (nunca en silencio). La escritura
+// (subirAvatarPerfil) ya tira un error explícito en ese caso.
 export async function checkAvatarDisponible(): Promise<boolean> {
   const { error } = await supabase.from('profiles').select('avatar_url').limit(1);
-  return !(error && isMissingColumnError(error));
+  if (error && isMissingColumnError(error)) {
+    console.warn('[GreenFit] Foto de perfil: falta correr supabase_migration_avatar.sql (profiles.avatar_url).', error.message);
+    return false;
+  }
+  return true;
 }
 
 // Sube (o reemplaza) la foto de perfil y actualiza profiles.avatar_url.

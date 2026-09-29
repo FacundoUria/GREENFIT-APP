@@ -27,30 +27,35 @@ function makeChain(result: any) {
 }
 
 describe('getUserExerciseWeights (carga real por ejercicio, independiente del checklist diario)', () => {
-  it('arma un Map de routine_exercise_id -> última carga guardada', async () => {
-    mockedFrom.mockImplementation(() =>
-      makeChain({
-        data: [
-          { routine_exercise_id: 're-1', weight_used: '60kg' },
-          { routine_exercise_id: 're-2', weight_used: '2x14kg' },
-        ],
-        error: null,
-      })
-    );
+  it('lee user_exercise_weights y arma un Map de exercise_id -> última carga guardada', async () => {
+    const chain = makeChain({
+      data: [
+        { exercise_id: 'ex-1', weight_used: '60kg' },
+        { exercise_id: 'ex-2', weight_used: '2x14kg' },
+      ],
+      error: null,
+    });
+    mockedFrom.mockImplementation(() => chain);
 
     const pesos = await getUserExerciseWeights('user-1');
-    expect(pesos.get('re-1')).toBe('60kg');
-    expect(pesos.get('re-2')).toBe('2x14kg');
+    expect(mockedFrom).toHaveBeenCalledWith('user_exercise_weights');
+    expect(chain.select).toHaveBeenCalledWith('exercise_id, weight_used');
+    expect(chain.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(pesos.get('ex-1')).toBe('60kg');
+    expect(pesos.get('ex-2')).toBe('2x14kg');
     expect(pesos.size).toBe(2);
   });
 
-  it('si la tabla todavía no existe (migración sin correr), devuelve un Map vacío en vez de romper', async () => {
+  it('LECTURA sin la tabla (migración sin correr): Map vacío (cae a la sugerencia) pero con console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockedFrom.mockImplementation(() =>
       makeChain({ data: null, error: { code: 'PGRST205', message: 'schema cache' } })
     );
 
     const pesos = await getUserExerciseWeights('user-1');
     expect(pesos.size).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_user_exercise_weights.sql'), 'schema cache');
+    warn.mockRestore();
   });
 
   it('un error real (no de tabla faltante) sí se propaga', async () => {
@@ -61,23 +66,37 @@ describe('getUserExerciseWeights (carga real por ejercicio, independiente del ch
 });
 
 describe('saveExerciseWeight (upsert por socio+ejercicio)', () => {
-  it('hace upsert con onConflict de user_id+routine_exercise_id', async () => {
+  it('hace upsert en user_exercise_weights por (user_id, exercise_id)', async () => {
     const chain = makeChain({ error: null });
     mockedFrom.mockImplementation(() => chain);
 
-    await saveExerciseWeight('user-1', 're-1', '65kg');
+    await saveExerciseWeight('user-1', 'ex-1', '65kg');
 
-    expect(mockedFrom).toHaveBeenCalledWith('routine_exercise_weights');
+    expect(mockedFrom).toHaveBeenCalledWith('user_exercise_weights');
     expect(chain.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ user_id: 'user-1', routine_exercise_id: 're-1', weight_used: '65kg' }),
-      { onConflict: 'user_id,routine_exercise_id' }
+      expect.objectContaining({ user_id: 'user-1', exercise_id: 'ex-1', weight_used: '65kg' }),
+      { onConflict: 'user_id,exercise_id' }
     );
+    // Nunca por la fila de la rutina (se regenera cada vez que Seba re-guarda).
+    expect(chain.upsert.mock.calls[0][0]).not.toHaveProperty('routine_exercise_id');
   });
 
-  it('no rompe si la tabla todavía no existe -- el socio puede seguir editando en pantalla', async () => {
+  // Regresión real (2026-09-29): la tabla nunca se creó en producción y este
+  // guardado "andaba" sin guardar nada, sin que nadie se enterara.
+  it('ESCRITURA sin la tabla: tira un error claro (nunca en silencio) y lo registra', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockedFrom.mockImplementation(() => makeChain({ error: { code: '42P01', message: 'undefined_table' } }));
 
-    await expect(saveExerciseWeight('user-1', 're-1', '65kg')).resolves.toBeUndefined();
+    await expect(saveExerciseWeight('user-1', 'ex-1', '65kg')).rejects.toThrow(
+      'El guardado de cargas todavía no está activado en el servidor.'
+    );
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_user_exercise_weights.sql'), 'undefined_table');
+    err.mockRestore();
+  });
+
+  it('ESCRITURA con otro error real (ej. RLS): también se propaga', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ error: { code: '42501', message: 'new row violates row-level security' } }));
+    await expect(saveExerciseWeight('user-1', 'ex-1', '65kg')).rejects.toThrow('row-level security');
   });
 });
 
@@ -103,8 +122,12 @@ describe('eliminarSesionHistorial (RPC: borra la sesión completa, solo del due�
   });
 
   it('si la función todavía no existe (v2 sin correr), avisa con un error claro', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
-    await expect(eliminarSesionHistorial('s-1')).rejects.toThrow('falta actualizar el servidor');
+    await expect(eliminarSesionHistorial('s-1')).rejects.toThrow(
+      'El borrado de entrenamientos todavía no está activado en el servidor.'
+    );
+    err.mockRestore();
   });
 
   it('un error real se propaga', async () => {
@@ -164,13 +187,15 @@ describe('finalizarEntrenamiento (RPC con ventana de 10 s y tope diario en el se
     expect(r).toEqual({ estado: 'reciente' });
   });
 
-  it('si la función todavía no existe (migración sin correr), devuelve no_disponible sin romper', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  it('ESCRITURA sin la función (migración sin correr): tira un error claro -- ya no festeja sin guardar', async () => {
+    const err = jest.spyOn(console, 'error').mockImplementation(() => {});
     mockedRpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'function not found' } });
 
-    const r = await finalizarEntrenamiento('Día 1', 5, items);
-    expect(r).toEqual({ estado: 'no_disponible' });
-    warn.mockRestore();
+    await expect(finalizarEntrenamiento('Día 1', 5, items)).rejects.toThrow(
+      'El historial de entrenamientos todavía no está activado en el servidor.'
+    );
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_routine_history.sql'), 'function not found');
+    err.mockRestore();
   });
 
   it('un error real se propaga', async () => {
@@ -238,8 +263,11 @@ describe('getRoutineHistory (solo lectura)', () => {
     expect(dias).toHaveLength(1);
   });
 
-  it('si la tabla todavía no existe, devuelve un historial vacío', async () => {
+  it('LECTURA sin la tabla: historial vacío pero con console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockedFrom.mockImplementation(() => makeChain({ data: null, error: { code: '42P01', message: 'undefined_table' } }));
     await expect(getRoutineHistory('user-1')).resolves.toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_routine_history.sql'), 'undefined_table');
+    warn.mockRestore();
   });
 });

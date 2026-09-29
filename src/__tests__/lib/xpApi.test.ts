@@ -344,3 +344,23 @@ describe('registrarHoyEntrene (único punto de escritura -- el RPC hace todo el 
     await expect(registrarHoyEntrene()).rejects.toThrow('Todavía no tenés ninguna disciplina activa');
   });
 });
+
+describe('regla de errores: una LECTURA que cae al valor por defecto nunca es silenciosa', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('fetchEntrenamientosHoy sin xp_events: devuelve 0 pero deja console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: '42P01', message: 'relation "xp_events" does not exist' } }));
+
+    expect(await fetchEntrenamientosHoy('user-1')).toBe(0);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Entrenamientos de hoy'), expect.stringContaining('xp_events'));
+  });
+
+  it('fetchAsistenciaHoyRegistrada sin xp_events: devuelve false pero deja console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedFrom.mockReturnValue(makeChain({ data: null, error: { code: 'PGRST205', message: 'schema cache' } }));
+
+    expect(await fetchAsistenciaHoyRegistrada('user-1')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});

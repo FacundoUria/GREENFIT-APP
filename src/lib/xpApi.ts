@@ -41,6 +41,13 @@ function isMissingRelationError(error: { code?: string; message?: string } | nul
   return msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('could not find');
 }
 
+// Regla (igual que routinesApi.ts): una LECTURA puede caer a un valor por
+// defecto sin romper la pantalla, pero nunca en silencio -- queda un
+// console.warn. Las ESCRITURAS (registrarHoyEntrene) siempre tiran el error.
+function avisarLecturaConFallback(que: string, error: { message?: string } | null) {
+  console.warn(`[GreenFit] ${que}: se usa el valor por defecto.`, error?.message);
+}
+
 // XP total acumulado real de la tabla xp_events. Si esa tabla todavía no
 // está desplegada, estima el XP a partir de clases con asistencia real
 // (mismo peso que la regla real de +100 por clase en disciplinas
@@ -51,6 +58,7 @@ export async function fetchTotalXp(userId: string): Promise<number> {
   const { data, error } = await supabase.from('xp_events').select('xp_amount').eq('user_id', userId);
   if (!error) return (data ?? []).reduce((acc, row: any) => acc + (row.xp_amount ?? 0), 0);
   if (!isMissingRelationError(error)) throw new Error(error.message);
+  avisarLecturaConFallback('XP total (falta xp_events, se estima por asistencias)', error);
 
   const { count, error: countError } = await supabase
     .from('bookings')
@@ -75,7 +83,10 @@ export async function fetchAsistenciaHoyRegistrada(userId: string): Promise<bool
     .eq('event_date', hoy)
     .maybeSingle();
   if (error) {
-    if (isMissingRelationError(error)) return false;
+    if (isMissingRelationError(error)) {
+      avisarLecturaConFallback('Asistencia de hoy (falta xp_events)', error);
+      return false;
+    }
     throw new Error(error.message);
   }
   return !!data;
@@ -96,6 +107,7 @@ export async function fetchFechasAsistencia(userId: string): Promise<string[]> {
     .eq('event_type', 'asistencia');
   if (!error) return Array.from(new Set((data ?? []).map((row: any) => row.event_date as string)));
   if (!isMissingRelationError(error)) throw new Error(error.message);
+  avisarLecturaConFallback('Fechas de asistencia (falta xp_events, se usan reservas con asistencia)', error);
 
   const { data: bookingsData, error: bookingsError } = await supabase
     .from('bookings')
@@ -166,7 +178,10 @@ export function calcularInicioCicloDeCorte(diaCorte: number, hoy: Date): string 
 async function resolverInicioDelCiclo(hoy: Date): Promise<string> {
   const inicioMesCalendario = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
   const { data, error } = await supabase.rpc('mi_dia_corte').single();
-  if (error) return inicioMesCalendario;
+  if (error) {
+    avisarLecturaConFallback('Día de corte (mi_dia_corte), se usa el 1° del mes', error);
+    return inicioMesCalendario;
+  }
 
   const resultado = data as { vinculado: boolean; dia_corte: number | null } | null;
   if (!resultado?.vinculado || !resultado.dia_corte) return inicioMesCalendario;
@@ -193,6 +208,7 @@ export async function fetchClasesDelMes(userId: string): Promise<number> {
     .lte('event_date', hoyStr);
   if (!error) return new Set((data ?? []).map((row: any) => row.event_date as string)).size;
   if (!isMissingRelationError(error)) throw new Error(error.message);
+  avisarLecturaConFallback('Clases del mes (falta xp_events, se usan reservas con asistencia)', error);
 
   const { count, error: countError } = await supabase
     .from('bookings')
@@ -211,7 +227,11 @@ export async function fetchClasesDelMes(userId: string): Promise<number> {
 // tanto desde Mi Perfil como desde Inicio.
 export async function fetchMiembroDesde(userId: string): Promise<string | null> {
   const { data, error } = await supabase.from('profiles').select('created_at').eq('id', userId).single();
-  if (error || !data?.created_at) return null;
+  if (error) {
+    avisarLecturaConFallback('Miembro desde (profiles.created_at)', error);
+    return null;
+  }
+  if (!data?.created_at) return null;
   return data.created_at as string;
 }
 
@@ -235,7 +255,10 @@ export async function fetchEntrenamientosHoy(userId: string): Promise<number> {
     .is('discipline_id', null)
     .eq('event_date', hoy);
   if (error) {
-    if (isMissingRelationError(error)) return 0;
+    if (isMissingRelationError(error)) {
+      avisarLecturaConFallback('Entrenamientos de hoy (falta xp_events)', error);
+      return 0;
+    }
     throw new Error(error.message);
   }
   return (data ?? []).length;

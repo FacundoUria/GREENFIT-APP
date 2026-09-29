@@ -2,17 +2,32 @@ import { supabase } from './supabase';
 import { Exercise, Routine, RoutineDay } from '../types';
 
 // 42P01 = undefined_table (Postgres). PGRST205 = PostgREST no encuentra la
-// tabla en su schema cache -- mismo criterio que xpApi.ts/avatarApi.ts: si
-// `routine_exercise_weights` (backend/supabase_migration_routine_weights.sql)
-// todavía no se desplegó en este ambiente, la carga real simplemente no se
-// precarga/guarda todavía, sin romper el resto de la pantalla.
-// Mismo criterio para `finalizar_entrenamiento` (42883 = undefined_function,
-// PGRST202 = PostgREST no encuentra la función).
+// tabla en su schema cache. 42883 = undefined_function, PGRST202 = PostgREST
+// no encuentra la función. O sea: "esa migración no corrió en este ambiente".
+//
+// Regla para ese caso (después de descubrir, el 2026-09-29, que
+// routine_exercise_weights nunca se había creado en producción y el guardado
+// de pesos fallaba EN SILENCIO):
+// - LECTURAS: pueden caer a un valor por defecto (sugerencia del entrenador,
+//   historial vacío) sin romper la pantalla, pero siempre con console.warn.
+// - ESCRITURAS: nunca en silencio -- se tira un error con un mensaje claro y
+//   la pantalla se lo muestra al socio.
 function isMissingRelationError(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   if (['42P01', 'PGRST205', '42883', 'PGRST202'].includes(error.code ?? '')) return true;
   const msg = (error.message ?? '').toLowerCase();
   return msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('could not find');
+}
+
+// Lectura sin la migración corrida: se sigue, pero queda registrado.
+function avisarLecturaSinMigracion(que: string, migracion: string, error: { message?: string }) {
+  console.warn(`[GreenFit] ${que}: falta correr ${migracion} en este ambiente -- se usa el valor por defecto.`, error.message);
+}
+
+// Escritura sin la migración corrida: error explícito (nunca en silencio).
+function errorEscrituraSinMigracion(que: string, migracion: string, error: { message?: string }): Error {
+  console.error(`[GreenFit] ${que}: falta correr ${migracion} en este ambiente.`, error.message);
+  return new Error(`${que} todavía no está activado en el servidor. Avisale al gimnasio.`);
 }
 
 function mapExercise(row: {
@@ -127,39 +142,53 @@ export async function unmarkExerciseCompleted(
 // -- Carga real por ejercicio (Módulo "Registro dinámico de peso") --
 //
 // Independiente del checklist diario de arriba: acá se guarda la ÚLTIMA
-// carga que el socio usó en cada ejercicio, para que la próxima vez que
+// carga que el socio usó en cada EJERCICIO, para que la próxima vez que
 // entre a Mi Rutina la vea precargada en vez de escribirla de cero.
 // `weight_suggestion` (routine_exercises, cargado por el entrenador) sigue
 // siendo el valor por defecto mientras el socio no haya guardado el suyo.
+//
+// Tabla `user_exercise_weights` (backend/supabase_migration_user_exercise_weights.sql),
+// atada a exercise_id y NO a routine_exercise_id: el panel Admin regenera
+// los routine_exercises cada vez que Seba guarda una rutina, pero conserva el
+// exercise_id -> la carga sobrevive a las ediciones de la rutina. Si el mismo
+// ejercicio aparece dos veces en una rutina, comparte la carga.
 
-// routine_exercise_id -> última carga que el socio cargó a mano ahí.
+// exercise_id -> última carga que el socio usó en ese ejercicio.
 export async function getUserExerciseWeights(userId: string): Promise<Map<string, string>> {
   const { data, error } = await supabase
-    .from('routine_exercise_weights')
-    .select('routine_exercise_id, weight_used')
+    .from('user_exercise_weights')
+    .select('exercise_id, weight_used')
     .eq('user_id', userId);
   if (error) {
-    if (isMissingRelationError(error)) return new Map();
+    if (isMissingRelationError(error)) {
+      // Sin la tabla, la pantalla muestra la sugerencia del entrenador.
+      avisarLecturaSinMigracion('Cargas guardadas', 'supabase_migration_user_exercise_weights.sql', error);
+      return new Map();
+    }
     throw new Error(error.message);
   }
-  return new Map((data ?? []).map((row) => [row.routine_exercise_id as string, row.weight_used as string]));
+  return new Map((data ?? []).map((row) => [row.exercise_id as string, row.weight_used as string]));
 }
 
-// Upsert por (user_id, routine_exercise_id) -- pisa el valor anterior, no
-// acumula historial (ver índice único de la migración). Silencioso si la
-// tabla todavía no existe: el socio puede seguir editando el campo en
-// pantalla, simplemente no persiste todavía entre sesiones.
-export async function saveExerciseWeight(userId: string, routineExerciseId: string, weight: string): Promise<void> {
-  const { error } = await supabase.from('routine_exercise_weights').upsert(
+// Upsert por (user_id, exercise_id) -- pisa el valor anterior, no acumula
+// historial (ver índice único de la migración). Si la tabla no existe, tira
+// error: la pantalla le avisa al socio que la carga NO se guardó.
+export async function saveExerciseWeight(userId: string, exerciseId: string, weight: string): Promise<void> {
+  const { error } = await supabase.from('user_exercise_weights').upsert(
     {
       user_id: userId,
-      routine_exercise_id: routineExerciseId,
+      exercise_id: exerciseId,
       weight_used: weight,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'user_id,routine_exercise_id' }
+    { onConflict: 'user_id,exercise_id' }
   );
-  if (error && !isMissingRelationError(error)) throw new Error(error.message);
+  if (error) {
+    if (isMissingRelationError(error)) {
+      throw errorEscrituraSinMigracion('El guardado de cargas', 'supabase_migration_user_exercise_weights.sql', error);
+    }
+    throw new Error(error.message);
+  }
 }
 
 // -- Historial de entrenamientos (pestaña "Historial" de Mi Rutina) --
@@ -188,10 +217,7 @@ export type ResultadoFinalizar =
   // dispositivo): no se guardó de nuevo.
   | { estado: 'reciente' }
   // Ya registró 20 entrenamientos hoy.
-  | { estado: 'tope_diario' }
-  // La migración todavía no corrió en este ambiente: el socio igual ve el
-  // cierre, simplemente no queda en el historial.
-  | { estado: 'no_disponible' };
+  | { estado: 'tope_diario' };
 
 export async function finalizarEntrenamiento(
   tituloDia: string | null,
@@ -205,11 +231,9 @@ export async function finalizarEntrenamiento(
   });
   if (error) {
     if (isMissingRelationError(error)) {
-      console.warn(
-        '[GreenFit] Historial de rutina no disponible (¿falta correr supabase_migration_routine_history.sql?):',
-        error.message
-      );
-      return { estado: 'no_disponible' };
+      // Antes esto devolvía 'no_disponible' y la pantalla festejaba igual,
+      // sin que nada quedara guardado. Ahora es un error visible.
+      throw errorEscrituraSinMigracion('El historial de entrenamientos', 'supabase_migration_routine_history.sql', error);
     }
     throw new Error(error.message);
   }
@@ -229,7 +253,7 @@ export async function eliminarSesionHistorial(sesionId: string): Promise<number>
   const { data, error } = await supabase.rpc('eliminar_sesion_historial', { p_sesion_id: sesionId });
   if (error) {
     if (isMissingRelationError(error)) {
-      throw new Error('Todavía no se puede eliminar del historial (falta actualizar el servidor).');
+      throw errorEscrituraSinMigracion('El borrado de entrenamientos', 'supabase_migration_routine_history_v2.sql', error);
     }
     throw new Error(error.message);
   }
@@ -334,7 +358,10 @@ export async function getRoutineHistory(userId: string): Promise<DiaHistorial[]>
     .order('created_at', { ascending: false })
     .limit(1000);
   if (error) {
-    if (isMissingRelationError(error)) return [];
+    if (isMissingRelationError(error)) {
+      avisarLecturaSinMigracion('Historial de entrenamientos', 'supabase_migration_routine_history.sql', error);
+      return [];
+    }
     throw new Error(error.message);
   }
   return agruparHistorial((data ?? []) as FilaHistorial[]);

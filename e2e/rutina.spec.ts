@@ -45,10 +45,22 @@ const DAY_1 = {
   ],
 };
 
+// Respuesta real de finalizar_entrenamiento() cuando registra. Antes estos
+// tests no la configuraban y dependían de que, sin la función, la pantalla
+// festejara igual SIN guardar nada -- ese "fallo silencioso" ya no existe
+// (ahora es un error visible), así que se configura explícitamente.
+const FINALIZAR_OK = () => ({
+  registrado: true,
+  sesion_id: 'e2e-sesion',
+  motivo: null,
+  disponible_desde: new Date(Date.now() + 10_000).toISOString(),
+});
+
 test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
   test('agrupa por grupo muscular, marca ejercicios y actualiza el indicador de progreso', async ({ page }) => {
     await loginComoSocio(page, {
       tables: { ...tablasBase(), routines: [ROUTINE], routine_days: [DAY_1], routine_completions: [] },
+      rpc: { finalizar_entrenamiento: FINALIZAR_OK },
     });
 
     await irATab(page, 'Mi Rutina');
@@ -84,6 +96,7 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
   test('cerrar el entreno sin completar todo muestra el copy de progreso parcial', async ({ page }) => {
     await loginComoSocio(page, {
       tables: { ...tablasBase(), routines: [ROUTINE], routine_days: [DAY_1], routine_completions: [] },
+      rpc: { finalizar_entrenamiento: FINALIZAR_OK },
     });
 
     await irATab(page, 'Mi Rutina');
@@ -103,7 +116,7 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
       routines: [ROUTINE],
       routine_days: [DAY_1],
       routine_completions: [],
-      routine_exercise_weights: [],
+      user_exercise_weights: [] as any[],
     };
     await loginComoSocio(page, { tables: tablas });
 
@@ -117,13 +130,15 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
     await cargaPressBanca.fill('25kg');
     await cargaPressBanca.blur();
 
-    // Quedó guardado en el mock (routine_exercise_weights), no solo en
-    // memoria -- refleja lo que en producción persiste vía saveExerciseWeight.
+    // Quedó guardado en el mock (user_exercise_weights), no solo en memoria,
+    // y atado al EJERCICIO (ex-1), no a la fila de la rutina (e2e-re-1) --
+    // refleja lo que en producción persiste vía saveExerciseWeight.
     await expect
       .poll(() =>
-        tablas.routine_exercise_weights.some((w: any) => w.routine_exercise_id === 'e2e-re-1' && w.weight_used === '25kg')
+        tablas.user_exercise_weights.some((w: any) => w.exercise_id === 'ex-1' && w.weight_used === '25kg')
       )
       .toBe(true);
+    expect(tablas.user_exercise_weights.every((w: any) => !('routine_exercise_id' in w))).toBe(true);
   });
 
   test('si el socio ya había guardado una carga antes, la ve precargada en vez de la sugerencia del entrenador', async ({
@@ -137,14 +152,37 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
         routine_completions: [],
         // Ya cargó 25kg en una sesión anterior -- distinto de los 20kg que
         // sugiere el entrenador (weight_suggestion de Press de banca).
-        routine_exercise_weights: [
-          { id: 'w-1', user_id: SOCIO_DEMO.id, routine_exercise_id: 'e2e-re-1', weight_used: '25kg' },
-        ],
+        user_exercise_weights: [{ id: 'w-1', user_id: SOCIO_DEMO.id, exercise_id: 'ex-1', weight_used: '25kg' }],
       },
     });
 
     await irATab(page, 'Mi Rutina');
     await expect(page.getByLabel('Carga (kg) usada en este ejercicio').first()).toHaveValue('25kg');
+  });
+
+  test('si Seba re-guardó la rutina (filas con ids nuevos, mismo ejercicio), la carga guardada se sigue viendo', async ({
+    page,
+  }) => {
+    // Lo que deja el panel Admin después de saveRoutineFull: día y filas
+    // recreados con ids NUEVOS, pero el mismo exercise_id en cada fila.
+    const DIA_REGUARDADO = {
+      ...DAY_1,
+      id: 'e2e-day-1-nuevo',
+      routine_exercises: DAY_1.routine_exercises.map((re) => ({ ...re, id: `${re.id}-nuevo` })),
+    };
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        routines: [ROUTINE],
+        routine_days: [DIA_REGUARDADO],
+        routine_completions: [],
+        // La carga la guardó ANTES de que Seba re-guardara la rutina.
+        user_exercise_weights: [{ id: 'w-1', user_id: SOCIO_DEMO.id, exercise_id: 'ex-1', weight_used: '27.5kg' }],
+      },
+    });
+
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByLabel('Carga (kg) usada en este ejercicio').first()).toHaveValue('27.5kg');
   });
 });
 
@@ -155,7 +193,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
       routines: [ROUTINE],
       routine_days: [DAY_1],
       routine_completions: [],
-      routine_exercise_weights: [],
+      user_exercise_weights: [],
       routine_history: [] as any[],
     };
     const llamadas: any[] = [];

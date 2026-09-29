@@ -428,10 +428,12 @@ export default function UserRoutineScreen() {
   const [selectedDayIdx, setSelectedDayIdx] = useState(0);
   const [completados, setCompletados] = useState<Set<string>>(new Set());
   const [modalFinalVisible, setModalFinalVisible] = useState(false);
-  // routine_exercise_id -> última carga que el socio guardó ahí. Vacío
-  // (sin entrada) para cualquier ejercicio en el que todavía no cargó la
-  // suya -- en ese caso se muestra la sugerencia del entrenador como valor
-  // por defecto (ver `pesoDe` más abajo), sin que eso cuente como "guardado".
+  // exercise_id -> última carga que el socio guardó en ese ejercicio (por
+  // EJERCICIO, no por fila de la rutina: sobrevive a que Seba re-guarde la
+  // rutina, y un ejercicio repetido comparte la carga). Vacío (sin entrada)
+  // para cualquier ejercicio en el que todavía no cargó la suya -- en ese
+  // caso se muestra la sugerencia del entrenador como valor por defecto (ver
+  // `pesoDe` más abajo), sin que eso cuente como "guardado".
   const [pesos, setPesos] = useState<Map<string, string>>(new Map());
   const [vista, setVista] = useState<Vista>('hoy');
   // `finalizando` = esperando la respuesta del servidor (spinner).
@@ -561,28 +563,28 @@ export default function UserRoutineScreen() {
   // guardó ninguna, cae a la sugerencia del entrenador (weight_suggestion)
   // como punto de partida -- nunca un campo vacío de la nada.
   function pesoDe(bloque: RoutineExercise): string {
-    return pesos.get(bloque.id) ?? bloque.weightSuggestion ?? '';
+    return pesos.get(bloque.exercise.id) ?? bloque.weightSuggestion ?? '';
   }
 
-  async function handleGuardarPeso(routineExerciseId: string, nuevoValor: string) {
+  async function handleGuardarPeso(exerciseId: string, nuevoValor: string) {
     if (!user) return;
-    const anterior = pesos.get(routineExerciseId);
+    const anterior = pesos.get(exerciseId);
 
     // Optimista, mismo criterio que el checklist: se ve al instante, se
-    // corrige sola si la escritura falla.
+    // corrige sola si la escritura falla (y el socio ve el aviso).
     setPesos((prev) => {
       const next = new Map(prev);
-      next.set(routineExerciseId, nuevoValor);
+      next.set(exerciseId, nuevoValor);
       return next;
     });
 
     try {
-      await saveExerciseWeight(user.id, routineExerciseId, nuevoValor);
+      await saveExerciseWeight(user.id, exerciseId, nuevoValor);
     } catch (err) {
       setPesos((prev) => {
         const next = new Map(prev);
-        if (anterior === undefined) next.delete(routineExerciseId);
-        else next.set(routineExerciseId, anterior);
+        if (anterior === undefined) next.delete(exerciseId);
+        else next.set(exerciseId, anterior);
         return next;
       });
       showAlert('No se pudo guardar la carga', err instanceof Error ? err.message : 'Intentá de nuevo.');
@@ -820,7 +822,7 @@ export default function UserRoutineScreen() {
                     completado={completados.has(bloque.id)}
                     peso={pesoDe(bloque)}
                     onToggle={() => handleToggle(bloque.id)}
-                    onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.id, nuevoValor)}
+                    onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.exercise.id, nuevoValor)}
                     onVerDemo={setVideoUrl}
                   />
                 ))

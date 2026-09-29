@@ -104,7 +104,7 @@ begin
   $f$, v_col, v_routine) into v_day, v_title, v_total;
   if v_day is null then raise exception 'La rutina vigente no tiene ningún día con 3 o más ejercicios'; end if;
 
-  v_hay_pesos := to_regclass('public.routine_exercise_weights') is not null;
+  v_hay_pesos := to_regclass('public.user_exercise_weights') is not null;  -- carga por EJERCICIO (supabase_migration_user_exercise_weights.sql)
   execute format($f$
     create temp table _ej as
     select re.id as re_id, e.name as nombre, e.muscle_group as grupo, re.sets as series, re.reps as reps,
@@ -116,7 +116,7 @@ begin
     where re.%I = %L
   $f$,
     case when v_hay_pesos then 'w.weight_used' else 'null::text' end,
-    case when v_hay_pesos then format('left join routine_exercise_weights w on w.routine_exercise_id = re.id and w.user_id = %L', v_user) else '' end,
+    case when v_hay_pesos then format('left join user_exercise_weights w on w.exercise_id = re.exercise_id and w.user_id = %L', v_user) else '' end,
     v_col, v_day);
 
   select max(created_at) into v_ultimo from routine_history where user_id = v_user;
