@@ -10,7 +10,7 @@ const REAFIRMACION_SALUD =
   'Declaro que mi estado de salud no ha cambiado desde mi última declaración y que me encuentro en condiciones de realizar la actividad.';
 
 // Cubre el checklist de Agenda: tarjetas de clases con el estilo renovado
-// (verde flúor / badge "Disponible") y la ausencia del botón flotante "+"
+// (pill decorativo "Reservar" dentro de la tarjeta tocable) y la ausencia del botón flotante "+"
 // (se sacó de acá -- ahora es exclusivo de Comunidad).
 test.describe('PWA -- Mi Agenda', () => {
   // Reloj congelado a las 08:00 de HOY (mismo día real que HOY_STR, solo
@@ -52,7 +52,7 @@ test.describe('PWA -- Mi Agenda', () => {
     // "CrossFit" en su Hero Card a partir del mismo fixture de user_credits.
     const tarjetaClase = page.getByTestId('agenda-card-class-crossfit-hoy');
     await expect(tarjetaClase.getByText('CrossFit')).toBeVisible();
-    await expect(tarjetaClase.getByText('Disponible')).toBeVisible();
+    await expect(tarjetaClase.getByText('Reservar', { exact: true })).toBeVisible();
 
     // El FAB de Agenda ("Volver a hoy") se sacó -- y el de Comunidad
     // ("Nueva publicación") nunca debería aparecer acá.
@@ -149,7 +149,51 @@ test.describe('PWA -- Mi Agenda', () => {
     await page.getByText('Cancelar', { exact: true }).click();
     await expect(page.getByText('Reservar CrossFit')).toHaveCount(0);
     expect(bookClassLlamado).toBe(false);
-    await expect(page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Disponible')).toBeVisible();
+    await expect(page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Reservar', { exact: true })).toBeVisible();
+  });
+
+  // Rediseño: el pill "Reservar" es PURAMENTE decorativo -- tocar justo
+  // encima de él (en un navegador real) hace exactamente lo mismo que tocar
+  // cualquier otra parte de la tarjeta: abre la confirmación, no reserva directo.
+  test('tocar encima del pill "Reservar" hace lo mismo que tocar la tarjeta (no es un botón aparte)', async ({ page }) => {
+    let bookClassLlamado = false;
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        classes: [CLASE_HOY],
+        user_credits: [
+          {
+            id: 'uc-1',
+            user_id: SOCIO_DEMO.id,
+            remaining_credits: 5,
+            expires_at: EN_30_DIAS,
+            created_at: '2026-08-01T00:00:00.000Z',
+            discipline: DISCIPLINA_CROSSFIT,
+            pack: null,
+          },
+        ],
+      },
+      rpc: { book_class: () => ((bookClassLlamado = true), 'e2e-booking-id') },
+    });
+
+    await irATab(page, 'Agenda');
+    // Clic REAL del mouse en las coordenadas del pill (no locator.click():
+    // Playwright se niega a clickear un elemento con pointer-events: none,
+    // que es justamente lo que hace que el toque le llegue a la tarjeta).
+    const pill = page.getByTestId('agenda-card-class-crossfit-hoy').getByText('Reservar', { exact: true });
+    await expect(pill).toBeVisible();
+    const caja = await pill.boundingBox();
+    if (!caja) throw new Error('el pill no tiene caja visible');
+    // Lo que el navegador tiene justo debajo de ese punto es la tarjeta, no el pill.
+    const debajo = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.closest('[data-testid]')?.getAttribute('data-testid') ?? null,
+      [caja.x + caja.width / 2, caja.y + caja.height / 2]
+    );
+    expect(debajo).toBe('agenda-card-class-crossfit-hoy');
+    await page.mouse.click(caja.x + caja.width / 2, caja.y + caja.height / 2);
+
+    await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
+    expect(bookClassLlamado).toBe(false);
   });
 
   // Mismo flujo, pero confirmando: book_class se llama, el badge pasa a

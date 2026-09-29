@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -29,6 +30,8 @@ import ConsentModal from '../../components/ConsentModal';
 import MessageModal, { MessageModalContent } from '../../components/MessageModal';
 import { fetchTieneConsentimientoVigente, registrarConsentimiento } from '../../lib/consentApi';
 import { capitalize } from '../../lib/dateFormat';
+import Avatar from '../../components/Avatar';
+import { mockup, alfa, colorDisciplinaMockup, fuentes, useFuentesMockup } from '../../theme/agendaMockup';
 
 // Timeout de red para reservar/cancelar: el cliente de Supabase no tiene
 // uno por defecto -- si la conexión se cuelga a mitad de la request (wifi
@@ -106,6 +109,7 @@ async function fetchTieneContactoEmergencia(userId: string): Promise<boolean> {
 
 export default function AgendaMobileView({ navigation }: any) {
   useTicker();
+  useFuentesMockup();
   const { user } = useAuth();
   const { configuracion } = useConfiguracion();
   const cancelLimitMs = configuracion.limiteCancelacionMinutos * 60 * 1000;
@@ -189,9 +193,10 @@ export default function AgendaMobileView({ navigation }: any) {
     target.setHours(0, 0, 0, 0);
     const diffDays = Math.round((target.getTime() - today.getTime()) / 86_400_000);
     const eyebrow = diffDays === 0 ? 'HOY' : diffDays === 1 ? 'MAÑANA' : 'PRÓXIMOS DÍAS';
-    const title = capitalize(
-      selectedDate.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-    );
+    // Formato del mockup: "Jueves 24 de Septiembre" (sin coma, mes en mayúscula).
+    const diaSemana = selectedDate.toLocaleDateString('es-AR', { weekday: 'long' });
+    const mes = selectedDate.toLocaleDateString('es-AR', { month: 'long' });
+    const title = `${capitalize(diaSemana)} ${selectedDate.getDate()} de ${capitalize(mes)}`;
     return { eyebrow, title };
   }, [selectedDate]);
 
@@ -364,70 +369,71 @@ export default function AgendaMobileView({ navigation }: any) {
     const credits = creditsByDiscipline.get(item.disciplineId) ?? 0;
     const sinCreditos = !item.isBooked && !isFull && credits <= 0;
     const startLabel = formatClassTime(item.startAt);
-    const endLabel = item.endAt ? formatClassTime(item.endAt) : null;
     const countdown = getCountdown(item.startAt);
     const isPending = pendingId === item.id;
 
-    const badge = item.isBooked
-      ? { label: 'Reservada', bg: colors.primary, fg: colors.onPrimary, icon: 'checkmark-circle' as const }
+    // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
+    // con pointerEvents="none", así cualquier toque (incluido encima del
+    // pill) lo recibe el TouchableOpacity de la tarjeta y dispara el mismo
+    // handlePress de siempre. Calcado del mockup: "RESERVAR" verde sólido y
+    // "SIN CUPO" gris sólido; los dos estados que el mockup no tiene
+    // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos, sin íconos.
+    const pill = item.isBooked
+      ? { label: 'Reservada', caja: styles.pillReservada, texto: styles.pillTextoReservada }
       : isFull
-      ? { label: 'Sin cupo', bg: colors.surfaceAlt, fg: colors.danger, icon: 'close-circle' as const }
+      ? { label: 'Sin cupo', caja: styles.pillSinCupo, texto: styles.pillTextoSinCupo }
       : sinCreditos
-      ? { label: 'Sin créditos', bg: colors.surfaceAlt, fg: colors.warning, icon: 'alert-circle' as const }
-      : { label: 'Disponible', bg: 'rgba(0, 255, 56, 0.14)', fg: colors.primary, icon: 'ellipse-outline' as const };
+      ? { label: 'Sin créditos', caja: styles.pillSinCreditos, texto: styles.pillTextoSinCreditos }
+      : { label: 'Reservar', caja: styles.pillReservar, texto: styles.pillTextoReservar };
+
+    const colorDisciplina = isFull
+      ? mockup.onSurfaceVariant
+      : colorDisciplinaMockup(item.title, disciplineStyle.color);
+
+    // Info funcional que el mockup no tiene, en letra chica para no romper
+    // el layout compacto: profesor · cupos · cuenta regresiva.
+    const detalles = [
+      item.instructor ? `Prof. ${item.instructor}` : null,
+      `${item.bookedCount}/${item.capacity} cupos`,
+    ].filter(Boolean) as string[];
 
     return (
       <TouchableOpacity
         testID={`agenda-card-${item.id}`}
         activeOpacity={0.85}
-        style={[styles.card, { borderLeftColor: disciplineStyle.color }, item.isBooked && styles.cardBooked]}
+        style={[styles.card, isFull && styles.cardSinCupo, item.isBooked && styles.cardReservada]}
         onPress={() => handlePress(item)}
         disabled={isPending}
       >
-        <View
-          style={[
-            styles.iconCircle,
-            { backgroundColor: `${disciplineStyle.color}26`, borderColor: `${disciplineStyle.color}55` },
-          ]}
-        >
-          <Ionicons name={disciplineStyle.icon} size={18} color={disciplineStyle.color} />
+        <View style={styles.cardBody}>
+          <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={[styles.hora, isFull && styles.horaSinCupo]}>
+            {startLabel}
+            <Text style={styles.horaHs}> hs</Text>
+          </Text>
+          <Text style={styles.detalles} numberOfLines={1}>
+            {detalles.join(' · ')}
+            {!countdown.isPast && (
+              <>
+                {' · '}
+                <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+              </>
+            )}
+          </Text>
         </View>
 
-        <View style={styles.cardBody}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.className} numberOfLines={1}>
-              {item.title}
-            </Text>
-            {isPending ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : (
-              <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                <Ionicons name={badge.icon} size={12} color={badge.fg} />
-                <Text style={[styles.badgeText, { color: badge.fg }]}>{badge.label}</Text>
-              </View>
-            )}
-          </View>
-
-          <Text style={styles.metaText}>
-            {startLabel}
-            {endLabel ? ` - ${endLabel}` : ''} hs
-            {item.instructor ? ` · Prof. ${item.instructor}` : ''}
-          </Text>
-
-          <View style={styles.cardFooterRow}>
-            {!!item.location && (
-              <View style={styles.footerItem}>
-                <Ionicons name="location-outline" size={12} color={colors.textSecondary} />
-                <Text style={styles.footerText}>{item.location}</Text>
-              </View>
-            )}
-            <Text style={styles.footerText}>
-              {item.bookedCount}/{item.capacity} cupos
-            </Text>
-            {!countdown.isPast && (
-              <Text style={[styles.footerText, countdown.isSoon && styles.countdownSoon]}>{countdown.label}</Text>
-            )}
-          </View>
+        <View style={styles.pillSlot} pointerEvents="none">
+          {isPending ? (
+            <View style={[styles.pill, styles.pillSinCupo]} testID={`agenda-card-cargando-${item.id}`}>
+              <ActivityIndicator size="small" color={mockup.primaryContainer} />
+            </View>
+          ) : (
+            <View style={[styles.pill, pill.caja]}>
+              <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -435,8 +441,28 @@ export default function AgendaMobileView({ navigation }: any) {
 
   return (
     <View style={styles.container}>
+      {/* Brillo ambiental del mockup (dos círculos verdes difuminados). Solo
+          web: el blur es un filtro CSS; en nativo no se dibuja. */}
+      {Platform.OS === 'web' && (
+        <View style={styles.brilloFondo} pointerEvents="none">
+          <View style={styles.brilloArriba} />
+          <View style={styles.brilloAbajo} />
+        </View>
+      )}
+
+      {/* Header calcado del mockup (avatar + saludo + título). Sin el pill de
+          "15 créditos": los créditos son por disciplina y sumarlos engañaría
+          al socio. El título sigue siendo "Mi Agenda". */}
       <View style={styles.headerRow}>
-        <Text style={styles.header}>Mi Agenda</Text>
+        <View style={styles.avatarRing}>
+          <Avatar uri={user?.avatarUrl} name={user?.name ?? ''} size={36} />
+        </View>
+        <View style={styles.headerTextos}>
+          <Text style={styles.headerSaludo} numberOfLines={1}>
+            Hola, {(user?.name ?? '').trim().split(/\s+/)[0] || 'socio'}
+          </Text>
+          <Text style={styles.header}>Mi Agenda</Text>
+        </View>
       </View>
 
       <View style={styles.daySelectorWrap}>
@@ -444,8 +470,12 @@ export default function AgendaMobileView({ navigation }: any) {
       </View>
 
       <View style={styles.dayHeadingWrap}>
-        <Text style={styles.dayEyebrow}>{dayHeading.eyebrow}</Text>
-        <Text style={styles.dayTitle}>{dayHeading.title}</Text>
+        <Text style={styles.dayTitle} numberOfLines={1}>
+          {dayHeading.title}
+        </Text>
+        {!closedToday && !error && classes.length > 0 && (
+          <Text style={styles.dayTurnos}>{classes.length === 1 ? '1 turno' : `${classes.length} turnos`}</Text>
+        )}
       </View>
 
       {closedToday ? (
@@ -529,69 +559,206 @@ export default function AgendaMobileView({ navigation }: any) {
   );
 }
 
+// Medidas calcadas del mockup (Tailwind -> px): px-6 = 24, gap-5 = 20,
+// gap-3.5 = 14, p-4 = 16, rounded-2xl = 16, rounded-xl = 12, text-3xl = 30,
+// text-xs = 12, text-sm = 14, min-h-[48px], px-6 / px-5 del pill.
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  headerRow: { padding: 16, paddingBottom: 0 },
-  header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
-  daySelectorWrap: { paddingHorizontal: 16, paddingTop: 12 },
-  dayHeadingWrap: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 4 },
-  dayEyebrow: { color: colors.primary, fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
-  dayTitle: { color: colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 2 },
-  error: { color: colors.danger, paddingHorizontal: 16, marginTop: 12 },
-  empty: { color: colors.textSecondary, paddingHorizontal: 16, marginTop: 12 },
+  container: { flex: 1, backgroundColor: mockup.background, overflow: 'hidden' },
+
+  // "Ambient Glow Backdrop" del mockup: w-96 h-96 bg-primary-container/10
+  // blur-[120px] arriba al centro, y w-72 h-72 /5 blur-[100px] abajo a la izquierda.
+  brilloFondo: { ...StyleSheet.absoluteFillObject },
+  brilloArriba: {
+    position: 'absolute',
+    top: -160,
+    left: '50%',
+    marginLeft: -192,
+    width: 384,
+    height: 384,
+    borderRadius: 192,
+    backgroundColor: alfa(mockup.primaryContainer, 0.1),
+    // `filter` = CSS de web (react-native-web lo pasa tal cual).
+    filter: 'blur(120px)',
+  },
+  brilloAbajo: {
+    position: 'absolute',
+    bottom: 80,
+    left: 0,
+    width: 288,
+    height: 288,
+    borderRadius: 144,
+    backgroundColor: alfa(mockup.primaryContainer, 0.05),
+    // `filter` = CSS de web (react-native-web lo pasa tal cual).
+    filter: 'blur(100px)',
+  },
+
+  // ---- Header: px-6 pt-7 pb-3 ----
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    paddingBottom: 12,
+  },
+  avatarRing: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: mockup.outlineVariant,
+    backgroundColor: mockup.surfaceContainerHigh,
+    padding: 1,
+  },
+  headerTextos: { flexShrink: 1 },
+  headerSaludo: {
+    color: mockup.onSurfaceVariant,
+    fontFamily: fuentes.titulo,
+    fontSize: 11,
+    lineHeight: 12,
+    fontWeight: '700',
+    letterSpacing: 0.55,
+    textTransform: 'uppercase',
+  },
+  header: {
+    color: mockup.onSurface,
+    fontFamily: fuentes.titulo,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+    letterSpacing: -0.4,
+    marginTop: 2,
+  },
+
+  // ---- Selector de días (py-2 del main) ----
+  daySelectorWrap: { paddingHorizontal: 24, paddingTop: 8 },
+
+  // ---- Encabezado del día: text-xl bold tracking-tight + "N turnos" text-xs ----
+  dayHeadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+  },
+  dayTitle: {
+    flexShrink: 1,
+    color: mockup.onSurface,
+    fontFamily: fuentes.titulo,
+    fontSize: 20,
+    lineHeight: 28,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+  dayTurnos: {
+    color: mockup.onSurfaceVariant,
+    fontFamily: fuentes.titulo,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+
+  error: { color: colors.danger, paddingHorizontal: 24, marginTop: 12 },
+  empty: { color: mockup.onSurfaceVariant, fontFamily: fuentes.texto, paddingHorizontal: 24, marginTop: 16 },
   closedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    margin: 16,
+    marginHorizontal: 24,
+    marginTop: 20,
     padding: 16,
-    borderRadius: 14,
-    backgroundColor: colors.surface,
+    borderRadius: 16,
+    backgroundColor: mockup.surfaceContainerLow,
     borderWidth: 1,
     borderColor: colors.warning,
   },
-  closedBannerText: { flex: 1, color: colors.textPrimary, fontSize: 13.5, lineHeight: 19 },
-  listContent: { padding: 16, paddingBottom: 32 },
+  closedBannerText: { flex: 1, color: mockup.onSurface, fontFamily: fuentes.texto, fontSize: 14, lineHeight: 20 },
+
+  // ---- Lista: gap-5 arriba, gap-3.5 entre tarjetas, pb-6 ----
+  listContent: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 24, gap: 14 },
+
+  // ---- Tarjeta: bg-surface-container-low border-outline-variant/50 rounded-2xl p-4 ----
   card: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: mockup.surfaceContainerLow,
     borderRadius: 16,
     padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    borderLeftWidth: 5,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+    borderColor: alfa(mockup.outlineVariant, 0.5),
   },
-  cardBooked: { borderColor: colors.primary, shadowOpacity: 0.2, elevation: 4 },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
+  // Sin cupo: bg /70, border /30, opacity-80 (igual al mockup).
+  cardSinCupo: {
+    backgroundColor: alfa(mockup.surfaceContainerLow, 0.7),
+    borderColor: alfa(mockup.outlineVariant, 0.3),
+    opacity: 0.8,
   },
+  // Reservada (no está en el mockup): mismo formato, borde verde para
+  // ubicarla de un vistazo.
+  cardReservada: { borderColor: alfa(mockup.primaryContainer, 0.5) },
   cardBody: { flex: 1, minWidth: 0 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  className: { color: colors.textPrimary, fontSize: 15, fontWeight: '700', flexShrink: 1 },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 20,
+  // text-xs font-bold uppercase tracking-wider mb-1
+  disciplina: {
+    fontFamily: fuentes.titulo,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 4,
   },
-  badgeText: { fontSize: 10.5, fontWeight: '800' },
-  metaText: { color: colors.textSecondary, fontSize: 12, marginTop: 3 },
-  cardFooterRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 8 },
-  footerItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  footerText: { color: colors.textSecondary, fontSize: 11 },
-  countdownSoon: { color: colors.primary, fontWeight: '700' },
+  // text-3xl font-black tracking-tight leading-none
+  hora: {
+    color: mockup.onSurface,
+    fontFamily: fuentes.titulo,
+    fontSize: 30,
+    lineHeight: 30,
+    fontWeight: '900',
+    letterSpacing: -0.75,
+  },
+  horaSinCupo: { color: alfa(mockup.onSurface, 0.8) },
+  // "hs": text-base font-semibold text-on-surface-variant
+  horaHs: { color: mockup.onSurfaceVariant, fontSize: 16, fontWeight: '600', letterSpacing: 0 },
+  // Info funcional extra, chica y discreta (no está en el mockup).
+  detalles: { color: mockup.onSurfaceVariant, fontFamily: fuentes.texto, fontSize: 11, lineHeight: 14, marginTop: 8 },
+  countdownSoon: { color: mockup.primaryContainer, fontWeight: '700' },
+
+  // ---- Pill (decorativo): min-h-[48px] rounded-xl ----
+  pillSlot: { flexShrink: 0 },
+  pill: { minHeight: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  pillTexto: { fontFamily: fuentes.titulo, textTransform: 'uppercase' },
+  // RESERVAR: px-6 bg-primary-container text-on-secondary-fixed text-sm font-black tracking-wider + sombra verde
+  pillReservar: {
+    paddingHorizontal: 24,
+    backgroundColor: mockup.primaryContainer,
+    shadowColor: mockup.primaryContainer,
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  pillTextoReservar: { color: mockup.onSecondaryFixed, fontSize: 14, lineHeight: 20, fontWeight: '900', letterSpacing: 0.7 },
+  // SIN CUPO: px-5 bg-surface-container-high border-outline-variant/40 text-on-surface-variant text-xs font-bold tracking-wider
+  pillSinCupo: {
+    paddingHorizontal: 20,
+    backgroundColor: mockup.surfaceContainerHigh,
+    borderWidth: 1,
+    borderColor: alfa(mockup.outlineVariant, 0.4),
+  },
+  pillTextoSinCupo: { color: mockup.onSurfaceVariant, fontSize: 12, lineHeight: 16, fontWeight: '700', letterSpacing: 0.6 },
+  // RESERVADA (no está en el mockup): mismo tamaño que SIN CUPO, sólido verde
+  // muy oscuro con borde y texto neón -> se lee "ya es tuya" sin confundirse
+  // con la acción RESERVAR.
+  pillReservada: {
+    paddingHorizontal: 20,
+    backgroundColor: mockup.onPrimary,
+    borderWidth: 1,
+    borderColor: mockup.primaryContainer,
+  },
+  pillTextoReservada: { color: mockup.primaryContainer, fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 0.6 },
+  // SIN CRÉDITOS (no está en el mockup): mismo tamaño que SIN CUPO, ámbar
+  // sólido con texto oscuro -> estado bien visible, no una alerta tenue.
+  pillSinCreditos: { paddingHorizontal: 20, backgroundColor: mockup.amber },
+  pillTextoSinCreditos: { color: mockup.onSecondaryFixed, fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 0.6 },
 });

@@ -15,8 +15,12 @@ jest.mock('@react-navigation/native', () => ({
   },
 }));
 
+// Mismo objeto `user` en cada render, como en la app real (AuthContext lo
+// guarda en estado) -- si no, `load` cambia de identidad en cada render y el
+// useEffect vuelve a cargar la agenda sin parar (isLoading nunca se asienta).
+const mockAuthValue = { user: { id: 'user-1', name: 'Facundo Uria', dni: '30111222' } };
 jest.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'user-1', name: 'Facundo Uria', dni: '30111222' } }),
+  useAuth: () => mockAuthValue,
 }));
 // jest.fn() (no un objeto fijo) -- algunos tests necesitan un
 // limiteCancelacionMinutos DISTINTO de 120 para confirmar que el mensaje de
@@ -153,11 +157,11 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
   });
 
-  it('muestra la clase como Disponible cuando el socio todavía no la reservó', async () => {
+  it('muestra la clase disponible (pill decorativo "Reservar") cuando el socio todavía no la reservó', async () => {
     mockFromDefault({ data: [], error: null });
     const { getByText } = render(<AgendaMobileView navigation={navigation} />);
     await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
-    expect(getByText('Disponible')).toBeTruthy();
+    expect(getByText('Reservar')).toBeTruthy();
   });
 
   // Antes reservaba directo al primer tap (one-tap) -- un socio que
@@ -211,7 +215,7 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
         p_reason: null,
       })
     );
-    await waitFor(() => expect(getByText('Disponible')).toBeTruthy());
+    await waitFor(() => expect(getByText('Reservar')).toBeTruthy());
   });
 
   // TAREA 4 (bug de seguridad reportado: "una alumna canceló a tiempo y el
@@ -613,5 +617,129 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
 
       await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
     });
+  });
+});
+
+// Rediseño visual (mockup "Agenda - GreenFit"): SOLO estilo. Toda la tarjeta
+// sigue siendo el único elemento tocable; el pill de estado es decorativo.
+describe('AgendaMobileView -- rediseño visual (sin cambios de lógica)', () => {
+  const DISPONIBLE = { ...CLASE_BASE, id: 'c-disp', title: 'CrossFit', startTime: '11:00:00' };
+  const RESERVADA = { ...CLASE_BASE, id: 'c-res', title: 'Funcional', startTime: '12:00:00' };
+  const LLENA = { ...CLASE_BASE, id: 'c-llena', title: 'Kickstrike', bookedCount: 10, startTime: '13:00:00' };
+  // disc-2 no tiene saldo en el mock de fetchUserBalances -> "Sin créditos".
+  const SIN_CREDITOS = { ...CLASE_BASE, id: 'c-sincred', title: 'Boxeo', disciplineId: 'disc-2', startTime: '14:00:00' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedRpc.mockResolvedValue({ data: null, error: null });
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
+  });
+
+  // Sube desde un nodo hasta el primer ancestro con onPress (lo que dispararía un toque ahí).
+  function manejadorDelToque(nodo: any) {
+    let actual = nodo;
+    while (actual && !actual.props?.onPress) actual = actual.parent;
+    return actual;
+  }
+
+  it('los 4 estados reales se ven con su pill: Reservar / Reservada / Sin cupo / Sin créditos', async () => {
+    mockedLoadClasses.mockResolvedValue([DISPONIBLE, RESERVADA, LLENA, SIN_CREDITOS]);
+    mockFromDefault({ data: [{ class_id: 'c-res' }], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('Kickstrike')).toBeTruthy());
+    const dentro = (id: string, texto: string) =>
+      expect(
+        getByTestId(`agenda-card-${id}`).findAll((n: any) => n.props.children === texto).length
+      ).toBeGreaterThan(0);
+    dentro('c-disp', 'Reservar');
+    dentro('c-res', 'Reservada');
+    dentro('c-llena', 'Sin cupo');
+    dentro('c-sincred', 'Sin créditos');
+    // Nada de "Disponible" (el pill de ese estado ahora dice "Reservar").
+    expect(() => getByText('Disponible')).toThrow();
+  });
+
+  it('el pill es DECORATIVO: no tiene manejador propio y tocarlo dispara el handlePress de la tarjeta', async () => {
+    mockedLoadClasses.mockResolvedValue([DISPONIBLE]);
+    mockFromDefault({ data: [], error: null });
+    const { getByText } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('Reservar')).toBeTruthy());
+    const pillTexto = getByText('Reservar');
+    // El primer ancestro con onPress es la TARJETA entera, no el pill.
+    const tocable = manejadorDelToque(pillTexto);
+    expect(tocable?.props.testID).toBe('agenda-card-c-disp');
+    // Y el contenedor del pill deja pasar el toque (pointerEvents="none").
+    let n: any = pillTexto;
+    let pointerNone = false;
+    while (n && n !== tocable) {
+      if (n.props?.pointerEvents === 'none') pointerNone = true;
+      n = n.parent;
+    }
+    expect(pointerNone).toBe(true);
+
+    // Tocar "encima del pill" hace lo mismo que tocar la tarjeta: abre la confirmación.
+    fireEvent.press(pillTexto);
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    expect(mockedRpc).not.toHaveBeenCalledWith('book_class', expect.anything());
+  });
+
+  it('mientras espera al servidor, la tarjeta muestra la ruedita en lugar del pill', async () => {
+    mockedLoadClasses.mockResolvedValue([DISPONIBLE]);
+    // La consulta de consentimiento queda colgada -> la tarjeta queda "pendiente".
+    let liberar: (v: any) => void = () => {};
+    const colgada = new Promise((res) => (liberar = res));
+    mockedFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return makeChain(CONTACTO_COMPLETO);
+      if (table === 'consentimientos_socio') {
+        const chain = makeChain(null);
+        chain.then = (resolve: any, reject: any) => colgada.then(resolve, reject);
+        return chain;
+      }
+      return makeChain({ data: [], error: null });
+    });
+    const { getByText, getByTestId, queryByText } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('Reservar')).toBeTruthy());
+    fireEvent.press(getByTestId('agenda-card-c-disp'));
+
+    await waitFor(() => expect(getByTestId('agenda-card-cargando-c-disp')).toBeTruthy());
+    expect(queryByText('Reservar')).toBeNull();
+    liberar(CONSENT_VIGENTE);
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+  });
+
+  it('header con el nombre real del socio y SIN ningún total de créditos; cantidad de turnos y cuenta regresiva', async () => {
+    mockedLoadClasses.mockResolvedValue([DISPONIBLE, RESERVADA]);
+    mockFromDefault({ data: [], error: null });
+    const { getByText, getAllByText, queryByText } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+    expect(getByText('Hola, Facundo')).toBeTruthy();
+    expect(getByText('Mi Agenda')).toBeTruthy();
+    expect(queryByText(/\d+\s*créditos/i)).toBeNull();
+    expect(getByText('2 turnos')).toBeTruthy();
+    // EN_3_HORAS -> la cuenta regresiva se mantiene.
+    expect(getAllByText(/En 3 horas/)).toHaveLength(2); // una por tarjeta, en la línea de detalles
+  });
+});
+
+describe('DaySelector -- estilo nuevo, mismos 10 días', () => {
+  it('muestra 10 días (hoy + 9): "Hoy" y después el día abreviado a 3 letras (sin "Mañana"), con el elegido marcado', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const DaySelector = require('../../components/DaySelector').default;
+    const hoy = new Date();
+    const { getAllByRole, getByText, getAllByText } = render(<DaySelector selectedDate={hoy} onSelect={jest.fn()} />);
+
+    const dias = getAllByRole('button');
+    expect(dias).toHaveLength(10);
+    expect(getByText('Hoy')).toBeTruthy();
+    // El segundo día usa el mismo formato corto que el resto de la fila.
+    const manana = new Date();
+    manana.setDate(manana.getDate() + 1);
+    expect(getAllByText(['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][manana.getDay()]).length).toBeGreaterThan(0);
+    expect(() => getByText('Mañana')).toThrow();
+    expect(dias.filter((d: any) => d.props.accessibilityState?.selected)).toHaveLength(1);
   });
 });
