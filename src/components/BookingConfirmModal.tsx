@@ -6,6 +6,10 @@ import { CONSENT_TEXT_SHORT } from '../lib/consentApi';
 
 export interface BookingConfirmTarget {
   title: string;
+  // Fecha exacta de la ocurrencia que se va a reservar, ya formateada
+  // ("Hoy, jueves 1 de octubre"). Sale de la TARJETA tocada, no del día
+  // elegido en el selector: el socio confirma el día, no solo la hora.
+  dateLabel: string;
   startLabel: string;
   endLabel: string | null;
   instructor: string | null;
@@ -50,6 +54,7 @@ export default function BookingConfirmModal({
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>Reservar {target.title}</Text>
+          <Text style={styles.fecha}>{target.dateLabel}</Text>
           <Text style={styles.subtitle}>
             {target.startLabel}
             {target.endLabel ? ` - ${target.endLabel}` : ''} hs
@@ -108,6 +113,9 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
+  // La fecha va destacada (verde, negrita): es lo que el socio tiene que
+  // poder chequear de un vistazo antes de confirmar.
+  fecha: { color: colors.primary, fontSize: 14, fontWeight: '700', marginBottom: 2 },
   subtitle: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
   question: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 14, marginBottom: 4 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },

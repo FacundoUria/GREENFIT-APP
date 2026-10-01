@@ -80,3 +80,32 @@ export function formatLongDate(dateStr: string): string {
 export function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+// "2026-10-01" -> "Hoy, jueves 1 de octubre" / "Mañana, viernes 2 de octubre"
+// / "Sábado 3 de octubre". Para el modal de confirmación de reserva: la
+// fecha EXACTA de la ocurrencia que se va a reservar (class.occurrenceDate),
+// no el día que esté elegido en el selector -- así, si alguna vez la tarjeta
+// y el encabezado no coincidieran, el socio lo ve antes de confirmar.
+// El día de la semana sale de la fecha tal cual (Date.UTC), y "hoy" se
+// calcula en horario de Argentina, sin depender del huso del dispositivo.
+export function formatFechaReserva(occurrenceDate: string, ahora: Date = new Date()): string {
+  const [anio, mes, dia] = occurrenceDate.split('-').map(Number);
+  const utc = Date.UTC(anio, mes - 1, dia);
+  const hoyAr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Mendoza',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(ahora)
+    .split('-')
+    .map(Number);
+  const diffDias = Math.round((utc - Date.UTC(hoyAr[0], hoyAr[1] - 1, hoyAr[2])) / 86_400_000);
+
+  const base = `${DIAS_SEMANA[new Date(utc).getUTCDay()]} ${dia} de ${MESES[mes - 1]}`;
+  if (diffDias === 0) return `Hoy, ${base}`;
+  if (diffDias === 1) return `Mañana, ${base}`;
+  return capitalize(base);
+}

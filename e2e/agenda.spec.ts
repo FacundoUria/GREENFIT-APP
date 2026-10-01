@@ -394,3 +394,115 @@ test.describe('PWA -- Mi Agenda', () => {
     });
   });
 });
+
+// Bug real (2026-10-01): viendo HOY con cupos reales, tocar "mañana" y volver
+// a HOY dejaba los cupos de HOY en 0 (y "Reservar" reservaba la clase de
+// mañana). Causa: carrera entre respuestas -- la de "mañana" llegaba después
+// que la de "hoy" y pisaba la lista. Acá se fuerza ese orden demorando SOLO
+// el conteo de cupos del día de mañana.
+test.describe('PWA -- Mi Agenda: cambio de día', () => {
+  const manana = new Date(Date.now() + 86_400_000);
+  const MANANA_STR = `${manana.getFullYear()}-${String(manana.getMonth() + 1).padStart(2, '0')}-${String(manana.getDate()).padStart(2, '0')}`;
+  // Se dicta todos los días: existe hoy y mañana.
+  const CLASE_DIARIA = { ...CLASE_HOY, id: 'class-diaria', days_of_week: [0, 1, 2, 3, 4, 5, 6] };
+  // 4 anotados HOY, nadie mañana.
+  const ANOTADOS_HOY = ['a', 'b', 'c', 'd'].map((u) => ({
+    id: `b-${u}`,
+    user_id: `otro-${u}`,
+    class_id: CLASE_DIARIA.id,
+    booking_date: HOY_STR,
+  }));
+  const CREDITOS = [
+    {
+      id: 'uc-1',
+      user_id: SOCIO_DEMO.id,
+      remaining_credits: 5,
+      expires_at: EN_30_DIAS,
+      created_at: '2026-08-01T00:00:00.000Z',
+      discipline: DISCIPLINA_CROSSFIT,
+      pack: null,
+    },
+  ];
+  const chipDia = (page: any, indice: number) =>
+    page
+      .locator('[role="button"]')
+      .filter({ hasText: /^(hoy|dom|lun|mar|mié|jue|vie|sáb)\s*\d+$/i })
+      .nth(indice);
+
+  test.beforeEach(async ({ page }) => {
+    const hoyALasOcho = new Date();
+    hoyALasOcho.setHours(8, 0, 0, 0);
+    await page.clock.install({ time: hoyALasOcho });
+  });
+
+  test('una respuesta atrasada de "mañana" no pisa los cupos de HOY, y al cambiar de día no quedan tarjetas viejas', async ({
+    page,
+  }) => {
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), classes: [CLASE_DIARIA], bookings: ANOTADOS_HOY, user_credits: CREDITOS },
+    });
+    await irATab(page, 'Agenda');
+    const tarjeta = page.getByTestId('agenda-card-class-diaria');
+    await expect(tarjeta.getByText(/4\/12 cupos/)).toBeVisible();
+
+    // A partir de acá, el conteo de cupos de MAÑANA tarda 3 s en responder.
+    let respondioManana = false;
+    await page.route(
+      (url) => url.pathname.endsWith('/rpc/get_bookings_count_por_clase'),
+      async (route) => {
+        if (route.request().postDataJSON()?.p_booking_date === MANANA_STR) {
+          await new Promise((r) => setTimeout(r, 3000));
+          respondioManana = true;
+        }
+        await route.fallback();
+      }
+    );
+
+    await chipDia(page, 1).click();
+    // Mientras carga el día nuevo NO se ve la tarjeta del día anterior.
+    await expect(tarjeta).toHaveCount(0);
+
+    await chipDia(page, 0).click(); // vuelve a HOY antes de que responda mañana
+    await expect(tarjeta.getByText(/4\/12 cupos/)).toBeVisible();
+
+    // Llega (tarde) la respuesta de mañana: HOY tiene que seguir con sus cupos reales.
+    await expect.poll(() => respondioManana, { timeout: 10_000 }).toBe(true);
+    await page.waitForTimeout(1000);
+    await expect(tarjeta.getByText(/4\/12 cupos/)).toBeVisible();
+    await expect(tarjeta.getByText(/0\/12 cupos/)).toHaveCount(0);
+  });
+
+  test('el modal de confirmación muestra la fecha de la clase, no solo la hora', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), classes: [CLASE_DIARIA], bookings: ANOTADOS_HOY, user_credits: CREDITOS },
+    });
+    await irATab(page, 'Agenda');
+
+    await page.getByTestId('agenda-card-class-diaria').click();
+    await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
+    await expect(page.getByText(/^Hoy, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeVisible();
+    await page.getByText('Cancelar', { exact: true }).click();
+
+    // En otro día, la fecha del modal es la de ESE día.
+    await chipDia(page, 1).click();
+    await expect(page.getByTestId('agenda-card-class-diaria').getByText(/0\/12 cupos/)).toBeVisible();
+    await page.getByTestId('agenda-card-class-diaria').click();
+    await expect(page.getByText(/^Mañana, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeVisible();
+  });
+  test('el modal de cancelar muestra la fecha de la reserva que se cancela (la de la tarjeta)', async ({ page }) => {
+    // El socio tiene reservada la clase de MAÑANA.
+    const miReserva = { id: 'mia', user_id: SOCIO_DEMO.id, class_id: CLASE_DIARIA.id, booking_date: MANANA_STR };
+    await loginComoSocio(page, {
+      tables: { ...tablasBase(), classes: [CLASE_DIARIA], bookings: [...ANOTADOS_HOY, miReserva], user_credits: CREDITOS },
+    });
+    await irATab(page, 'Agenda');
+    await chipDia(page, 1).click();
+
+    const tarjeta = page.getByTestId('agenda-card-class-diaria');
+    await expect(tarjeta.getByText('Reservada', { exact: true })).toBeVisible();
+    await tarjeta.click();
+
+    await expect(page.getByText('Cancelar CrossFit')).toBeVisible();
+    await expect(page.getByText(/^Mañana, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeVisible();
+  });
+});

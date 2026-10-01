@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 
 // AgendaMobileView usa useFocusEffect (refresco del gate de contacto de
 // emergencia al volver de "Mis datos") -- sin un NavigationContainer real
@@ -741,5 +741,154 @@ describe('DaySelector -- estilo nuevo, mismos 10 días', () => {
     expect(getAllByText(['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][manana.getDay()]).length).toBeGreaterThan(0);
     expect(() => getByText('Mañana')).toThrow();
     expect(dias.filter((d: any) => d.props.accessibilityState?.selected)).toHaveLength(1);
+  });
+});
+
+// Bug real (2026-10-01): viendo HOY con cupos reales (4/20), tocar "mañana" y
+// volver a HOY dejaba los cupos de HOY en 0. Causa: carrera entre respuestas
+// -- cada carga escribía su resultado al terminar, sin chequear si su día
+// seguía siendo el elegido; si la de "mañana" llegaba última, pisaba la lista
+// (encabezado HOY + tarjetas de mañana, y "Reservar" reservaba mañana).
+describe('AgendaMobileView -- cambio de día: respuestas viejas, lista y fecha a confirmar', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mockedFormatDateOnly = require('../../lib/classesApi').formatDateOnly as jest.Mock;
+  const fechaReal = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  const HOY_STR = fechaReal(new Date());
+  const MANANA_STR = fechaReal(new Date(Date.now() + 86_400_000));
+  const DE_HOY = { ...CLASE_BASE, bookedCount: 4, occurrenceDate: HOY_STR };
+  const DE_MANANA = { ...CLASE_BASE, bookedCount: 0, occurrenceDate: MANANA_STR };
+
+  function diferida<T>() {
+    let resolver: (v: T) => void = () => {};
+    const promesa = new Promise<T>((res) => (resolver = res));
+    return { promesa, resolver };
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedRpc.mockResolvedValue({ data: null, error: null });
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
+    mockFromDefault({ data: [], error: null });
+    // En este bloque el día elegido tiene que cambiar de verdad (el resto del
+    // archivo usa una fecha fija).
+    mockedFormatDateOnly.mockImplementation(fechaReal);
+  });
+  afterEach(() => {
+    mockedFormatDateOnly.mockImplementation(() => '2026-08-10');
+  });
+
+  it('una respuesta ATRASADA de otro día no pisa la lista del día elegido', async () => {
+    const lenta = diferida<any[]>();
+    mockedLoadClasses
+      .mockResolvedValueOnce([DE_HOY]) // 1) entra a HOY
+      .mockReturnValueOnce(lenta.promesa) // 2) toca mañana: queda colgada
+      .mockResolvedValueOnce([DE_HOY]); // 3) vuelve a HOY: responde enseguida
+    const { getByText, getAllByRole, queryByText } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText(/4\/10 cupos/)).toBeTruthy());
+    fireEvent.press(getAllByRole('button')[1]); // mañana
+    fireEvent.press(getAllByRole('button')[0]); // vuelve a hoy antes de que responda mañana
+    await waitFor(() => expect(mockedLoadClasses).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(getByText(/4\/10 cupos/)).toBeTruthy());
+
+    // Llega, tarde, la respuesta de mañana (0 anotados).
+    await act(async () => {
+      lenta.resolver([DE_MANANA]);
+    });
+    expect(getByText(/4\/10 cupos/)).toBeTruthy();
+    expect(queryByText(/0\/10 cupos/)).toBeNull();
+  });
+
+  it('el ERROR de una respuesta atrasada no se muestra sobre el día elegido', async () => {
+    const lentaManana = diferida<any[]>();
+    const lentaHoy = diferida<any[]>();
+    mockedLoadClasses
+      .mockResolvedValueOnce([DE_HOY])
+      .mockReturnValueOnce(lentaManana.promesa)
+      .mockReturnValueOnce(lentaHoy.promesa);
+    const { getByText, getAllByRole, queryByText, queryByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText(/4\/10 cupos/)).toBeTruthy());
+    fireEvent.press(getAllByRole('button')[1]);
+    fireEvent.press(getAllByRole('button')[0]);
+    await waitFor(() => expect(mockedLoadClasses).toHaveBeenCalledTimes(3));
+
+    // La de mañana FALLA tarde: su error no se muestra (ya no es el día elegido).
+    await act(async () => {
+      lentaManana.resolver(Promise.reject(new Error('timeout de mañana')) as any);
+    });
+    expect(queryByText('timeout de mañana')).toBeNull();
+    expect(queryByText('No hay clases programadas para este día.')).toBeNull();
+    // HOY ya estaba cargado: sus tarjetas (de ESE día) se ven mientras se refresca.
+    expect(getByText(/4\/10 cupos/)).toBeTruthy();
+
+    await act(async () => {
+      lentaHoy.resolver([DE_HOY]);
+    });
+    await waitFor(() => expect(getByText(/4\/10 cupos/)).toBeTruthy());
+  });
+
+  it('al cambiar de día se vacía la lista: mientras carga no se ven (ni se pueden tocar) las tarjetas del día anterior', async () => {
+    const lenta = diferida<any[]>();
+    mockedLoadClasses.mockResolvedValueOnce([DE_HOY]).mockReturnValueOnce(lenta.promesa);
+    const { getByText, getAllByRole, queryByTestId, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByTestId('agenda-card-class-1')).toBeTruthy());
+    fireEvent.press(getAllByRole('button')[1]); // mañana, todavía cargando
+
+    await waitFor(() => expect(queryByTestId('agenda-card-class-1')).toBeNull());
+
+    await act(async () => {
+      lenta.resolver([DE_MANANA]);
+    });
+    await waitFor(() => expect(getByText(/0\/10 cupos/)).toBeTruthy());
+  });
+
+  it('recargar el MISMO día (después de reservar) NO vacía la lista: las tarjetas siguen ahí mientras refresca', async () => {
+    const recarga = diferida<any[]>();
+    mockedLoadClasses.mockResolvedValueOnce([DE_HOY]).mockReturnValueOnce(recarga.promesa);
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByTestId('agenda-card-class-1')).toBeTruthy());
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    fireEvent.press(getByText(CONSENT_TEXT_SHORT));
+    fireEvent.press(getByText('Confirmar'));
+
+    // book_class respondió y la agenda se está recargando (misma fecha).
+    await waitFor(() => expect(mockedLoadClasses).toHaveBeenCalledTimes(2));
+    expect(getByTestId('agenda-card-class-1')).toBeTruthy();
+
+    await act(async () => {
+      recarga.resolver([DE_HOY]);
+    });
+    await waitFor(() => expect(getByText('¡Reserva confirmada!')).toBeTruthy());
+  });
+
+  it('el modal de CANCELAR muestra la fecha de la reserva que se cancela (la de la tarjeta, no la del selector)', async () => {
+    // Reserva de MAÑANA, con el selector parado en hoy.
+    mockedLoadClasses.mockResolvedValue([DE_MANANA]);
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+
+    await waitFor(() => expect(getByText('Cancelar CrossFit')).toBeTruthy());
+    expect(getByText(/^Mañana, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeTruthy();
+  });
+
+  it('el modal de confirmación muestra la FECHA de la tarjeta que se va a reservar', async () => {
+    mockedLoadClasses.mockResolvedValue([DE_MANANA]);
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByTestId('agenda-card-class-1')).toBeTruthy());
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    // Sale de occurrenceDate de la TARJETA (mañana), no del día del selector (hoy).
+    expect(getByText(/^Mañana, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeTruthy();
   });
 });

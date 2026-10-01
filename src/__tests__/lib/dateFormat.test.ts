@@ -1,4 +1,4 @@
-import { formatShortDate, formatLongDate, capitalize } from '../../lib/dateFormat';
+import { formatShortDate, formatLongDate, capitalize, formatFechaReserva } from '../../lib/dateFormat';
 
 // formatShortDate() es el reemplazo de los `toLocaleDateString('es-AR')`
 // dispersos por toda la app -- en particular el de HistoryScreen.tsx, que
@@ -90,5 +90,29 @@ describe('capitalize (mudado desde AgendaMobileView.tsx/ReservaConfirmadaModal.t
 
   it('string vacío no rompe', () => {
     expect(capitalize('')).toBe('');
+  });
+});
+
+// Fecha que muestra el modal de confirmación de reserva: sale de la
+// ocurrencia que se va a reservar (class.occurrenceDate).
+describe('formatFechaReserva (fecha del modal "Reservar")', () => {
+  // 2026-10-01 es jueves. 15:00 UTC = 12:00 en Argentina.
+  const ahora = new Date('2026-10-01T15:00:00Z');
+
+  it('hoy y mañana llevan el prefijo; el resto, el día de la semana con mayúscula', () => {
+    expect(formatFechaReserva('2026-10-01', ahora)).toBe('Hoy, jueves 1 de octubre');
+    expect(formatFechaReserva('2026-10-02', ahora)).toBe('Mañana, viernes 2 de octubre');
+    expect(formatFechaReserva('2026-10-03', ahora)).toBe('Sábado 3 de octubre');
+    expect(formatFechaReserva('2026-10-10', ahora)).toBe('Sábado 10 de octubre');
+  });
+
+  it('"hoy" se calcula en horario de Argentina: a las 23:30 AR (ya es el día siguiente en UTC) sigue siendo hoy', () => {
+    const casiMedianocheAr = new Date('2026-10-02T02:30:00Z'); // 23:30 del 1/10 en Argentina
+    expect(formatFechaReserva('2026-10-01', casiMedianocheAr)).toBe('Hoy, jueves 1 de octubre');
+    expect(formatFechaReserva('2026-10-02', casiMedianocheAr)).toBe('Mañana, viernes 2 de octubre');
+  });
+
+  it('cruza de mes sin correrse de día', () => {
+    expect(formatFechaReserva('2026-11-01', new Date('2026-10-31T15:00:00Z'))).toBe('Mañana, domingo 1 de noviembre');
   });
 });

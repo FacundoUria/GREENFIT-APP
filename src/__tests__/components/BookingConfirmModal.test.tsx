@@ -5,6 +5,7 @@ import { CONSENT_TEXT_SHORT } from '../../lib/consentApi';
 
 const TARGET = {
   title: 'CrossFit',
+  dateLabel: 'Hoy, jueves 1 de octubre',
   startLabel: '19:00',
   endLabel: '20:00',
   instructor: 'Seba',
@@ -20,6 +21,16 @@ describe('BookingConfirmModal', () => {
       <BookingConfirmModal visible target={null} onClose={jest.fn()} onConfirm={jest.fn()} />
     );
     expect(toJSON()).toBeNull();
+  });
+
+  // Bug real: el modal mostraba la hora pero no la fecha -- con la lista de
+  // Agenda pisada por una respuesta atrasada, el socio confirmaba una clase
+  // de OTRO día sin poder notarlo.
+  it('muestra la FECHA de la clase que se va a reservar, no solo la hora', () => {
+    const { getByText } = render(
+      <BookingConfirmModal visible target={TARGET} onClose={jest.fn()} onConfirm={jest.fn()} />
+    );
+    expect(getByText('Hoy, jueves 1 de octubre')).toBeTruthy();
   });
 
   it('muestra la clase y el horario a confirmar', () => {

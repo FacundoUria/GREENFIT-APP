@@ -9,6 +9,29 @@ import CancelBookingModal from '../../components/CancelBookingModal';
 // cancelación" condenado a fallar: lo deshabilita y cambia el aviso para
 // avisar ESO, no el reintegro.
 describe('CancelBookingModal', () => {
+  // Mismo criterio que BookingConfirmModal: el socio ve la FECHA de la
+  // reserva que está por cancelar, no solo el nombre de la clase.
+  it('muestra la fecha de la reserva que se va a cancelar', () => {
+    const { getByText } = render(
+      <CancelBookingModal
+        visible
+        className="CrossFit"
+        dateLabel="Mañana, viernes 2 de octubre"
+        onClose={jest.fn()}
+        onConfirm={jest.fn()}
+      />
+    );
+    expect(getByText('Cancelar CrossFit')).toBeTruthy();
+    expect(getByText('Mañana, viernes 2 de octubre')).toBeTruthy();
+  });
+
+  it('sin fecha (dateLabel ausente) no dibuja una línea vacía', () => {
+    const { queryByText } = render(
+      <CancelBookingModal visible className="CrossFit" onClose={jest.fn()} onConfirm={jest.fn()} />
+    );
+    expect(queryByText(/^(Hoy|Mañana), /)).toBeNull();
+  });
+
   it('fuera de la ventana (withinCancelLimit=false): sin aviso, "Confirmar cancelación" habilitado y funcional', () => {
     const onConfirm = jest.fn();
     const { getByText, queryByText, getByTestId } = render(

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -29,7 +29,7 @@ import BookingConfirmModal from '../../components/BookingConfirmModal';
 import ConsentModal from '../../components/ConsentModal';
 import MessageModal, { MessageModalContent } from '../../components/MessageModal';
 import { fetchTieneConsentimientoVigente, registrarConsentimiento } from '../../lib/consentApi';
-import { capitalize } from '../../lib/dateFormat';
+import { capitalize, formatFechaReserva } from '../../lib/dateFormat';
 import Avatar from '../../components/Avatar';
 import { mockup, alfa, colorDisciplinaMockup, fuentes, useFuentesMockup } from '../../theme/agendaMockup';
 
@@ -115,7 +115,11 @@ export default function AgendaMobileView({ navigation }: any) {
   const cancelLimitMs = configuracion.limiteCancelacionMinutos * 60 * 1000;
 
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [classes, setClasses] = useState<AgendaClass[]>([]);
+  // La lista se guarda JUNTO con el día al que pertenece. En pantalla solo se
+  // usan sus tarjetas si ese día es el elegido ahora (ver `classes` más
+  // abajo): así nunca se dibuja -- ni por un cuadro -- una tarjeta de otro día
+  // bajo el encabezado del día nuevo.
+  const [lista, setLista] = useState<{ fecha: string | null; items: AgendaClass[] }>({ fecha: null, items: [] });
   const [creditsByDiscipline, setCreditsByDiscipline] = useState<Map<string, number>>(new Map());
   const [closedDays, setClosedDays] = useState<ClosedDay[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -144,20 +148,41 @@ export default function AgendaMobileView({ navigation }: any) {
   const selectedDateStr = formatDateOnly(selectedDate);
   const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
 
+  // Tarjetas del día ELEGIDO. Si lo que hay cargado es de otro día (recién se
+  // cambió de día y la respuesta todavía no llegó), no se muestra nada: se ve
+  // la ruedita. Tirar para refrescar o recargar después de reservar no cambia
+  // el día, así que ahí las tarjetas se quedan en pantalla.
+  const hayDatosDelDia = lista.fecha === selectedDateStr;
+  const classes = hayDatosDelDia ? lista.items : [];
+
+  // Número de la última carga pedida. Bug real (carrera entre respuestas):
+  // tocar "mañana" y volver a "hoy" dispara dos cargas; si la de mañana
+  // respondía DESPUÉS que la de hoy, pisaba la lista -- encabezado de HOY con
+  // las tarjetas (y los cupos en 0) de mañana, y un toque en "Reservar"
+  // reservaba la clase de mañana. Ahora cada carga recuerda su número y solo
+  // la ÚLTIMA pedida puede escribir en pantalla; las viejas se descartan.
+  const ultimaCarga = useRef(0);
+
   const load = useCallback(async () => {
     if (!user) return;
+    const estaCarga = ++ultimaCarga.current;
+    const sigueVigente = () => estaCarga === ultimaCarga.current;
+    const fechaPedida = formatDateOnly(selectedDate);
     setError(null);
     try {
       const [classList, credits] = await Promise.all([
         loadAgendaClasses(user.id, selectedDate),
         fetchCreditsByDiscipline(user.id),
       ]);
-      setClasses(classList);
+      if (!sigueVigente()) return;
+      setLista({ fecha: fechaPedida, items: classList });
       setCreditsByDiscipline(credits);
     } catch (err) {
+      if (!sigueVigente()) return;
       setError(err instanceof Error ? err.message : 'No se pudo cargar la agenda.');
     } finally {
-      setIsLoading(false);
+      // Una carga vieja no apaga la ruedita de la carga que sigue en curso.
+      if (sigueVigente()) setIsLoading(false);
     }
   }, [user, selectedDate]);
 
@@ -165,6 +190,7 @@ export default function AgendaMobileView({ navigation }: any) {
     setIsLoading(true);
     load();
   }, [load]);
+
 
   useEffect(() => {
     fetchClosedDays()
@@ -487,11 +513,12 @@ export default function AgendaMobileView({ navigation }: any) {
         </View>
       ) : (
         <>
-          {isLoading && classes.length === 0 && (
+          {/* Ruedita: cargando, o todavía sin la respuesta del día elegido. */}
+          {(isLoading || (!hayDatosDelDia && !error)) && classes.length === 0 && (
             <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
           )}
           {!!error && <Text style={styles.error}>{error}</Text>}
-          {!isLoading && !error && classes.length === 0 && (
+          {!isLoading && !error && hayDatosDelDia && classes.length === 0 && (
             <Text style={styles.empty}>No hay clases programadas para este día.</Text>
           )}
 
@@ -508,6 +535,9 @@ export default function AgendaMobileView({ navigation }: any) {
       <CancelBookingModal
         visible={!!cancelTarget}
         className={cancelTarget?.title ?? ''}
+        // La fecha de la reserva que se cancela (la de la tarjeta tocada),
+        // no la del día elegido en el selector.
+        dateLabel={cancelTarget ? formatFechaReserva(cancelTarget.occurrenceDate) : null}
         isSubmitting={isCancelling}
         withinCancelLimit={
           !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < cancelLimitMs
@@ -543,6 +573,9 @@ export default function AgendaMobileView({ navigation }: any) {
         target={
           confirmTarget && {
             title: confirmTarget.title,
+            // La fecha de la TARJETA (lo que book_class va a reservar), no
+            // la del día elegido en el selector.
+            dateLabel: formatFechaReserva(confirmTarget.occurrenceDate),
             startLabel: formatClassTime(confirmTarget.startAt),
             endLabel: confirmTarget.endAt ? formatClassTime(confirmTarget.endAt) : null,
             instructor: confirmTarget.instructor,

@@ -27,6 +27,7 @@ import { formatClassTime, formatDayLabel } from '../../lib/classTime';
 import { getCreditsStatus, getExpiryStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
 import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
+import { formatFechaReserva } from '../../lib/dateFormat';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
 import XpProgressRing from '../../components/XpProgressRing';
@@ -446,6 +447,7 @@ export default function HomeScreen({ navigation }: any) {
       <CancelBookingModal
         visible={showCancelModal}
         className={nextBooking?.title ?? ''}
+        dateLabel={nextBooking ? formatFechaReserva(nextBooking.bookingDate) : null}
         isSubmitting={isCancelling}
         withinCancelLimit={isWithinCancelLimit}
         limiteMinutos={configuracion.limiteCancelacionMinutos}

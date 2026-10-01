@@ -5,6 +5,10 @@ import { colors } from '../theme/colors';
 interface CancelBookingModalProps {
   visible: boolean;
   className: string;
+  // Fecha exacta de la reserva que se va a cancelar, ya formateada ("Hoy,
+  // jueves 1 de octubre" -- formatFechaReserva). Sale de la RESERVA, no del
+  // día elegido en el selector: mismo criterio que BookingConfirmModal.
+  dateLabel?: string | null;
   isSubmitting?: boolean;
   // true si cancelar AHORA sería dentro de la ventana de
   // configuracion.limite_cancelacion_minutos previa a la clase — calculado
@@ -46,6 +50,7 @@ export function formatLimite(minutos: number): string {
 export default function CancelBookingModal({
   visible,
   className,
+  dateLabel,
   isSubmitting,
   withinCancelLimit,
   limiteMinutos = 120,
@@ -69,6 +74,7 @@ export default function CancelBookingModal({
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>Cancelar {className}</Text>
+          {!!dateLabel && <Text style={styles.fecha}>{dateLabel}</Text>}
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
           {withinCancelLimit && (
             <Text style={styles.warning}>
@@ -121,6 +127,9 @@ const styles = StyleSheet.create({
     borderColor: colors.surfaceAlt,
   },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
+  // Mismo estilo que la fecha de BookingConfirmModal: lo que el socio chequea
+  // de un vistazo antes de confirmar.
+  fecha: { color: colors.primary, fontSize: 14, fontWeight: '700', marginBottom: 4 },
   subtitle: { color: colors.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 },
   warning: {
     color: colors.warning,
