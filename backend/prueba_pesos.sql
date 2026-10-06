@@ -19,8 +19,9 @@
 --   5  EL CASO IMPORTANTE: Seba re-guarda la rutina (borra y recrea días/ejercicios con ids
 --      NUEVOS, igual que saveRoutineFull del panel) -> la carga sigue ahí y la app la encuentra
 --      para el ejercicio nuevo. Se hace de verdad y se deshace sola (subtransacción).
---   6  Borrar un ejercicio del catálogo arrastra sus cargas (con un ejercicio TEMPORAL de
---      prueba, también dentro de una subtransacción que se deshace).
+--   6  Un ejercicio con cargas NO se puede borrar del catálogo: falla con 23503 y la carga queda
+--      (FK RESTRICT; requiere supabase_migration_ejercicios_fk_restrict.sql del panel Admin).
+--      Con un ejercicio TEMPORAL de prueba, dentro de una subtransacción que se deshace.
 --   7  La tabla no tiene policy de delete.
 --
 -- ESTADO FINAL: se borra la fila de prueba (o, si Facundo ya tenía una carga en ese ejercicio,
@@ -291,26 +292,33 @@ begin
     format('la simulación se deshizo: tu rutina real está intacta (%s ejercicios)', v_re_final));
 end $$;
 
--- ── PASO 6 ── Borrar un ejercicio del catálogo arrastra sus cargas. Con un ejercicio TEMPORAL
---    creado solo para esto, adentro de una subtransacción que se deshace.
+-- ── PASO 6 ── Un ejercicio con cargas de socios NO se puede borrar del catálogo (FK RESTRICT,
+--    supabase_migration_ejercicios_fk_restrict.sql en PAGINA SUPABASE): el borrado falla con
+--    23503 y la carga queda. Con un ejercicio TEMPORAL creado solo para esto, adentro de una
+--    subtransacción que se deshace.
 do $$
-declare c record; r record; v_ex uuid; v_antes int; v_despues int; v_err text; v_existe_despues int;
+declare c record; r record; v_ex uuid; v_codigo text; v_pesos int; v_err text; v_existe_despues int;
 begin
   select * into c from pg_temp._ctx;
   begin
     insert into exercises (name, muscle_group) values ('ZZ PRUEBA pesos (temporal)', 'Otros') returning id into v_ex;
     r := pg_temp.como_socio(c.facundo, pg_temp.sql_guardar(c.facundo, v_ex, '10kg'));
-    select count(*) into v_antes from user_exercise_weights where exercise_id = v_ex;
-    delete from exercises where id = v_ex;
-    select count(*) into v_despues from user_exercise_weights where exercise_id = v_ex;
+    begin
+      delete from exercises where id = v_ex;
+      v_codigo := 'sin error';
+    exception when others then
+      v_codigo := sqlstate;
+    end;
+    select count(*) into v_pesos from user_exercise_weights where exercise_id = v_ex;
     raise exception 'ROLLBACK_SIMULACION';
   exception when others then
     if sqlerrm <> 'ROLLBACK_SIMULACION' then v_err := sqlerrm; end if;
   end;
   if v_err is not null then perform pg_temp.log('6', 'RESULTADO', 'ERROR (se deshizo igual): ' || v_err); end if;
   select count(*) into v_existe_despues from exercises where name = 'ZZ PRUEBA pesos (temporal)';
-  perform pg_temp.verificar('6', v_antes = 1 and v_despues = 0,
-    format('al borrar el ejercicio, su carga se borró (antes=%s, después=%s)', coalesce(v_antes::text, '-'), coalesce(v_despues::text, '-')));
+  perform pg_temp.verificar('6', v_codigo = '23503' and v_pesos = 1,
+    format('borrar un ejercicio con cargas de socios falla (%s, esperado 23503) y la carga queda (%s)',
+      coalesce(v_codigo, '-'), coalesce(v_pesos::text, '-')));
   perform pg_temp.verificar('6', v_existe_despues = 0, 'el ejercicio temporal no quedó en el catálogo');
 end $$;
 
