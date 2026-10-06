@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
 import { tablasBase, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
@@ -412,5 +412,226 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await expect(page.getByText('Completo', { exact: true })).toBeVisible();
     // Solo lectura: nada de "Repetir" ni favoritos.
     await expect(page.getByText(/Repetir|Favorita/)).toHaveCount(0);
+  });
+});
+
+// ── Recarga de Mi Rutina (foco / primer plano / cambio de día) ──────────────
+// Bug real: Seba re-guardaba la rutina desde el panel (el Admin borra y
+// recrea los routine_exercises con ids NUEVOS) con la app del socio abierta;
+// la pantalla seguía con los ids viejos y marcar fallaba con el error crudo
+// de Postgres (23503, FK). El mock de Supabase de los e2e no valida FKs, así
+// que cada test que lo necesita registra su propia ruta para
+// routine_completions (la última ruta registrada gana en Playwright).
+
+const DIA_REGUARDADO = {
+  ...DAY_1,
+  id: 'e2e-day-1-nuevo',
+  routine_exercises: DAY_1.routine_exercises.map((re) => ({ ...re, id: `${re.id}-nuevo` })),
+};
+
+function tablasRecarga() {
+  return {
+    ...tablasBase(),
+    routines: [ROUTINE],
+    routine_days: [DAY_1] as any[],
+    routine_completions: [] as any[],
+    user_exercise_weights: [] as any[],
+  };
+}
+
+// Responde 23503 (como Postgres) si se marca un routine_exercise que ya no
+// está en la rutina actual del fixture; si existe, deja pasar al mock común.
+async function validarFkDeCompletions(page: Page, tablas: ReturnType<typeof tablasRecarga>) {
+  await page.route(
+    (url) => url.pathname === '/rest/v1/routine_completions',
+    async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      const fila = route.request().postDataJSON();
+      const existe = tablas.routine_days.some((d: any) =>
+        d.routine_exercises.some((re: any) => re.id === fila.routine_exercise_id)
+      );
+      if (existe) return route.fallback();
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: '23503',
+          message:
+            'insert or update on table "routine_completions" violates foreign key constraint "routine_completions_routine_exercise_id_fkey"',
+          details: null,
+          hint: null,
+        }),
+      });
+    }
+  );
+}
+
+// Lo que hace el navegador al ir a segundo plano y volver (react-native-web
+// implementa AppState sobre visibilitychange).
+async function segundoPlanoYVuelta(page: Page) {
+  await page.evaluate(() => {
+    const poner = (estado: 'hidden' | 'visible') => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => estado });
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => estado === 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+    poner('hidden');
+    poner('visible');
+  });
+}
+
+function contarPedidosDeRutina(page: Page) {
+  const contador = { n: 0 };
+  page.on('request', (req) => {
+    if (req.method() === 'GET' && new URL(req.url()).pathname === '/rest/v1/routines') contador.n += 1;
+  });
+  return contador;
+}
+
+function fechaLocal(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+test.describe('PWA -- Mi Rutina: recarga con la app abierta', () => {
+  test('Seba re-guarda la rutina con la pantalla abierta: al volver a la pestaña marcar usa los ids nuevos', async ({
+    page,
+  }) => {
+    const tablas = tablasRecarga();
+    await loginComoSocio(page, { tables: tablas });
+    await validarFkDeCompletions(page, tablas);
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByText('Press de banca')).toBeVisible();
+
+    // Seba re-guarda desde el panel mientras tanto.
+    tablas.routine_days[0] = DIA_REGUARDADO;
+
+    await irATab(page, 'Inicio');
+    await irATab(page, 'Mi Rutina');
+    await page.getByLabel('Marcar Press de banca como completado').click();
+
+    await expect(page.getByLabel('Press de banca, completado')).toBeVisible();
+    await expect
+      .poll(() => tablas.routine_completions.some((c: any) => c.routine_exercise_id === 'e2e-re-1-nuevo'))
+      .toBe(true);
+  });
+
+  test('23503 sin salir de la pantalla: aviso con título y mensaje entendibles, recarga sola y se puede volver a marcar', async ({
+    page,
+  }) => {
+    const tablas = tablasRecarga();
+    await loginComoSocio(page, { tables: tablas });
+    await validarFkDeCompletions(page, tablas);
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByText('Press de banca')).toBeVisible();
+
+    tablas.routine_days[0] = DIA_REGUARDADO;
+
+    const dialogo = page.waitForEvent('dialog');
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    const d = await dialogo;
+    // window.alert en web: título Y mensaje (antes el título se perdía), sin el texto de Postgres.
+    expect(d.message()).toBe(
+      'Tu rutina se actualizó\n\nTu entrenador hizo cambios. Volvé a marcar los ejercicios que ya hiciste.'
+    );
+    expect(d.message()).not.toContain('foreign key');
+    await d.accept();
+
+    // El tilde volvió atrás; marcar de nuevo ya va con el id nuevo y queda guardado.
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    await expect(page.getByLabel('Press de banca, completado')).toBeVisible();
+    await expect
+      .poll(() => tablas.routine_completions.some((c: any) => c.routine_exercise_id === 'e2e-re-1-nuevo'))
+      .toBe(true);
+  });
+
+  test('volver a primer plano con la pestaña abierta recarga la rutina', async ({ page }) => {
+    const tablas = tablasRecarga();
+    const pedidos = contarPedidosDeRutina(page);
+    await loginComoSocio(page, { tables: tablas });
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByText('Press de banca')).toBeVisible();
+    const antes = pedidos.n;
+
+    const primero = DIA_REGUARDADO.routine_exercises[0];
+    tablas.routine_days[0] = {
+      ...DIA_REGUARDADO,
+      routine_exercises: [{ ...primero, exercise: { ...primero.exercise, name: 'Press inclinado' } }],
+    };
+    await segundoPlanoYVuelta(page);
+
+    await expect(page.getByText('Press inclinado')).toBeVisible();
+    expect(pedidos.n).toBe(antes + 1);
+  });
+
+  test('una Carga escrita y NO guardada sigue ahí después de volver a primer plano (y no se guardó sola)', async ({
+    page,
+  }) => {
+    const tablas = tablasRecarga();
+    const pedidos = contarPedidosDeRutina(page);
+    await loginComoSocio(page, { tables: tablas });
+    await irATab(page, 'Mi Rutina');
+    const carga = page.getByLabel('Carga (kg) usada en este ejercicio').first();
+    await expect(carga).toHaveValue('20kg');
+    const antes = pedidos.n;
+
+    await carga.fill('55kg'); // sin salir del campo: todavía no se guardó
+
+    // Además la rutina se re-guardó con ids nuevos (la fila se vuelve a montar).
+    tablas.routine_days[0] = DIA_REGUARDADO;
+    await segundoPlanoYVuelta(page);
+    await expect.poll(() => pedidos.n).toBe(antes + 1);
+
+    await expect(page.getByLabel('Carga (kg) usada en este ejercicio').first()).toHaveValue('55kg');
+    expect(tablas.user_exercise_weights).toHaveLength(0);
+  });
+});
+
+test.describe('PWA -- Mi Rutina: cambio de día con la app abierta', () => {
+  test('pasada la medianoche no marca con la fecha de ayer: avisa, recarga y los tildes de ayer no aparecen', async ({
+    page,
+  }) => {
+    const casiMedianoche = new Date();
+    casiMedianoche.setHours(23, 58, 0, 0);
+    const ayer = fechaLocal(casiMedianoche);
+    const manana = new Date(casiMedianoche);
+    manana.setDate(manana.getDate() + 1);
+    manana.setHours(0, 1, 0, 0);
+    const hoy = fechaLocal(manana);
+    await page.clock.install({ time: casiMedianoche });
+
+    const tablas = tablasRecarga();
+    // "Ayer" (23:58) ya había marcado Press de banca.
+    tablas.routine_completions.push({
+      id: 'c-ayer',
+      user_id: SOCIO_DEMO.id,
+      routine_exercise_id: 'e2e-re-1',
+      completed_date: ayer,
+    });
+    await loginComoSocio(page, { tables: tablas });
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByLabel('Press de banca, completado')).toBeVisible();
+
+    // Pasa la medianoche con la app abierta.
+    await page.clock.setSystemTime(manana);
+
+    // Este aviso sale en el MISMO click (sin esperar al servidor): el
+    // diálogo se acepta desde el listener, si no el click queda bloqueado.
+    const mensajes: string[] = [];
+    page.once('dialog', async (dialogo) => {
+      mensajes.push(dialogo.message());
+      await dialogo.accept();
+    });
+    await page.getByLabel('Marcar Fondos en banco como completado').click();
+    await expect.poll(() => mensajes).toEqual(['Empezó un nuevo día\n\nTu rutina se actualizó.']);
+
+    // Recargó con la fecha nueva: el tilde de ayer ya no aparece.
+    await expect(page.getByLabel('Marcar Press de banca como completado')).toBeVisible();
+    expect(tablas.routine_completions).toHaveLength(1); // no se escribió nada con la fecha vieja
+
+    // Marcar ahora va con la fecha de hoy.
+    await page.getByLabel('Marcar Fondos en banco como completado').click();
+    await expect
+      .poll(() => tablas.routine_completions.find((c: any) => c.routine_exercise_id === 'e2e-re-2')?.completed_date)
+      .toBe(hoy);
   });
 });

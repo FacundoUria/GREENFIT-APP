@@ -1,5 +1,5 @@
 import { Alert, Platform } from 'react-native';
-import { showAlert } from '../../lib/crossPlatformAlert';
+import { showAlert, textoAlertaWeb } from '../../lib/crossPlatformAlert';
 
 // Test dedicado que faltaba: los 24 call sites migrados a showAlert()
 // (ProfileScreen, ProgresoMobileView, UserRoutineScreen, ComunidadMobileView,
@@ -19,7 +19,7 @@ describe('showAlert (reemplazo de Alert.alert -- no-op mudo en react-native-web)
     jest.restoreAllMocks();
   });
 
-  it('en Web, usa window.alert con el mensaje (no el título -- window.alert es un solo string)', () => {
+  it('en Web, usa window.alert con el título Y el mensaje (antes el título se perdía)', () => {
     Platform.OS = 'web';
     // jest.spyOn exige que la propiedad ya exista -- window.alert no existe
     // en este entorno de test (jest-expo no corre en un browser real), así
@@ -30,7 +30,7 @@ describe('showAlert (reemplazo de Alert.alert -- no-op mudo en react-native-web)
 
     showAlert('No se pudo reservar', 'Sin créditos disponibles para esta disciplina');
 
-    expect(windowAlertSpy).toHaveBeenCalledWith('Sin créditos disponibles para esta disciplina');
+    expect(windowAlertSpy).toHaveBeenCalledWith('No se pudo reservar\n\nSin créditos disponibles para esta disciplina');
     expect(nativeAlertSpy).not.toHaveBeenCalled();
   });
 
@@ -54,5 +54,12 @@ describe('showAlert (reemplazo de Alert.alert -- no-op mudo en react-native-web)
 
     expect(nativeAlertSpy).toHaveBeenCalledWith('Guardado', 'Tus datos se actualizaron.');
     expect(windowAlertSpy).not.toHaveBeenCalled();
+  });
+
+  it('textoAlertaWeb: título + línea en blanco + mensaje; si falta uno, el otro solo', () => {
+    expect(textoAlertaWeb('Tu rutina se actualizó', 'Volvé a marcar.')).toBe('Tu rutina se actualizó\n\nVolvé a marcar.');
+    expect(textoAlertaWeb('Guardado')).toBe('Guardado');
+    expect(textoAlertaWeb('', 'Solo el mensaje')).toBe('Solo el mensaje');
+    expect(textoAlertaWeb('Título', '   ')).toBe('Título');
   });
 });

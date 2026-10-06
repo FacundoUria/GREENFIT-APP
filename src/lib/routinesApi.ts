@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { errorConCodigo } from './supabaseErrors';
 import { Exercise, Routine, RoutineDay } from '../types';
 
 // 42P01 = undefined_table (Postgres). PGRST205 = PostgREST no encuentra la
@@ -121,8 +122,10 @@ export async function markExerciseCompleted(
     .from('routine_completions')
     .insert({ user_id: userId, routine_exercise_id: routineExerciseId, completed_date: todayStr });
   // Ya marcado (choque del unique constraint) no es un error real -- el
-  // checkbox ya estaba en el estado que se quería dejar.
-  if (error && error.code !== '23505') throw new Error(error.message);
+  // checkbox ya estaba en el estado que se quería dejar. Cualquier otro error
+  // se lanza CON su código: un 23503 (el ejercicio ya no existe porque el
+  // entrenador re-guardó la rutina) lo maneja la pantalla recargando.
+  if (error && error.code !== '23505') throw errorConCodigo(error);
 }
 
 export async function unmarkExerciseCompleted(
@@ -136,7 +139,9 @@ export async function unmarkExerciseCompleted(
     .eq('user_id', userId)
     .eq('routine_exercise_id', routineExerciseId)
     .eq('completed_date', todayStr);
-  if (error) throw new Error(error.message);
+  // Mismo criterio que markExerciseCompleted (en la práctica un DELETE no da
+  // 23503: si la fila ya no existe, borra 0 filas sin error).
+  if (error) throw errorConCodigo(error);
 }
 
 // -- Carga real por ejercicio (Módulo "Registro dinámico de peso") --

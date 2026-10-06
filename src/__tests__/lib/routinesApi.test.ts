@@ -11,7 +11,10 @@ import {
   getRoutineHistory,
   eliminarSesionHistorial,
   agruparHistorial,
+  markExerciseCompleted,
+  unmarkExerciseCompleted,
 } from '../../lib/routinesApi';
+import { esViolacionDeFk } from '../../lib/supabaseErrors';
 
 const mockedFrom = supabase.from as jest.Mock;
 const mockedRpc = supabase.rpc as jest.Mock;
@@ -19,7 +22,7 @@ const mockedRpc = supabase.rpc as jest.Mock;
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'upsert', 'order', 'limit'].forEach((m) => {
+  ['select', 'eq', 'upsert', 'order', 'limit', 'insert', 'delete'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
@@ -269,5 +272,64 @@ describe('getRoutineHistory (solo lectura)', () => {
     await expect(getRoutineHistory('user-1')).resolves.toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_routine_history.sql'), 'undefined_table');
     warn.mockRestore();
+  });
+});
+
+// El checklist diario conserva el código de Postgres: la pantalla necesita
+// distinguir un 23503 (el ejercicio ya no existe porque Seba re-guardó la
+// rutina) de cualquier otro error.
+describe('markExerciseCompleted / unmarkExerciseCompleted (conservan el código de error)', () => {
+  it('marcar inserta en routine_completions por (socio, fila de la rutina, fecha)', async () => {
+    const chain = makeChain({ error: null });
+    mockedFrom.mockImplementation(() => chain);
+
+    await markExerciseCompleted('user-1', 're-1', '2026-10-06');
+
+    expect(mockedFrom).toHaveBeenCalledWith('routine_completions');
+    expect(chain.insert).toHaveBeenCalledWith({ user_id: 'user-1', routine_exercise_id: 're-1', completed_date: '2026-10-06' });
+  });
+
+  it('23505 (ya estaba marcado) no es un error', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ error: { code: '23505', message: 'duplicate key value' } }));
+    await expect(markExerciseCompleted('user-1', 're-1', '2026-10-06')).resolves.toBeUndefined();
+  });
+
+  it('23503 (el ejercicio ya no existe) se lanza con el código, y esViolacionDeFk lo reconoce', async () => {
+    mockedFrom.mockImplementation(() =>
+      makeChain({ error: { code: '23503', message: 'insert or update on table "routine_completions" violates foreign key constraint' } })
+    );
+    const err = await markExerciseCompleted('user-1', 're-viejo', '2026-10-06').catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('23503');
+    expect(esViolacionDeFk(err)).toBe(true);
+  });
+
+  it('cualquier otro error se lanza con su mensaje y su código, y NO cuenta como FK', async () => {
+    mockedFrom.mockImplementation(() => makeChain({ error: { code: '42501', message: 'new row violates row-level security' } }));
+    const err = await markExerciseCompleted('user-1', 're-1', '2026-10-06').catch((e) => e);
+
+    expect(err.message).toBe('new row violates row-level security');
+    expect(err.code).toBe('42501');
+    expect(esViolacionDeFk(err)).toBe(false);
+  });
+
+  it('desmarcar borra por (socio, fila, fecha) y también conserva el código si falla', async () => {
+    const ok = makeChain({ error: null });
+    mockedFrom.mockImplementation(() => ok);
+    await unmarkExerciseCompleted('user-1', 're-1', '2026-10-06');
+    expect(ok.delete).toHaveBeenCalled();
+    expect(ok.eq).toHaveBeenCalledWith('routine_exercise_id', 're-1');
+    expect(ok.eq).toHaveBeenCalledWith('completed_date', '2026-10-06');
+
+    mockedFrom.mockImplementation(() => makeChain({ error: { code: '42501', message: 'rls' } }));
+    const err = await unmarkExerciseCompleted('user-1', 're-1', '2026-10-06').catch((e) => e);
+    expect(err.code).toBe('42501');
+  });
+
+  it('esViolacionDeFk no rompe con valores que no son errores', () => {
+    expect(esViolacionDeFk(null)).toBe(false);
+    expect(esViolacionDeFk(undefined)).toBe(false);
+    expect(esViolacionDeFk(new Error('x'))).toBe(false);
   });
 });

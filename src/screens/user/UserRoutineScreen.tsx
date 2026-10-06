@@ -11,7 +11,9 @@ import {
   Linking,
   Animated,
   Modal,
+  AppState,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { showAlert } from '../../lib/crossPlatformAlert';
@@ -31,6 +33,7 @@ import {
   SesionHistorial,
 } from '../../lib/routinesApi';
 import { formatDateOnly } from '../../lib/classesApi';
+import { esViolacionDeFk } from '../../lib/supabaseErrors';
 import { Routine, RoutineExercise } from '../../types';
 import Avatar from '../../components/Avatar';
 import VideoModal from '../../components/VideoModal';
@@ -108,19 +111,34 @@ function MetaChip({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: 
 
 // Carga real editable -- distinta de bloque.weightSuggestion (la sugerencia
 // fija que cargó el entrenador, igual para cualquier socio con esta
-// rutina). Estado local propio para no disparar un guardado en cada tecla:
-// solo persiste al perder el foco, y solo si realmente cambió algo.
-function CargaInput({ valor, onGuardar }: { valor: string; onGuardar: (nuevoValor: string) => void }) {
-  const [texto, setTexto] = useState(valor);
-
-  useEffect(() => {
-    setTexto(valor);
-  }, [valor]);
+// rutina). No dispara un guardado en cada tecla: solo persiste al perder el
+// foco, y solo si realmente cambió algo.
+//
+// Lo que el socio está escribiendo y todavía no guardó (`borrador`) NO vive
+// acá sino en la pantalla, por exercise_id: así sobrevive a una recarga de
+// la rutina (vuelta a primer plano, foco de la pestaña, rutina re-guardada
+// con ids nuevos -- que remonta esta fila) en vez de perderse.
+function CargaInput({
+  valor,
+  borrador,
+  onCambiar,
+  onGuardar,
+  onDescartar,
+}: {
+  valor: string;
+  borrador: string | undefined;
+  onCambiar: (texto: string) => void;
+  onGuardar: (nuevoValor: string) => void;
+  onDescartar: () => void;
+}) {
+  const texto = borrador ?? valor;
 
   function handleBlur() {
-    const limpio = texto.trim();
+    if (borrador === undefined) return;
+    const limpio = borrador.trim();
+    // no se guardan cargas vacías -- al descartar el borrador vuelve al último valor real
     if (limpio && limpio !== valor.trim()) onGuardar(limpio);
-    else if (!limpio) setTexto(valor); // no se guardan cargas vacías -- vuelve al último valor real
+    onDescartar();
   }
 
   return (
@@ -128,7 +146,7 @@ function CargaInput({ valor, onGuardar }: { valor: string; onGuardar: (nuevoValo
       <Ionicons name="barbell-outline" size={14} color={colors.primary} />
       <TextInput
         value={texto}
-        onChangeText={setTexto}
+        onChangeText={onCambiar}
         onBlur={handleBlur}
         placeholder="Carga"
         placeholderTextColor={colors.textSecondary}
@@ -151,16 +169,22 @@ function ExerciseRow({
   numero,
   completado,
   peso,
+  borradorPeso,
   onToggle,
+  onCambiarPeso,
   onGuardarPeso,
+  onDescartarPeso,
   onVerDemo,
 }: {
   bloque: RoutineExercise;
   numero: number;
   completado: boolean;
   peso: string;
+  borradorPeso: string | undefined;
   onToggle: () => void;
+  onCambiarPeso: (texto: string) => void;
   onGuardarPeso: (nuevoValor: string) => void;
+  onDescartarPeso: () => void;
   onVerDemo: (url: string) => void;
 }) {
   const anim = useRef(new Animated.Value(completado ? 1 : 0)).current;
@@ -207,7 +231,13 @@ function ExerciseRow({
           {/* Carga editable -- recuerda la última que el socio cargó a mano
               (persistente entre sesiones), no la sugerencia fija del
               entrenador. */}
-          <CargaInput valor={peso} onGuardar={onGuardarPeso} />
+          <CargaInput
+            valor={peso}
+            borrador={borradorPeso}
+            onCambiar={onCambiarPeso}
+            onGuardar={onGuardarPeso}
+            onDescartar={onDescartarPeso}
+          />
         </View>
 
         {!!instrucciones && (
@@ -457,34 +487,151 @@ export default function UserRoutineScreen() {
   const [eliminando, setEliminando] = useState(false);
   const [avisoHistorial, setAvisoHistorial] = useState<string | null>(null);
 
-  const todayStr = useMemo(() => formatDateOnly(new Date()), []);
+  // Fecha de HOY con la que se leen y escriben los tildes. Es estado (no un
+  // useMemo fijo): si la app queda abierta y pasa la medianoche, la próxima
+  // recarga la actualiza. `hoyRef` es la misma fecha para los callbacks.
+  const [todayStr, setTodayStr] = useState(() => formatDateOnly(new Date()));
+  const hoyRef = useRef(todayStr);
   // true apenas el socio toca un chip de día: desde ahí se respeta su
   // elección (incluso al refrescar) en vez de volver a elegir por los tildes.
   const diaElegidoAMano = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setError(null);
-    try {
-      const [r, completions, pesosGuardados] = await Promise.all([
-        getUserRoutine(user.id),
-        getTodayCompletions(user.id, todayStr),
-        getUserExerciseWeights(user.id),
-      ]);
-      setRoutine(r);
-      setCompletados(completions);
-      setPesos(pesosGuardados);
-      setSelectedDayIdx((prev) => diaInicial(r, completions, diaElegidoAMano.current ? prev : null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo cargar tu rutina.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user, todayStr]);
+  // Lo que el socio está escribiendo en una Carga y todavía no guardó, por
+  // exercise_id (igual que `pesos`). Vive acá y no en cada CargaInput para
+  // que una recarga no lo pierda -- ni siquiera si la rutina se re-guardó
+  // con ids nuevos y las filas se vuelven a montar.
+  const [borradoresPeso, setBorradoresPeso] = useState<Map<string, string>>(new Map());
+  function cambiarBorradorPeso(exerciseId: string, texto: string | undefined) {
+    setBorradoresPeso((prev) => {
+      const next = new Map(prev);
+      if (texto === undefined) next.delete(exerciseId);
+      else next.set(exerciseId, texto);
+      return next;
+    });
+  }
 
+  // ── Recargas ──
+  // La rutina se vuelve a pedir al tomar foco la pestaña y al volver la app a
+  // primer plano: si Seba la re-guarda mientras el socio la tiene abierta, el
+  // panel Admin borra y recrea los routine_exercises con ids NUEVOS (y la
+  // cascada borra los tildes del día). Sin recargar, la pantalla seguía con
+  // los ids viejos y marcar fallaba con 23503 (FK).
+  //
+  // Contra las carreras:
+  //  - `pedidoRef`: cada carga lleva un número; solo aplica su resultado la
+  //    más reciente (una respuesta vieja que llega tarde se descarta).
+  //  - `cargaEnCursoRef`: una recarga NO forzada con otra en vuelo para la
+  //    misma fecha reusa esa (foco + primer plano juntos = un solo pedido).
+  //  - `escriturasRef`: si hay un tilde o una carga guardándose, una recarga
+  //    que termina en ese momento podría pisarlo con datos leídos ANTES de la
+  //    escritura -- se descarta y se vuelve a pedir al terminar la escritura.
+  const pedidoRef = useRef(0);
+  const cargaEnCursoRef = useRef<{ fecha: string; promesa: Promise<void> } | null>(null);
+  const escriturasRef = useRef(0);
+  const recargaPendienteRef = useRef(false);
+  const hayRutinaRef = useRef(false);
+  const enfocadaRef = useRef(false);
+
+  const cargar = useCallback(
+    async (fecha: string) => {
+      if (!user) return;
+      const pedido = ++pedidoRef.current;
+      try {
+        const [r, completions, pesosGuardados] = await Promise.all([
+          getUserRoutine(user.id),
+          getTodayCompletions(user.id, fecha),
+          getUserExerciseWeights(user.id),
+        ]);
+        if (pedido !== pedidoRef.current) return;
+        if (escriturasRef.current > 0) {
+          recargaPendienteRef.current = true;
+          return;
+        }
+        setError(null);
+        setRoutine(r);
+        hayRutinaRef.current = r !== null;
+        setCompletados(completions);
+        setPesos(pesosGuardados);
+        setSelectedDayIdx((prev) => diaInicial(r, completions, diaElegidoAMano.current ? prev : null));
+      } catch (err) {
+        if (pedido !== pedidoRef.current) return;
+        // Lectura: si ya hay una rutina en pantalla, una recarga en segundo
+        // plano que falla no la borra -- se queda lo que se ve, con aviso en
+        // consola. Sin nada cargado todavía, el error sí se muestra.
+        if (hayRutinaRef.current) console.warn('[Mi Rutina] No se pudo recargar la rutina:', err);
+        else setError(err instanceof Error ? err.message : 'No se pudo cargar tu rutina.');
+      } finally {
+        if (pedido === pedidoRef.current) setIsLoading(false);
+      }
+    },
+    [user]
+  );
+
+  // `forzar`: lanza una carga nueva aunque haya otra en vuelo (23503, tirar
+  // para refrescar, recarga pendiente tras una escritura).
+  const refrescar = useCallback(
+    (forzar = false): Promise<void> => {
+      if (!user) return Promise.resolve();
+      const hoy = formatDateOnly(new Date());
+      if (hoy !== hoyRef.current) {
+        // Cambió el día con la app abierta: los tildes de ayer no aplican, y
+        // el día de la rutina se vuelve a elegir solo.
+        hoyRef.current = hoy;
+        setTodayStr(hoy);
+        diaElegidoAMano.current = false;
+      }
+      const enCurso = cargaEnCursoRef.current;
+      if (!forzar && enCurso && enCurso.fecha === hoy) return enCurso.promesa;
+      const promesa: Promise<void> = cargar(hoy).finally(() => {
+        if (cargaEnCursoRef.current?.promesa === promesa) cargaEnCursoRef.current = null;
+      });
+      cargaEnCursoRef.current = { fecha: hoy, promesa };
+      return promesa;
+    },
+    [user, cargar]
+  );
+
+  function empezarEscritura() {
+    escriturasRef.current += 1;
+    // Una carga que ya estaba en vuelo leyó (o va a leer) ANTES de esta
+    // escritura: su resultado se descarta y se vuelve a pedir al terminar.
+    if (cargaEnCursoRef.current) {
+      pedidoRef.current += 1;
+      cargaEnCursoRef.current = null;
+      recargaPendienteRef.current = true;
+    }
+  }
+
+  function terminarEscritura() {
+    escriturasRef.current -= 1;
+    if (escriturasRef.current === 0 && recargaPendienteRef.current) {
+      recargaPendienteRef.current = false;
+      refrescar(true);
+    }
+  }
+
+  // Foco de la pestaña (también cubre la carga inicial: no hay un useEffect
+  // aparte, que haría dos pedidos al montar). Mismo criterio que Agenda,
+  // Comunidad y Perfil.
+  useFocusEffect(
+    useCallback(() => {
+      enfocadaRef.current = true;
+      refrescar();
+      return () => {
+        enfocadaRef.current = false;
+      };
+    }, [refrescar])
+  );
+
+  // Vuelta a primer plano. Un solo listener de AppState sirve para nativo y
+  // web: react-native-web implementa AppState sobre `visibilitychange`. Solo
+  // recarga si Mi Rutina es la pestaña visible (si no, lo hará el foco).
   useEffect(() => {
-    load();
-  }, [load]);
+    const sub = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active' && enfocadaRef.current) refrescar();
+    });
+    return () => sub?.remove();
+  }, [refrescar]);
 
   const loadHistorial = useCallback(async () => {
     if (!user) return;
@@ -530,6 +677,14 @@ export default function UserRoutineScreen() {
 
   async function handleToggle(routineExerciseId: string) {
     if (!user) return;
+    // Pasó la medianoche con la app abierta: no se marca con la fecha de
+    // ayer -- se recarga con la de hoy y se avisa.
+    if (formatDateOnly(new Date()) !== hoyRef.current) {
+      refrescar(true);
+      showAlert('Empezó un nuevo día', 'Tu rutina se actualizó.');
+      return;
+    }
+    const fecha = hoyRef.current;
     const yaCompletado = completados.has(routineExerciseId);
     setAvisoFinal(null);
 
@@ -542,11 +697,12 @@ export default function UserRoutineScreen() {
       return next;
     });
 
+    empezarEscritura();
     try {
       if (yaCompletado) {
-        await unmarkExerciseCompleted(user.id, routineExerciseId, todayStr);
+        await unmarkExerciseCompleted(user.id, routineExerciseId, fecha);
       } else {
-        await markExerciseCompleted(user.id, routineExerciseId, todayStr);
+        await markExerciseCompleted(user.id, routineExerciseId, fecha);
       }
     } catch (err) {
       setCompletados((prev) => {
@@ -555,7 +711,16 @@ export default function UserRoutineScreen() {
         else next.delete(routineExerciseId);
         return next;
       });
-      showAlert('No se pudo guardar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      if (esViolacionDeFk(err)) {
+        // El ejercicio ya no existe: el entrenador re-guardó la rutina. Se
+        // recarga sola y se avisa en criollo, no con el texto de Postgres.
+        refrescar(true);
+        showAlert('Tu rutina se actualizó', 'Tu entrenador hizo cambios. Volvé a marcar los ejercicios que ya hiciste.');
+      } else {
+        showAlert('No se pudo guardar', err instanceof Error ? err.message : 'Intentá de nuevo.');
+      }
+    } finally {
+      terminarEscritura();
     }
   }
 
@@ -578,6 +743,7 @@ export default function UserRoutineScreen() {
       return next;
     });
 
+    empezarEscritura();
     try {
       await saveExerciseWeight(user.id, exerciseId, nuevoValor);
     } catch (err) {
@@ -588,6 +754,8 @@ export default function UserRoutineScreen() {
         return next;
       });
       showAlert('No se pudo guardar la carga', err instanceof Error ? err.message : 'Intentá de nuevo.');
+    } finally {
+      terminarEscritura();
     }
   }
 
@@ -678,7 +846,7 @@ export default function UserRoutineScreen() {
       refreshControl={
         <RefreshControl
           refreshing={vista === 'hoy' ? isLoading : historialCargando}
-          onRefresh={vista === 'hoy' ? load : loadHistorial}
+          onRefresh={vista === 'hoy' ? () => refrescar(true) : loadHistorial}
           tintColor={colors.primary}
         />
       }
@@ -821,8 +989,11 @@ export default function UserRoutineScreen() {
                     numero={idx + 1}
                     completado={completados.has(bloque.id)}
                     peso={pesoDe(bloque)}
+                    borradorPeso={borradoresPeso.get(bloque.exercise.id)}
                     onToggle={() => handleToggle(bloque.id)}
+                    onCambiarPeso={(texto) => cambiarBorradorPeso(bloque.exercise.id, texto)}
                     onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.exercise.id, nuevoValor)}
+                    onDescartarPeso={() => cambiarBorradorPeso(bloque.exercise.id, undefined)}
                     onVerDemo={setVideoUrl}
                   />
                 ))

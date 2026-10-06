@@ -16,12 +16,20 @@ import { Alert, Platform } from 'react-native';
 // verdad) en vez del no-op.
 export function showAlert(title: string, message?: string): void {
   if (Platform.OS === 'web') {
-    // window.alert es un solo string -- mismo criterio que ya usaba
-    // mostrarErrorPago en HomeScreen.tsx: se muestra el mensaje (lo
-    // accionable), no el título, para no duplicar/alargar el texto en un
-    // alert nativo del navegador que no tiene layout para dos líneas.
-    if (typeof window !== 'undefined') window.alert(message ?? title);
+    // window.alert es un solo string: título y mensaje van juntos, separados
+    // por una línea en blanco. Antes se mostraba solo el mensaje y el título
+    // se perdía en web (ej. "Tu rutina se actualizó" no se veía).
+    if (typeof window !== 'undefined') window.alert(textoAlertaWeb(title, message));
     return;
   }
   Alert.alert(title, message);
+}
+
+// Texto de window.alert en Web: "título\n\nmensaje", o el que venga si falta
+// el otro (vacíos o solo espacios cuentan como faltantes).
+export function textoAlertaWeb(title: string, message?: string): string {
+  const titulo = title?.trim() ?? '';
+  const cuerpo = message?.trim() ?? '';
+  if (titulo && cuerpo) return `${titulo}\n\n${cuerpo}`;
+  return cuerpo || titulo;
 }

@@ -16,6 +16,18 @@ jest.mock('../../context/AuthContext', () => ({
   useAuth: () => mockAuth,
 }));
 
+// Mi Rutina carga con useFocusEffect -- sin un NavigationContainer real,
+// se mockea para que dispare el callback al montar (mismo patrón que
+// AgendaMobileView.render.test.tsx). Las recargas por foco / primer plano
+// tienen su propio archivo: UserRoutineScreen.recarga.test.tsx.
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ReactActual = require('react');
+    ReactActual.useEffect(() => callback(), []);
+  },
+}));
+
 // VideoModal trae react-native-webview (módulo nativo, no existe en Jest).
 jest.mock('../../components/VideoModal', () => () => null);
 
