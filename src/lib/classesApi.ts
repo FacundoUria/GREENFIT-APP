@@ -12,7 +12,17 @@ export type ClassWithBookings = GymClass & {
 };
 
 const CLASS_COLUMNS =
-  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time, disciplines(is_active, show_in_agenda)';
+  'id, title, discipline_id, instructor, location, capacity, days_of_week, start_time, end_time, fecha_unica, disciplines(is_active, show_in_agenda)';
+
+// Una clase de una sola vez (classes.fecha_unica, ver supabase_migration_clase_
+// una_sola_vez.sql) existe SOLO su fecha. Su days_of_week ya es {día de esa
+// fecha} (CHECK en la base), así que `.contains('days_of_week', …)` la trae
+// todas las semanas de ese día: acá se descartan las otras semanas. book_class
+// la rechaza igual ("Esta clase es solo del dd/mm") -- esto es para no
+// mostrarla. Sin la columna (fixtures viejos) es semanal, igual que antes.
+export function seDictaEnFecha(c: { fecha_unica?: string | null }, occurrenceDate: string): boolean {
+  return !c.fecha_unica || c.fecha_unica === occurrenceDate;
+}
 
 function mapClass(c: {
   id: string;
@@ -24,6 +34,7 @@ function mapClass(c: {
   days_of_week: number[];
   start_time: string;
   end_time: string | null;
+  fecha_unica?: string | null;
 }): GymClass {
   return {
     id: c.id,
@@ -35,6 +46,7 @@ function mapClass(c: {
     daysOfWeek: c.days_of_week ?? [],
     startTime: c.start_time,
     endTime: c.end_time,
+    fechaUnica: c.fecha_unica ?? null,
   };
 }
 
@@ -93,7 +105,9 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   // supabase_migration_show_in_agenda.sql).
   const classesActivas = classes.filter((c) => {
     const disciplina = Array.isArray(c.disciplines) ? c.disciplines[0] : c.disciplines;
-    return disciplina?.is_active !== false && disciplina?.show_in_agenda !== false;
+    return (
+      disciplina?.is_active !== false && disciplina?.show_in_agenda !== false && seDictaEnFecha(c, occurrenceDate)
+    );
   });
   if (classesActivas.length === 0) return [];
 
@@ -174,10 +188,13 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
 
   // Segunda capa: clases con distinto id pero mismo título+horario (típico
   // de un alta duplicada por doble tap en "Crear clase") se muestran como
-  // una sola tarjeta, priorizando la que ya tiene anotados.
+  // una sola tarjeta, priorizando la que ya tiene anotados. La fecha única
+  // entra en la clave: una clase de una sola vez con el mismo título y hora
+  // que una semanal es OTRA clase (distinto cupo y anotados), no un duplicado
+  // -- sin esto, una de las dos quedaba escondida.
   const byLogicalKey = new Map<string, (typeof uniqueById)[number]>();
   for (const item of uniqueById) {
-    const key = `${item.title.trim().toLowerCase()}|${item.startTime}`;
+    const key = `${item.title.trim().toLowerCase()}|${item.startTime}|${item.fechaUnica ?? ''}`;
     const existing = byLogicalKey.get(key);
     if (!existing || item.bookedCount > existing.bookedCount) {
       byLogicalKey.set(key, item);

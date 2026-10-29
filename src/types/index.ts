@@ -110,6 +110,9 @@ export interface GymClass {
   daysOfWeek: number[];
   startTime: string; // "HH:mm:ss"
   endTime: string | null; // "HH:mm:ss"
+  // Clase de una sola vez: "YYYY-MM-DD" -- existe SOLO ese día (daysOfWeek es
+  // {día de esa fecha}). null/ausente = se repite todas las semanas.
+  fechaUnica?: string | null;
 }
 
 export interface Booking {
