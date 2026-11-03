@@ -6,6 +6,7 @@ import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { NotificationAudience } from '../../types';
+import NotificationDetailSheet, { NotificationDetail } from '../../components/NotificationDetailSheet';
 
 // Vista nueva y paralela a NotificationsScreen (Módulo 4 del rediseño) --
 // mismo criterio que Agenda/Perfil: no toca esa pantalla, se engancha en su
@@ -113,12 +114,14 @@ async function loadLeidasIds(userId: string): Promise<Set<string>> {
   }
 }
 
+// Escritura: si falla, tira -- la pantalla le avisa al socio (regla de la
+// PWA: las escrituras nunca fallan en silencio).
 async function saveLeidasIds(userId: string, ids: Set<string>): Promise<void> {
   try {
     await AsyncStorage.setItem(leidasKey(userId), JSON.stringify(Array.from(ids)));
-  } catch {
-    // Best-effort: si falla el guardado, en el peor caso una notificación ya
-    // vista vuelve a aparecer como no leída. No rompe nada crítico.
+  } catch (err) {
+    const detalle = err instanceof Error ? err.message : String(err);
+    throw new Error(`No se pudo guardar qué notificaciones leíste (${detalle}).`);
   }
 }
 
@@ -172,6 +175,8 @@ export default function NotificacionesMobileView() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Filtro>('todas');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -191,19 +196,48 @@ export default function NotificacionesMobileView() {
     load();
   }, [load]);
 
+  // Entrar a la pantalla NO marca nada: una notificación pasa a leída solo
+  // cuando el socio abre su detalle (openDetail) o toca "Marcar todas".
   async function markAsRead(id: string) {
     if (!user) return;
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, leida: true } : n)));
-    const leidas = await loadLeidasIds(user.id);
-    leidas.add(id);
-    await saveLeidasIds(user.id, leidas);
+    try {
+      const leidas = await loadLeidasIds(user.id);
+      leidas.add(id);
+      await saveLeidasIds(user.id, leidas);
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : 'No se pudo marcar la notificación como leída.');
+    }
   }
 
   async function markAllAsRead() {
     if (!user) return;
     setItems((prev) => prev.map((n) => ({ ...n, leida: true })));
-    await saveLeidasIds(user.id, new Set(items.map((n) => n.id)));
+    try {
+      await saveLeidasIds(user.id, new Set(items.map((n) => n.id)));
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : 'No se pudieron marcar las notificaciones como leídas.');
+    }
   }
+
+  function openDetail(item: SmartNotification) {
+    setSelectedId(item.id);
+    if (!item.leida) markAsRead(item.id);
+  }
+
+  const selected = items.find((n) => n.id === selectedId) ?? null;
+  const selectedDetail: NotificationDetail | null = selected
+    ? {
+        id: selected.id,
+        title: selected.title,
+        body: selected.body,
+        createdAt: selected.createdAt,
+        categoriaLabel: CATEGORIA_META[selected.categoria].label,
+        categoriaColor: CATEGORIA_META[selected.categoria].color,
+        categoriaBg: CATEGORIA_META[selected.categoria].bg,
+        categoriaIcon: CATEGORIA_META[selected.categoria].icon,
+      }
+    : null;
 
   const unreadCount = items.filter((n) => !n.leida).length;
 
@@ -242,6 +276,7 @@ export default function NotificacionesMobileView() {
         <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
       )}
       {!!error && <Text style={styles.error}>{error}</Text>}
+      {!!writeError && <Text style={styles.error}>{writeError}</Text>}
       {!isLoading && !error && sections.length === 0 && <Text style={styles.empty}>{EMPTY_LABEL[filtro]}</Text>}
 
       <SectionList
@@ -258,7 +293,7 @@ export default function NotificacionesMobileView() {
               testID={`notif-card-${item.id}`}
               style={[styles.card, !item.leida && styles.cardUnread]}
               activeOpacity={0.85}
-              onPress={() => !item.leida && markAsRead(item.id)}
+              onPress={() => openDetail(item)}
             >
               {!item.leida && <View style={styles.unreadDot} />}
               <View style={[styles.iconCircle, { backgroundColor: meta.bg, borderColor: `${meta.color}55` }]}>
@@ -282,6 +317,8 @@ export default function NotificacionesMobileView() {
           );
         }}
       />
+
+      <NotificationDetailSheet notification={selectedDetail} onClose={() => setSelectedId(null)} />
     </View>
   );
 }
