@@ -297,23 +297,11 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
     expect(getByText('Cancelar')).toBeTruthy();
   });
 
-  // BUG REAL -- el mensaje de resultado tras cancelar decía "2 horas" como
-  // texto FIJO, sin leer configuracion.limite_cancelacion_minutos (a
-  // diferencia del aviso PREVIO del mismo modal, que sí lo leía). Con 10
-  // minutos configurados, el socio seguía viendo "2 horas", un dato falso.
-  it('cancelar fuera del límite de gracia (10 minutos configurados) -- el aviso dice "10 minutos", NO "2 horas"', async () => {
-    mockUseConfiguracion.mockReturnValue({
-      configuracion: {
-        diasTolerancia: 5,
-        limiteCancelacionMinutos: 10,
-        aliasCvu: null,
-        titularCuenta: null,
-        alertaActiva: false,
-        alertaMensaje: '',
-      },
-    });
-    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
-
+  // T4 -- antes, cancel_booking devolvía true siempre que cancelaba y Home decía
+  // "Te devolvimos el crédito." aunque no se hubiera devuelto nada (o armaba
+  // "Como cancelaste con menos de X…", una rama que nunca se veía). Ahora el
+  // texto lo arma el servidor (cancel_booking_detalle) y se muestra tal cual.
+  function reservaDeManana() {
     const manana = new Date();
     manana.setDate(manana.getDate() + 1);
     const mananaStr = manana.toISOString().slice(0, 10);
@@ -328,11 +316,66 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
       }
       return makeChain({ data: [], error: null });
     });
-    (supabase.rpc as jest.Mock).mockResolvedValue({ data: false, error: null }); // fuera del límite -- NO reintegra
+    return mananaStr;
+  }
+
+  it('cancelar y se devolvió el crédito: muestra el texto del servidor con la fecha de vencimiento', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const mananaStr = reservaDeManana();
+    (supabase.rpc as jest.Mock).mockImplementation((fn: string) =>
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({
+            data: { reintegrado: true, motivo: 'reintegrado', vence: '2026-12-02', mensaje: 'Te devolvimos el crédito (vence el 02/12/2026).' },
+            error: null,
+          })
+        : Promise.resolve({ data: null, error: null })
+    );
 
     const { getByText } = render(<HomeScreen navigation={navigation} />);
     await waitFor(() => expect(getByText('Cancelar')).toBeTruthy());
+    fireEvent.press(getByText('Cancelar'));
+    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(getByText('Confirmar cancelación'));
 
+    await waitFor(() =>
+      expect(Alert.alert).toHaveBeenCalledWith('Reserva cancelada', 'Te devolvimos el crédito (vence el 02/12/2026).')
+    );
+    expect(supabase.rpc).toHaveBeenCalledWith('cancel_booking_detalle', {
+      p_class_id: 'clase-1',
+      p_booking_date: mananaStr,
+      p_reason: null,
+    });
+  });
+
+  it('cancelar y NO se devolvió (lote vencido): dice por qué y nunca "Te devolvimos" (aunque el límite configurado sea 10 minutos)', async () => {
+    mockUseConfiguracion.mockReturnValue({
+      configuracion: {
+        diasTolerancia: 5,
+        limiteCancelacionMinutos: 10,
+        aliasCvu: null,
+        titularCuenta: null,
+        alertaActiva: false,
+        alertaMensaje: '',
+      },
+    });
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    reservaDeManana();
+    (supabase.rpc as jest.Mock).mockImplementation((fn: string) =>
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({
+            data: {
+              reintegrado: false,
+              motivo: 'lote_vencido',
+              vence: null,
+              mensaje: 'El crédito no se devolvió porque era de un plan que ya venció o que reemplazó un pago nuevo.',
+            },
+            error: null,
+          })
+        : Promise.resolve({ data: null, error: null })
+    );
+
+    const { getByText } = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(getByText('Cancelar')).toBeTruthy());
     fireEvent.press(getByText('Cancelar'));
     await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
     fireEvent.press(getByText('Confirmar cancelación'));
@@ -340,9 +383,10 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
     await waitFor(() =>
       expect(Alert.alert).toHaveBeenCalledWith(
         'Reserva cancelada',
-        'Como cancelaste con menos de 10 minutos de anticipación, no se reintegra el crédito.'
+        'El crédito no se devolvió porque era de un plan que ya venció o que reemplazó un pago nuevo.'
       )
     );
+    expect(Alert.alert).not.toHaveBeenCalledWith('Reserva cancelada', expect.stringMatching(/Te devolvimos|Como cancelaste/));
   });
 
   // BUG REAL, ticket "cancel_booking bloquea dentro del tiempo de gracia" --

@@ -22,7 +22,8 @@ import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatClassTime, getCountdown } from '../../lib/classTime';
 import { useTicker } from '../../hooks/useTicker';
 import { withTimeout } from '../../lib/withTimeout';
-import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
+import CancelBookingModal from '../../components/CancelBookingModal';
+import { cancelarReserva } from '../../lib/cancelarReserva';
 import DaySelector from '../../components/DaySelector';
 import ReservaConfirmadaModal from '../../components/ReservaConfirmadaModal';
 import BookingConfirmModal from '../../components/BookingConfirmModal';
@@ -358,24 +359,18 @@ export default function AgendaMobileView({ navigation }: any) {
     if (!cancelTarget) return;
     setIsCancelling(true);
     try {
-      const { data: creditoReintegrado, error: rpcError } = await withTimeout(
-        supabase.rpc('cancel_booking', {
-          p_class_id: cancelTarget.id,
-          p_booking_date: cancelTarget.occurrenceDate,
-          p_reason: reason || null,
-        }),
-        RPC_TIMEOUT_MS,
-        RPC_TIMEOUT_MESSAGE
-      );
-      if (rpcError) throw new Error(rpcError.message);
+      // T4 -- el texto lo arma el servidor (cancel_booking_detalle) y dice la
+      // verdad sobre el crédito. Antes: "Te devolvimos el crédito." siempre
+      // (cancel_booking devolvía true aunque el lote ya estuviera vencido).
+      // Tono (D-T4f): success si se devolvió, info si no (error queda para
+      // cuando la cancelación falla). Timeout de 20 s adentro de cancelarReserva.
+      const resultado = await cancelarReserva(cancelTarget.id, cancelTarget.occurrenceDate, reason || null);
       setCancelTarget(null);
       await load();
       setMessageModal({
         title: 'Reserva cancelada',
-        message: creditoReintegrado
-          ? 'Te devolvimos el crédito.'
-          : `Como cancelaste con menos de ${formatLimite(configuracion.limiteCancelacionMinutos)} de anticipación, no se reintegra el crédito.`,
-        tone: creditoReintegrado ? 'success' : 'info',
+        message: resultado.mensaje,
+        tone: resultado.reintegrado ? 'success' : 'info',
       });
     } catch (err) {
       setMessageModal({

@@ -208,8 +208,9 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     mockFromDefault({ data: [], error: null });
     fireEvent.press(getByText('Confirmar cancelación'));
 
+    // T4: la PWA llama a cancel_booking_detalle (devuelve qué pasó con el crédito).
     await waitFor(() =>
-      expect(mockedRpc).toHaveBeenCalledWith('cancel_booking', {
+      expect(mockedRpc).toHaveBeenCalledWith('cancel_booking_detalle', {
         p_class_id: 'class-1',
         p_booking_date: CLASE_BASE.occurrenceDate,
         p_reason: null,
@@ -218,103 +219,98 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     await waitFor(() => expect(getByText('Reservar')).toBeTruthy());
   });
 
-  // TAREA 4 (bug de seguridad reportado: "una alumna canceló a tiempo y el
-  // sistema no le devolvió el crédito"): cancel_booking() (backend, con
-  // lock `for update` sobre la fila de user_credits -- ver
-  // supabase_migration_cancel_booking_2h.sql) devuelve un boolean real
-  // (true = reintegró, false = no) según el tiempo de gracia de
-  // configuracion.limite_cancelacion_minutos. El resultado se muestra con
-  // MessageModal (un Modal real, no Alert.alert -- ver crossPlatformAlert.ts
-  // sobre por qué Alert.alert es un no-op en Web/PWA y por qué esto dejó de
-  // usarlo), así que se verifica como texto renderizado, no como spy.
-  it('cancelar A TIEMPO (dentro del límite de gracia): la RPC devuelve true y el modal confirma que se reintegró el crédito', async () => {
-    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+  // T4 -- antes, cancel_booking devolvía true siempre que cancelaba (se hubiera
+  // devuelto el crédito o no) y la PWA decía "Te devolvimos el crédito." aunque
+  // el lote ya estuviera vencido. Ahora el texto lo arma el SERVIDOR
+  // (cancel_booking_detalle) y se muestra tal cual, con MessageModal (un Modal
+  // real, no Alert.alert -- ver crossPlatformAlert.ts), así que se verifica como
+  // texto renderizado.
+  function mockDetalle(resultado: Record<string, unknown>) {
     mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking' ? Promise.resolve({ data: true, error: null }) : Promise.resolve({ data: null, error: null })
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({ data: resultado, error: null })
+        : Promise.resolve({ data: null, error: null })
     );
+  }
 
-    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
-    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+  async function cancelarClase1() {
+    const utils = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(utils.getByText('Reservada')).toBeTruthy());
+    fireEvent.press(utils.getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(utils.getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(utils.getByText('Confirmar cancelación'));
+    await waitFor(() => expect(utils.getByText('Reserva cancelada')).toBeTruthy());
+    return utils;
+  }
 
-    fireEvent.press(getByTestId('agenda-card-class-1'));
-    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
-    fireEvent.press(getByText('Confirmar cancelación'));
+  it('se devolvió el crédito: muestra el texto del servidor, con la fecha de vencimiento', async () => {
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    mockDetalle({ reintegrado: true, motivo: 'reintegrado', vence: '2026-12-02', mensaje: 'Te devolvimos el crédito (vence el 02/12/2026).' });
 
-    await waitFor(() => expect(getByText('Reserva cancelada')).toBeTruthy());
-    expect(getByText('Te devolvimos el crédito.')).toBeTruthy();
+    const { getByText } = await cancelarClase1();
+    expect(getByText('Te devolvimos el crédito (vence el 02/12/2026).')).toBeTruthy();
   });
 
-  it('cancelar TARDE (fuera del límite de gracia): la RPC devuelve false y el modal avisa que NO se reintegra el crédito (con 120 min configurados, se lee "2 horas")', async () => {
+  it('NO se devolvió (lote vencido): dice por qué, y NUNCA "Te devolvimos el crédito"', async () => {
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
-    mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
-    );
+    mockDetalle({
+      reintegrado: false,
+      motivo: 'lote_vencido',
+      vence: null,
+      mensaje: 'El crédito no se devolvió porque era de un plan que ya venció o que reemplazó un pago nuevo.',
+    });
 
-    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
-    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
-
-    fireEvent.press(getByTestId('agenda-card-class-1'));
-    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
-    fireEvent.press(getByText('Confirmar cancelación'));
-
-    await waitFor(() =>
-      expect(
-        getByText('Como cancelaste con menos de 2 horas de anticipación, no se reintegra el crédito.')
-      ).toBeTruthy()
-    );
+    const { getByText, queryByText } = await cancelarClase1();
+    expect(getByText('El crédito no se devolvió porque era de un plan que ya venció o que reemplazó un pago nuevo.')).toBeTruthy();
+    expect(queryByText(/Te devolvimos/)).toBeNull();
   });
 
-  // BUG REAL -- este mensaje decía "2 horas" como texto FIJO, sin leer
-  // configuracion.limite_cancelacion_minutos (a diferencia del aviso PREVIO
-  // del mismo modal, que sí lo leía) -- con el límite configurado en 10
-  // minutos, el socio seguía viendo "2 horas", un dato falso.
-  it('con limite_cancelacion_minutos=10, el mensaje de "no se reintegra" dice "10 minutos", NO "2 horas"', async () => {
+  // Antes el "no se reintegra" se armaba en la PWA con el límite de minutos
+  // ("Como cancelaste con menos de X de anticipación…"), una rama que nunca se
+  // veía (el servidor bloquea la cancelación dentro del límite). Ahora el texto
+  // es siempre el del servidor, sin importar el límite configurado.
+  it('el texto no depende del límite configurado (10 minutos): ya no aparece "Como cancelaste con menos de…"', async () => {
     mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 10 } });
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
-    mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
-    );
+    mockDetalle({
+      reintegrado: false,
+      motivo: 'sin_plan_disciplina',
+      vence: null,
+      mensaje: 'El crédito no se devolvió porque tu plan actual no incluye CrossFit. Consultá con el gimnasio.',
+    });
 
-    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
-    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
-
-    fireEvent.press(getByTestId('agenda-card-class-1'));
-    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
-    fireEvent.press(getByText('Confirmar cancelación'));
-
-    await waitFor(() =>
-      expect(getByText('Como cancelaste con menos de 10 minutos de anticipación, no se reintegra el crédito.')).toBeTruthy()
-    );
-    expect(queryByText(/2 horas/)).toBeNull();
+    const { getByText, queryByText } = await cancelarClase1();
+    expect(getByText('El crédito no se devolvió porque tu plan actual no incluye CrossFit. Consultá con el gimnasio.')).toBeTruthy();
+    expect(queryByText(/Como cancelaste con menos de/)).toBeNull();
   });
 
-  // 90 no es una cantidad entera de horas -- formatLimite() (mismo
-  // formateo que ya usa el aviso PREVIO de este modal) lo lee como "1 hora
-  // 30 min", no como "90 minutos" en crudo. Confirma que se reusa esa
-  // MISMA función, no un formateo propio inventado acá.
-  it('con otro valor configurado (90 minutos), el mensaje refleja ese número real, formateado igual que el aviso previo', async () => {
-    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 90 } });
+  // D-T4c -- si cancel_booking_detalle no existe (migración sin correr o rollback
+  // del SQL), cae a cancel_booking y muestra un texto NEUTRO: nunca afirma que
+  // se devolvió el crédito sin saberlo.
+  it('si cancel_booking_detalle no existe, usa cancel_booking y dice solo "Reserva cancelada."', async () => {
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking' ? Promise.resolve({ data: false, error: null }) : Promise.resolve({ data: null, error: null })
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({ data: null, error: { code: 'PGRST202', message: 'Could not find the function public.cancel_booking_detalle' } })
+        : fn === 'cancel_booking'
+        ? Promise.resolve({ data: true, error: null })
+        : Promise.resolve({ data: null, error: null })
     );
 
-    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
-    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
-
-    fireEvent.press(getByTestId('agenda-card-class-1'));
-    await waitFor(() => expect(getByText('Confirmar cancelación')).toBeTruthy());
-    fireEvent.press(getByText('Confirmar cancelación'));
-
-    await waitFor(() =>
-      expect(getByText('Como cancelaste con menos de 1 hora 30 min de anticipación, no se reintegra el crédito.')).toBeTruthy()
-    );
+    const { getByText, queryByText } = await cancelarClase1();
+    expect(mockedRpc).toHaveBeenCalledWith('cancel_booking', {
+      p_class_id: 'class-1',
+      p_booking_date: CLASE_BASE.occurrenceDate,
+      p_reason: null,
+    });
+    expect(getByText('Reserva cancelada.')).toBeTruthy();
+    expect(queryByText(/Te devolvimos/)).toBeNull();
   });
 
-  it('si cancel_booking devuelve un error real, avisa con el motivo y NO dice "cancelada" (ningún crédito se pierde en el éter)', async () => {
+  it('si cancel_booking_detalle devuelve un error real, avisa con el motivo y NO dice "cancelada" (ningún crédito se pierde en el éter)', async () => {
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking'
+      fn === 'cancel_booking_detalle'
         ? Promise.resolve({ data: null, error: { message: 'No tenías una reserva en esta clase' } })
         : Promise.resolve({ data: null, error: null })
     );
@@ -329,21 +325,23 @@ describe('AgendaMobileView (Módulo 2 -- reservar y cancelar desde la agenda)', 
     await waitFor(() => expect(getByText('No se pudo cancelar')).toBeTruthy());
     expect(getByText('No tenías una reserva en esta clase')).toBeTruthy();
     expect(queryByText('Reserva cancelada')).toBeNull();
+    // Un error que no es "la función no existe" NO cae a cancel_booking.
+    expect(mockedRpc).not.toHaveBeenCalledWith('cancel_booking', expect.anything());
   });
 
   // BUG REAL, ticket "cancel_booking bloquea dentro del tiempo de gracia" --
-  // cancel_booking() ahora rechaza (en vez de cancelar sin reintegrar) si
-  // faltan menos de limite_cancelacion_minutos para la clase. El gate
-  // cliente (withinCancelLimit, ver CancelBookingModal) ya deshabilita el
+  // el servidor rechaza (en vez de cancelar sin reintegrar) si faltan menos de
+  // limite_cancelacion_minutos para la clase (T4 mantiene el mismo error). El
+  // gate cliente (withinCancelLimit, ver CancelBookingModal) ya deshabilita el
   // botón para este caso normalmente -- este test simula que el SERVIDOR
   // igual rechaza (reloj del cliente desincronizado, o cualquier otra
   // carrera) con CLASE_BASE (3hs en el futuro, el cliente la deja pasar):
   // confirma que se muestra el mensaje REAL del backend (no uno genérico) y
   // que la reserva NO se toca -- sigue viéndose "Reservada".
-  it('si cancel_booking rechaza por estar dentro de la ventana, muestra el mensaje real del backend y la reserva sigue viéndose (no se borró nada)', async () => {
+  it('si el servidor rechaza por estar dentro de la ventana, muestra el mensaje real del backend y la reserva sigue viéndose (no se borró nada)', async () => {
     mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
     mockedRpc.mockImplementation((fn: string) =>
-      fn === 'cancel_booking'
+      fn === 'cancel_booking_detalle'
         ? Promise.resolve({
             data: null,
             error: { message: 'No podés cancelar esta reserva -- faltan menos de 120 minutos para que empiece la clase.' },

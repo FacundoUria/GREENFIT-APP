@@ -26,7 +26,8 @@ import { formatCurrency } from '../../lib/currency';
 import { formatClassTime, formatDayLabel } from '../../lib/classTime';
 import { getCreditsStatus, getExpiryStatus } from '../../lib/membershipStatus';
 import { useTicker } from '../../hooks/useTicker';
-import CancelBookingModal, { formatLimite } from '../../components/CancelBookingModal';
+import CancelBookingModal from '../../components/CancelBookingModal';
+import { cancelarReserva } from '../../lib/cancelarReserva';
 import { formatFechaReserva } from '../../lib/dateFormat';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { fetchUnreadNotificationCount } from '../../lib/notificationsBadge';
@@ -232,20 +233,13 @@ export default function HomeScreen({ navigation }: any) {
     if (!nextBooking) return;
     setIsCancelling(true);
     try {
-      const { data: creditoReintegrado, error: rpcError } = await supabase.rpc('cancel_booking', {
-        p_class_id: nextBooking.classId,
-        p_booking_date: nextBooking.bookingDate,
-        p_reason: reason || null,
-      });
-      if (rpcError) throw new Error(rpcError.message);
+      // T4 -- el texto lo arma el servidor (cancel_booking_detalle) y dice la
+      // verdad sobre el crédito. Antes: "Te devolvimos el crédito." siempre
+      // (cancel_booking devolvía true aunque el lote ya estuviera vencido).
+      const resultado = await cancelarReserva(nextBooking.classId, nextBooking.bookingDate, reason || null);
       setShowCancelModal(false);
       await load();
-      showAlert(
-        'Reserva cancelada',
-        creditoReintegrado
-          ? 'Te devolvimos el crédito.'
-          : `Como cancelaste con menos de ${formatLimite(configuracion.limiteCancelacionMinutos)} de anticipación, no se reintegra el crédito.`
-      );
+      showAlert('Reserva cancelada', resultado.mensaje);
     } catch (err) {
       showAlert('No se pudo cancelar', err instanceof Error ? err.message : 'Intentá de nuevo.');
     } finally {
