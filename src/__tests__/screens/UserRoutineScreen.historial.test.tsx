@@ -1,5 +1,7 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { colors } from '../../theme/colors';
 
 // Historial de rutina: "Finalizar Entrenamiento" guarda una foto de los
 // ejercicios MARCADOS del día que se está viendo (con el peso de ese
@@ -55,6 +57,8 @@ import UserRoutineScreen, {
   formatHoraArgentina,
   diaInicial,
   BLOQUEO_FINALIZAR_MS,
+  PLACEHOLDER_SIN_CARGA,
+  COLOR_PLACEHOLDER_CARGA,
 } from '../../screens/user/UserRoutineScreen';
 
 const m = api as jest.Mocked<typeof api>;
@@ -614,5 +618,73 @@ describe('formatos de fecha/hora del historial', () => {
   it('hora: siempre en horario de Argentina (UTC-3), formato 24 hs', () => {
     expect(formatHoraArgentina('2026-09-26T21:30:00Z')).toBe('18:30');
     expect(formatHoraArgentina('2026-09-26T02:05:00Z')).toBe('23:05');
+  });
+});
+
+describe('Mi Rutina -- carga/reps/descanso vacíos no muestran datos inventados', () => {
+  // Bug "20kg" (2026-11): en el panel, "20kg" era un placeholder que parecía
+  // un valor real. Si el entrenador deja la carga vacía (null en la base) y el
+  // socio no cargó la suya, la app muestra "—", nunca un número de ejemplo.
+  const vacia = {
+    ...ROUTINE,
+    days: [
+      {
+        ...ROUTINE.days[0],
+        exercises: [ejercicio('re-9', 'Remo', 'Espalda', 0, { weightSuggestion: null, reps: null, restSeconds: null })],
+      },
+    ],
+  };
+
+  it('sin carga del socio ni sugerencia: el campo queda vacío con "—" de placeholder', async () => {
+    m.getUserRoutine.mockResolvedValue(vacia as any);
+    m.getUserExerciseWeights.mockResolvedValue(new Map());
+    const { getByText, getByLabelText, queryByText, queryByDisplayValue } = render(<UserRoutineScreen />);
+    await waitFor(() => expect(getByText('Remo')).toBeTruthy());
+
+    const carga = getByLabelText('Carga (kg) usada en este ejercicio');
+    expect(carga.props.value).toBe('');
+    expect(carga.props.placeholder).toBe('—');
+    expect(PLACEHOLDER_SIN_CARGA).toBe('—');
+    expect(queryByDisplayValue(/kg/)).toBeNull();
+    expect(queryByText(/20\s*kg/)).toBeNull();
+  });
+
+  it('el "—" es PLACEHOLDER (no value), tenue y en itálica; al escribir una carga deja de ser itálica', async () => {
+    m.getUserRoutine.mockResolvedValue(vacia as any);
+    m.getUserExerciseWeights.mockResolvedValue(new Map());
+    const { getByText, getByLabelText, queryByDisplayValue } = render(<UserRoutineScreen />);
+    await waitFor(() => expect(getByText('Remo')).toBeTruthy());
+
+    const carga = getByLabelText('Carga (kg) usada en este ejercicio');
+    // placeholder, no value: no hay nada que "borrar"
+    expect(carga.props.value).toBe('');
+    expect(carga.props.placeholder).toBe('—');
+    expect(queryByDisplayValue('—')).toBeNull();
+
+    // tenue: gris secundario al 50% (no el gris pleno ni el verde del valor)
+    expect(carga.props.placeholderTextColor).toBe(COLOR_PLACEHOLDER_CARGA);
+    expect(COLOR_PLACEHOLDER_CARGA).toBe(`${colors.textSecondary}80`);
+    expect(StyleSheet.flatten(carga.props.style)).toMatchObject({ fontStyle: 'italic' });
+
+    fireEvent.changeText(carga, '30kg');
+    const conValor = getByLabelText('Carga (kg) usada en este ejercicio');
+    expect(conValor.props.value).toBe('30kg');
+    expect(StyleSheet.flatten(conValor.props.style).fontStyle).toBeUndefined();
+  });
+
+  it('reps null -> "4 × -" y descanso null -> no muestra el reloj de descanso', async () => {
+    m.getUserRoutine.mockResolvedValue(vacia as any);
+    m.getUserExerciseWeights.mockResolvedValue(new Map());
+    const { getByText, queryByText } = render(<UserRoutineScreen />);
+    await waitFor(() => expect(getByText('Remo')).toBeTruthy());
+
+    expect(getByText('4 × -')).toBeTruthy();
+    expect(queryByText(/^\d+s$/)).toBeNull();
+  });
+
+  it('con sugerencia del entrenador, se ve la sugerencia (no el "—")', async () => {
+    const { getAllByLabelText } = await renderPantalla();
+    const carga = getAllByLabelText('Carga (kg) usada en este ejercicio')[0]; // Sentadilla, sugerencia 40kg
+    expect(carga.props.value).toBe('40kg');
   });
 });

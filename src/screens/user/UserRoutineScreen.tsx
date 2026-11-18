@@ -109,6 +109,12 @@ function MetaChip({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: 
   );
 }
 
+// "—" de carga vacía: es PLACEHOLDER (value = ''), nunca un valor -- si fuera
+// value, el socio intentaría borrarlo (el mismo bug que el "20kg" del panel).
+// Tenue (gris al 50%) y en itálica, como los placeholders del Dashboard.
+export const PLACEHOLDER_SIN_CARGA = '—';
+export const COLOR_PLACEHOLDER_CARGA = `${colors.textSecondary}80`;
+
 // Carga real editable -- distinta de bloque.weightSuggestion (la sugerencia
 // fija que cargó el entrenador, igual para cualquier socio con esta
 // rutina). No dispara un guardado en cada tecla: solo persiste al perder el
@@ -148,9 +154,13 @@ function CargaInput({
         value={texto}
         onChangeText={onCambiar}
         onBlur={handleBlur}
-        placeholder="Carga"
-        placeholderTextColor={colors.textSecondary}
-        style={styles.cargaInput}
+        // Sin carga (ni la del socio ni la sugerencia del entrenador): "—",
+        // nunca un número de ejemplo que parezca un dato real.
+        placeholder={PLACEHOLDER_SIN_CARGA}
+        placeholderTextColor={COLOR_PLACEHOLDER_CARGA}
+        // itálica solo mientras está vacío (en RN no hay estilo propio del
+        // placeholder); la carga escrita se ve normal
+        style={[styles.cargaInput, !texto && styles.cargaInputVacio]}
         accessibilityLabel="Carga (kg) usada en este ejercicio"
       />
       <Ionicons name="pencil-outline" size={11} color={colors.textSecondary} />
@@ -1194,6 +1204,7 @@ const styles = StyleSheet.create({
     width: 64,
     paddingVertical: 3,
   },
+  cargaInputVacio: { fontStyle: 'italic', fontWeight: '400' },
 
   instructionsBox: {
     flexDirection: 'row',
