@@ -22,6 +22,11 @@ interface CancelBookingModalProps {
   withinCancelLimit?: boolean;
   // Mismo valor que usó withinCancelLimit para su cálculo, solo para mostrarlo en el aviso.
   limiteMinutos?: number;
+  // Tanda EC -- la clase ya empezó (desde que se puede reservar una clase en
+  // curso, se puede llegar acá con una reserva así). El aviso de "faltan menos
+  // de X para que empiece" sería falso: se dice que ya empezó. Sigue sin
+  // poder cancelarse (el servidor la rechaza por el mismo límite).
+  yaEmpezo?: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }
@@ -54,6 +59,7 @@ export default function CancelBookingModal({
   isSubmitting,
   withinCancelLimit,
   limiteMinutos = 120,
+  yaEmpezo = false,
   onClose,
   onConfirm,
 }: CancelBookingModalProps) {
@@ -78,7 +84,9 @@ export default function CancelBookingModal({
           <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
           {withinCancelLimit && (
             <Text style={styles.warning}>
-              Faltan menos de {formatLimite(limiteMinutos)} para que empiece la clase: no podés cancelarla.
+              {yaEmpezo
+                ? 'La clase ya empezó: no podés cancelarla.'
+                : `Faltan menos de ${formatLimite(limiteMinutos)} para que empiece la clase: no podés cancelarla.`}
             </Text>
           )}
           <TextInput

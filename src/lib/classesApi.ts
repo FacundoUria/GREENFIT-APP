@@ -82,6 +82,23 @@ export function combineDateAndTime(dateStr: string, timeStr: string | null): str
   return new Date(`${dateStr}T${timeStr}-03:00`).toISOString();
 }
 
+// Tanda EC -- hasta cuándo se puede reservar una ocurrencia: hasta que TERMINA
+// (decisión de negocio: el gimnasio es chico y Seba controla en persona quién
+// está). Misma regla que book_class() en la base: si la clase no tiene un
+// horario de fin válido (end_time null, o no posterior a start_time -- ej. un
+// "19:00 a 18:00" mal cargado), "termina" al empezar, como era antes. Las dos
+// fechas ya son instantes absolutos (-03:00 fijo, ver combineDateAndTime), así
+// que esto no depende de la zona horaria del dispositivo.
+export function finDeClase(c: { startAt: string; endAt: string | null }): string {
+  if (c.endAt && Date.parse(c.endAt) > Date.parse(c.startAt)) return c.endAt;
+  return c.startAt;
+}
+
+// Empezó y todavía no terminó (solo posible con un horario de fin válido).
+export function estaEnCurso(c: { startAt: string; endAt: string | null }, ahoraMs: number = Date.now()): boolean {
+  return Date.parse(c.startAt) <= ahoraMs && ahoraMs < Date.parse(finDeClase(c));
+}
+
 // Clases que se dictan el día de `date` (según days_of_week), con la
 // cantidad de anotados de ESA ocurrencia puntual (class_id + booking_date).
 export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[]> {
@@ -207,21 +224,20 @@ export async function loadClassesForDate(date: Date): Promise<ClassWithBookings[
   // ensucia la pantalla con horarios a los que ya no puede anotarse. Ya
   // viene ordenado cronológicamente (el SELECT de `classes` pidió
   // `order('start_time', ascending)` y ningún paso de arriba reordena), así
-  // que alcanza con filtrar las que ya arrancaron -- SOLO cuando `date` es
-  // hoy: para cualquier otro día del selector ninguna ocurrencia "ya pasó"
-  // todavía, así que el filtro no debe tocarlas.
+  // que alcanza con filtrar -- SOLO cuando `date` es hoy: para cualquier otro
+  // día del selector ninguna ocurrencia "ya pasó" todavía.
   //
-  // `item.startAt` ya es el instante real (fijo en -03:00, ver
-  // combineDateAndTime) -- comparar contra Date.now() acá es seguro: a
-  // diferencia de la construcción del instante de la clase, esta
-  // comparación NO depende de ninguna zona horaria (dos instantes
-  // absolutos se comparan igual sin importar cómo los muestre el
-  // dispositivo), solo de que el reloj del dispositivo esté bien puesto en
-  // términos absolutos -- un problema mucho más raro que una zona mal
-  // configurada, y fuera del alcance de este fix.
+  // Tanda EC: se filtran las que ya TERMINARON (antes: las que ya habían
+  // empezado). Una clase en curso se sigue mostrando y se puede reservar,
+  // igual que acepta book_class(). Sin horario de fin válido, finDeClase()
+  // devuelve el inicio: esas se siguen escondiendo al empezar, como antes.
+  //
+  // Los instantes ya son absolutos (fijos en -03:00, ver combineDateAndTime):
+  // comparar contra Date.now() no depende de la zona horaria del dispositivo,
+  // solo de que su reloj esté bien puesto.
   if (occurrenceDate === formatDateOnly(new Date())) {
     const ahora = Date.now();
-    return resultado.filter((item) => new Date(item.startAt).getTime() >= ahora);
+    return resultado.filter((item) => Date.parse(finDeClase(item)) > ahora);
   }
   return resultado;
 }

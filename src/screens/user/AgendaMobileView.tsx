@@ -16,7 +16,13 @@ import { getDisciplineStyle } from '../../theme/disciplineColors';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
-import { loadClassesForDate, formatDateOnly, ClassWithBookings as BaseClassWithBookings } from '../../lib/classesApi';
+import {
+  loadClassesForDate,
+  formatDateOnly,
+  estaEnCurso,
+  finDeClase,
+  ClassWithBookings as BaseClassWithBookings,
+} from '../../lib/classesApi';
 import { fetchClosedDays, ClosedDay } from '../../lib/closedDaysApi';
 import { fetchUserBalances } from '../../lib/creditsApi';
 import { formatClassTime, getCountdown } from '../../lib/classTime';
@@ -391,6 +397,8 @@ export default function AgendaMobileView({ navigation }: any) {
     const sinCreditos = !item.isBooked && !isFull && credits <= 0;
     const startLabel = formatClassTime(item.startAt);
     const countdown = getCountdown(item.startAt);
+    // Tanda EC -- empezó y todavía no terminó: se puede reservar igual.
+    const enCurso = estaEnCurso(item);
     const isPending = pendingId === item.id;
 
     // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
@@ -436,11 +444,18 @@ export default function AgendaMobileView({ navigation }: any) {
           </Text>
           <Text style={styles.detalles} numberOfLines={1}>
             {detalles.join(' · ')}
-            {!countdown.isPast && (
+            {enCurso ? (
               <>
                 {' · '}
-                <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+                <Text style={styles.enCurso}>{`En curso · termina ${formatClassTime(finDeClase(item))}`}</Text>
               </>
+            ) : (
+              !countdown.isPast && (
+                <>
+                  {' · '}
+                  <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+                </>
+              )
             )}
           </Text>
         </View>
@@ -538,6 +553,8 @@ export default function AgendaMobileView({ navigation }: any) {
           !!cancelTarget && new Date(cancelTarget.startAt).getTime() - Date.now() < cancelLimitMs
         }
         limiteMinutos={configuracion.limiteCancelacionMinutos}
+        // Tanda EC -- reservada con la clase en curso: el aviso dice que ya empezó.
+        yaEmpezo={!!cancelTarget && Date.parse(cancelTarget.startAt) <= Date.now()}
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />
@@ -575,6 +592,9 @@ export default function AgendaMobileView({ navigation }: any) {
             endLabel: confirmTarget.endAt ? formatClassTime(confirmTarget.endAt) : null,
             instructor: confirmTarget.instructor,
             location: confirmTarget.location,
+            aviso: estaEnCurso(confirmTarget)
+              ? `La clase ya empezó: termina a las ${formatClassTime(finDeClase(confirmTarget))} hs.`
+              : null,
           }
         }
         isSubmitting={isBooking}
@@ -751,6 +771,8 @@ const styles = StyleSheet.create({
   // Info funcional extra, chica y discreta (no está en el mockup).
   detalles: { color: mockup.onSurfaceVariant, fontFamily: fuentes.texto, fontSize: 11, lineHeight: 14, marginTop: 8 },
   countdownSoon: { color: mockup.primaryContainer, fontWeight: '700' },
+  // Tanda EC -- misma letra que countdownSoon: la clase ya arrancó y todavía se puede reservar.
+  enCurso: { color: mockup.primaryContainer, fontWeight: '700' },
 
   // ---- Pill (decorativo): min-h-[48px] rounded-xl ----
   pillSlot: { flexShrink: 0 },

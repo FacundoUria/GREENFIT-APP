@@ -2,7 +2,7 @@ jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import { supabase } from '../../lib/supabase';
-import { loadClassesForDate } from '../../lib/classesApi';
+import { loadClassesForDate, finDeClase, estaEnCurso } from '../../lib/classesApi';
 
 const mockedFrom = supabase.from as jest.Mock;
 const mockedRpc = supabase.rpc as jest.Mock;
@@ -428,5 +428,99 @@ describe('loadClassesForDate -- excluye ocurrencias con cancelación puntual (cl
     expect(resultado.map((c) => c.id)).toEqual(['clase-1']);
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+// Tanda EC -- se puede reservar con la clase empezada, hasta que termina (misma
+// regla que book_class en la base). La Agenda de HOY ahora esconde las que ya
+// TERMINARON, no las que ya empezaron. Sin horario de fin válido, como antes.
+describe('loadClassesForDate -- Tanda EC: la clase de HOY se muestra hasta que TERMINA', () => {
+  // 20:00 de Argentina del 31/08/2026 = 23:00 UTC: el mismo día en las dos
+  // zonas, así el resultado no depende de la zona de quien corre los tests.
+  const AHORA = new Date('2026-08-31T20:00:00-03:00');
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers().setSystemTime(AHORA);
+  });
+  afterEach(() => jest.useRealTimers());
+
+  function clase(id: string, start: string, end: string | null) {
+    return {
+      id,
+      title: 'CrossFit',
+      discipline_id: 'disc-crossfit',
+      instructor: null,
+      location: null,
+      capacity: 15,
+      days_of_week: [0, 1, 2, 3, 4, 5, 6],
+      start_time: start,
+      end_time: end,
+      disciplines: { is_active: true, show_in_agenda: true },
+    };
+  }
+
+  function mockClases(filas: ReturnType<typeof clase>[]) {
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla === 'classes') return makeChain({ data: filas, error: null });
+      if (tabla === 'class_occurrence_cancellations') return makeChain({ data: [], error: null });
+      throw new Error(`tabla inesperada: ${tabla}`);
+    });
+    mockBookingsCount([]);
+  }
+
+  it('en curso (19:30 a 20:30) se muestra; terminada (18:00 a 19:00) no; futura (21:00 a 22:00) sí', async () => {
+    mockClases([
+      clase('terminada', '18:00:00', '19:00:00'),
+      clase('en-curso', '19:30:00', '20:30:00'),
+      clase('futura', '21:00:00', '22:00:00'),
+    ]);
+    const resultado = await loadClassesForDate(AHORA);
+    expect(resultado.map((c) => c.id)).toEqual(['en-curso', 'futura']);
+  });
+
+  it('la que termina justo ahora (19:00 a 20:00) ya no se muestra: book_class la rechaza cuando fin <= ahora', async () => {
+    mockClases([clase('termina-ahora', '19:00:00', '20:00:00')]);
+    const resultado = await loadClassesForDate(AHORA);
+    expect(resultado).toHaveLength(0);
+  });
+
+  it('sin end_time: como antes, se esconde apenas empieza', async () => {
+    mockClases([clase('sin-fin-empezada', '19:30:00', null), clase('sin-fin-futura', '20:30:00', null)]);
+    const resultado = await loadClassesForDate(AHORA);
+    expect(resultado.map((c) => c.id)).toEqual(['sin-fin-futura']);
+  });
+
+  it('end_time anterior o igual a start_time (mal cargada): se toma como sin fin y se esconde al empezar', async () => {
+    mockClases([clase('fin-antes', '19:30:00', '18:00:00'), clase('fin-igual', '19:45:00', '19:45:00')]);
+    const resultado = await loadClassesForDate(AHORA);
+    expect(resultado).toHaveLength(0);
+  });
+});
+
+describe('finDeClase / estaEnCurso (Tanda EC)', () => {
+  const INICIO = '2026-08-31T22:30:00.000Z'; // 19:30 de Argentina
+  const FIN = '2026-08-31T23:30:00.000Z'; // 20:30 de Argentina
+
+  it('con un fin posterior al inicio, la clase termina en su fin', () => {
+    expect(finDeClase({ startAt: INICIO, endAt: FIN })).toBe(FIN);
+  });
+
+  it('sin fin, o con un fin que no es posterior al inicio, "termina" al empezar', () => {
+    expect(finDeClase({ startAt: INICIO, endAt: null })).toBe(INICIO);
+    expect(finDeClase({ startAt: INICIO, endAt: '2026-08-31T21:00:00.000Z' })).toBe(INICIO);
+    expect(finDeClase({ startAt: INICIO, endAt: INICIO })).toBe(INICIO);
+  });
+
+  it('estaEnCurso: desde el inicio (incluido) hasta el fin (excluido)', () => {
+    const c = { startAt: INICIO, endAt: FIN };
+    expect(estaEnCurso(c, Date.parse('2026-08-31T22:29:59.000Z'))).toBe(false);
+    expect(estaEnCurso(c, Date.parse(INICIO))).toBe(true);
+    expect(estaEnCurso(c, Date.parse('2026-08-31T23:00:00.000Z'))).toBe(true);
+    expect(estaEnCurso(c, Date.parse(FIN))).toBe(false);
+  });
+
+  it('sin fin válido nunca está "en curso"', () => {
+    expect(estaEnCurso({ startAt: INICIO, endAt: null }, Date.parse('2026-08-31T22:45:00.000Z'))).toBe(false);
   });
 });

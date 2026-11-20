@@ -14,6 +14,9 @@ export interface BookingConfirmTarget {
   endLabel: string | null;
   instructor: string | null;
   location: string | null;
+  // Tanda EC -- aviso opcional bajo el horario (ej. "La clase ya empezó:
+  // termina a las 20:00 hs."), para que reservar una clase en curso se entienda.
+  aviso?: string | null;
 }
 
 interface BookingConfirmModalProps {
@@ -61,6 +64,7 @@ export default function BookingConfirmModal({
             {target.instructor ? ` · Prof. ${target.instructor}` : ''}
             {target.location ? ` · ${target.location}` : ''}
           </Text>
+          {!!target.aviso && <Text style={styles.aviso}>{target.aviso}</Text>}
           <Text style={styles.question}>¿Confirmás tu lugar en esta clase?</Text>
 
           <TouchableOpacity
@@ -117,6 +121,7 @@ const styles = StyleSheet.create({
   // poder chequear de un vistazo antes de confirmar.
   fecha: { color: colors.primary, fontSize: 14, fontWeight: '700', marginBottom: 2 },
   subtitle: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
+  aviso: { color: colors.primary, fontSize: 13, fontWeight: '600', lineHeight: 18, marginTop: 6 },
   question: { color: colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 14, marginBottom: 4 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   checkboxLabel: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },

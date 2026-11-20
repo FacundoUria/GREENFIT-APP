@@ -119,4 +119,41 @@ describe('CancelBookingModal', () => {
     fireEvent.press(getByText('Volver'));
     expect(onClose).toHaveBeenCalled();
   });
+
+  // Tanda EC -- se puede reservar una clase en curso. Si el socio quiere
+  // cancelarla, el aviso de "faltan menos de X para que empiece" sería falso:
+  // la clase ya empezó. Sigue sin poder cancelarse (mismo límite en el servidor).
+  it('clase en curso (yaEmpezo): dice "La clase ya empezó", no "faltan menos de…", y el botón sigue deshabilitado', () => {
+    const onConfirm = jest.fn();
+    const { getByText, queryByText, getByTestId } = render(
+      <CancelBookingModal
+        visible
+        className="CrossFit"
+        withinCancelLimit
+        yaEmpezo
+        limiteMinutos={10}
+        onClose={jest.fn()}
+        onConfirm={onConfirm}
+      />
+    );
+
+    expect(getByText('La clase ya empezó: no podés cancelarla.')).toBeTruthy();
+    expect(queryByText(/Faltan menos de/)).toBeNull();
+    fireEvent.press(getByTestId('cancel-booking-confirm'));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it('yaEmpezo sin withinCancelLimit no muestra aviso (no debería pasar, pero no inventa un bloqueo)', () => {
+    const { queryByText } = render(
+      <CancelBookingModal
+        visible
+        className="CrossFit"
+        withinCancelLimit={false}
+        yaEmpezo
+        onClose={jest.fn()}
+        onConfirm={jest.fn()}
+      />
+    );
+    expect(queryByText(/no podés cancelarla/)).toBeNull();
+  });
 });

@@ -38,7 +38,9 @@ jest.mock('../../lib/calendarShare', () => ({
   addToCalendar: jest.fn().mockResolvedValue(undefined),
   shareReserva: jest.fn().mockResolvedValue('shared'),
 }));
+// estaEnCurso/finDeClase (Tanda EC) son funciones puras: se usan las reales.
 jest.mock('../../lib/classesApi', () => ({
+  ...jest.requireActual('../../lib/classesApi'),
   loadClassesForDate: jest.fn(),
   formatDateOnly: jest.fn(() => '2026-08-10'),
 }));
@@ -888,5 +890,76 @@ describe('AgendaMobileView -- cambio de día: respuestas viejas, lista y fecha a
     await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
     // Sale de occurrenceDate de la TARJETA (mañana), no del día del selector (hoy).
     expect(getByText(/^Mañana, (domingo|lunes|martes|miércoles|jueves|viernes|sábado) \d{1,2} de /)).toBeTruthy();
+  });
+});
+
+// Tanda EC -- decisión de negocio: se puede reservar con la clase empezada,
+// hasta que termina. La Agenda la muestra como "En curso" y deja reservarla;
+// cancelarla sigue bloqueado por el límite, con un aviso que dice la verdad.
+describe('AgendaMobileView -- clase en curso (Tanda EC)', () => {
+  // Relativo a AHORA (mismo criterio que EN_3_HORAS): empezó hace 10 min y
+  // termina en 50.
+  const HACE_10_MIN = new Date(Date.now() - 10 * 60 * 1000);
+  const EN_50_MIN = new Date(Date.now() + 50 * 60 * 1000);
+  const CLASE_EN_CURSO = {
+    ...CLASE_BASE,
+    startAt: HACE_10_MIN.toISOString(),
+    endAt: EN_50_MIN.toISOString(),
+    occurrenceDate: HACE_10_MIN.toISOString().slice(0, 10),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedLoadClasses.mockResolvedValue([{ ...CLASE_EN_CURSO }]);
+    mockedRpc.mockResolvedValue({ data: null, error: null });
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 10 } });
+  });
+
+  it('muestra "En curso · termina …" y se puede reservar: el modal avisa que ya empezó y Confirmar llama a book_class', async () => {
+    mockFromDefault({ data: [], error: null });
+    const { getByText, getAllByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+    expect(getAllByText(/En curso · termina/)).toHaveLength(1);
+    expect(getByText('Reservar')).toBeTruthy();
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    expect(getByText(/^La clase ya empezó: termina a las .+ hs\.$/)).toBeTruthy();
+
+    fireEvent.press(getByText(CONSENT_TEXT_SHORT));
+    fireEvent.press(getByText('Confirmar'));
+    await waitFor(() =>
+      expect(mockedRpc).toHaveBeenCalledWith('book_class', {
+        p_class_id: 'class-1',
+        p_booking_date: CLASE_EN_CURSO.occurrenceDate,
+      })
+    );
+  });
+
+  it('reservada y en curso: cancelar dice "La clase ya empezó: no podés cancelarla." (no "faltan menos de…") y no deja confirmar', async () => {
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+
+    await waitFor(() => expect(getByText('La clase ya empezó: no podés cancelarla.')).toBeTruthy());
+    expect(queryByText(/Faltan menos de/)).toBeNull();
+    fireEvent.press(getByTestId('cancel-booking-confirm'));
+    expect(mockedRpc).not.toHaveBeenCalledWith('cancel_booking_detalle', expect.anything());
+  });
+
+  it('una clase que todavía no empezó no dice "En curso" ni avisa nada en el modal', async () => {
+    mockedLoadClasses.mockResolvedValue([{ ...CLASE_BASE }]);
+    mockFromDefault({ data: [], error: null });
+    const { getByText, queryByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+
+    await waitFor(() => expect(getByText('CrossFit')).toBeTruthy());
+    expect(queryByText(/En curso/)).toBeNull();
+
+    fireEvent.press(getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    expect(queryByText(/ya empezó/)).toBeNull();
   });
 });

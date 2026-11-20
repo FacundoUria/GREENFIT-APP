@@ -41,6 +41,22 @@ describe('BookingConfirmModal', () => {
     expect(getByText(/19:00 - 20:00 hs · Prof\. Seba · Box 1/)).toBeTruthy();
   });
 
+  // Tanda EC -- reservar una clase en curso: el modal lo dice.
+  it('con aviso (clase en curso), lo muestra; sin aviso, no dibuja nada extra', () => {
+    const { getByText, rerender, queryByText } = render(
+      <BookingConfirmModal
+        visible
+        target={{ ...TARGET, aviso: 'La clase ya empezó: termina a las 20:00 hs.' }}
+        onClose={jest.fn()}
+        onConfirm={jest.fn()}
+      />
+    );
+    expect(getByText('La clase ya empezó: termina a las 20:00 hs.')).toBeTruthy();
+
+    rerender(<BookingConfirmModal visible target={TARGET} onClose={jest.fn()} onConfirm={jest.fn()} />);
+    expect(queryByText(/ya empezó/)).toBeNull();
+  });
+
   // Reafirmación corta de salud (segundo gate, coexiste con el
   // consentimiento informado completo de ConsentModal -- ver consentApi.ts):
   // se pide SIEMPRE, en cada reserva, y "Confirmar" no habilita hasta
