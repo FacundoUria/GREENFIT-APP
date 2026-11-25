@@ -9,13 +9,13 @@ import {
   RefreshControl,
   Linking,
   Animated,
-  Modal,
   AppState,
   useWindowDimensions,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
 import Aparecer from '../../components/Aparecer';
 import { EsqueletoEntrenamientos, EsqueletoRutina } from '../../components/Esqueletos';
+import HojaInferior from '../../components/HojaInferior';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -366,42 +366,44 @@ function EliminarSesionModal({
   onCancelar: () => void;
   onConfirmar: () => void;
 }) {
-  const s = objetivo?.sesion;
+  // Mientras la hoja se cierra (200 ms) se sigue mostrando el último entrenamiento.
+  const ultimo = useRef(objetivo);
+  if (objetivo) ultimo.current = objetivo;
+  const elegido = objetivo ?? ultimo.current;
+  const s = elegido?.sesion;
   return (
-    <Modal visible={!!objetivo} transparent animationType="fade" onRequestClose={onCancelar}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <View style={styles.modalIcon}>
-            <Ionicons name="eye-off-outline" size={24} color={colors.danger} />
-          </View>
-          <Text style={styles.modalTitulo}>¿Quitar este entrenamiento de tu lista?</Text>
-          {!!objetivo && !!s && (
-            <Text style={styles.modalTexto}>
-              {`${formatFechaHistorial(objetivo.fecha)} · ${formatHoraArgentina(s.creadoEn)} hs\n${
-                s.tituloDia || 'Entrenamiento'
-              }\n\nVas a dejar de verlo. Queda guardado para tu entrenador.`}
-            </Text>
-          )}
-          <View style={styles.modalBotones}>
-            <Tocable style={styles.modalCancelar} onPress={onCancelar} disabled={eliminando}>
-              <Text style={styles.modalCancelarText}>Cancelar</Text>
-            </Tocable>
-            <Tocable
-              style={[styles.modalEliminar, eliminando && styles.finishButtonBusy]}
-              onPress={onConfirmar}
-              disabled={eliminando}
-              accessibilityLabel="Confirmar quitar el entrenamiento de mi lista"
-            >
-              {eliminando ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <Text style={styles.modalEliminarText}>Quitar</Text>
-              )}
-            </Tocable>
-          </View>
+    <HojaInferior visible={!!objetivo} onClose={onCancelar} cerrable={!eliminando}>
+      <View style={styles.modalCard}>
+        <View style={styles.modalIcon}>
+          <Ionicons name="eye-off-outline" size={24} color={colors.danger} />
+        </View>
+        <Text style={styles.modalTitulo}>¿Quitar este entrenamiento de tu lista?</Text>
+        {!!elegido && !!s && (
+          <Text style={styles.modalTexto}>
+            {`${formatFechaHistorial(elegido.fecha)} · ${formatHoraArgentina(s.creadoEn)} hs\n${
+              s.tituloDia || 'Entrenamiento'
+            }\n\nVas a dejar de verlo. Queda guardado para tu entrenador.`}
+          </Text>
+        )}
+        <View style={styles.modalBotones}>
+          <Tocable style={styles.modalCancelar} onPress={onCancelar} disabled={eliminando}>
+            <Text style={styles.modalCancelarText}>Cancelar</Text>
+          </Tocable>
+          <Tocable
+            style={[styles.modalEliminar, eliminando && styles.finishButtonBusy]}
+            onPress={onConfirmar}
+            disabled={eliminando}
+            accessibilityLabel="Confirmar quitar el entrenamiento de mi lista"
+          >
+            {eliminando ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Text style={styles.modalEliminarText}>Quitar</Text>
+            )}
+          </Tocable>
         </View>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
@@ -1384,15 +1386,8 @@ const styles = StyleSheet.create({
   eliminarButtonText: { color: colors.danger, fontSize: 12.5, fontWeight: '700' },
 
   // ---- Modal de confirmación de borrado ----
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
-  modalCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 22,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
+  // Contenido de la hoja "Quitar" (el fondo y los bordes los pone HojaInferior).
+  modalCard: { alignItems: 'center', paddingTop: 4 },
   modalIcon: {
     width: 52,
     height: 52,

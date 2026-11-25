@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { colors } from '../theme/colors';
 
 interface CancelBookingModalProps {
@@ -76,64 +78,49 @@ export default function CancelBookingModal({
   }
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Cancelar {className}</Text>
-          {!!dateLabel && <Text style={styles.fecha}>{dateLabel}</Text>}
-          <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
-          {withinCancelLimit && (
-            <Text style={styles.warning}>
-              {yaEmpezo
-                ? 'La clase ya empezó: no podés cancelarla.'
-                : `Faltan menos de ${formatLimite(limiteMinutos)} para que empiece la clase: no podés cancelarla.`}
-            </Text>
-          )}
-          <TextInput
-            style={styles.input}
-            placeholder="Ej: estoy enfermo"
-            placeholderTextColor={colors.textSecondary}
-            value={reason}
-            onChangeText={setReason}
-            multiline
-          />
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleClose} disabled={isSubmitting}>
-              <Text style={styles.secondaryButtonText}>Volver</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="cancel-booking-confirm"
-              style={[styles.dangerButton, withinCancelLimit && styles.dangerButtonDisabled]}
-              onPress={handleConfirm}
-              disabled={isSubmitting || withinCancelLimit}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={colors.white} size="small" />
-              ) : (
-                <Text style={styles.dangerButtonText}>Confirmar cancelación</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+    <HojaInferior visible={visible} onClose={handleClose} cerrable={!isSubmitting}>
+      <View>
+        <Text style={styles.title}>Cancelar {className}</Text>
+        {!!dateLabel && <Text style={styles.fecha}>{dateLabel}</Text>}
+        <Text style={styles.subtitle}>Contanos por qué (opcional) — ayuda al gimnasio a organizarse.</Text>
+        {withinCancelLimit && (
+          <Text style={styles.warning}>
+            {yaEmpezo
+              ? 'La clase ya empezó: no podés cancelarla.'
+              : `Faltan menos de ${formatLimite(limiteMinutos)} para que empiece la clase: no podés cancelarla.`}
+          </Text>
+        )}
+        <TextInput
+          style={styles.input}
+          placeholder="Ej: estoy enfermo"
+          placeholderTextColor={colors.textSecondary}
+          value={reason}
+          onChangeText={setReason}
+          multiline
+        />
+        <View style={styles.buttonRow}>
+          <Tocable style={styles.secondaryButton} onPress={handleClose} disabled={isSubmitting}>
+            <Text style={styles.secondaryButtonText}>Volver</Text>
+          </Tocable>
+          <Tocable
+            testID="cancel-booking-confirm"
+            style={[styles.dangerButton, withinCancelLimit && styles.dangerButtonDisabled]}
+            onPress={handleConfirm}
+            disabled={isSubmitting || withinCancelLimit}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color={colors.white} size="small" />
+            ) : (
+              <Text style={styles.dangerButtonText}>Confirmar cancelación</Text>
+            )}
+          </Tocable>
         </View>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   // Mismo estilo que la fecha de BookingConfirmModal: lo que el socio chequea
   // de un vistazo antes de confirmar.

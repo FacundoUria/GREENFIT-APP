@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { ResultadoPago } from '../lib/paymentResult';
@@ -48,7 +49,7 @@ export default function PaymentResultCard({ resultado, reintentando, onReintenta
       <Text style={styles.resultMessage}>{meta.message}</Text>
       <View style={styles.resultActions}>
         {resultado === 'failure' && (
-          <TouchableOpacity
+          <Tocable
             style={[styles.resultButton, styles.resultButtonPrimary]}
             onPress={onReintentar}
             disabled={reintentando}
@@ -58,11 +59,11 @@ export default function PaymentResultCard({ resultado, reintentando, onReintenta
             ) : (
               <Text style={styles.resultButtonPrimaryText}>Reintentar</Text>
             )}
-          </TouchableOpacity>
+          </Tocable>
         )}
-        <TouchableOpacity style={styles.resultButton} onPress={onClose}>
+        <Tocable style={styles.resultButton} onPress={onClose}>
           <Text style={styles.resultButtonText}>{resultado === 'failure' ? 'Cancelar' : 'Listo'}</Text>
-        </TouchableOpacity>
+        </Tocable>
       </View>
     </View>
   );

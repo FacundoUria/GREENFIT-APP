@@ -1,5 +1,7 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 
@@ -15,44 +17,29 @@ interface PushBlockedModalProps {
 // switch en ese caso.
 export default function PushBlockedModal({ visible, onClose }: PushBlockedModalProps) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="lock-closed" size={22} color={colors.warning} />
-          </View>
-          <Text style={styles.title}>Notificaciones bloqueadas</Text>
-          <Text style={styles.text}>
-            Bloqueaste las notificaciones de Greenfit en este navegador. Para volver a activarlas:
-          </Text>
-          <View style={styles.steps}>
-            <Text style={styles.step}>1. Tocá el ícono de candado 🔒 (o "ⓘ") en la barra de direcciones.</Text>
-            <Text style={styles.step}>2. Buscá "Notificaciones" y cambiá el permiso a "Permitir".</Text>
-            <Text style={styles.step}>3. Volvé a esta pantalla y activá el switch de nuevo.</Text>
-          </View>
-          <TouchableOpacity style={styles.button} onPress={onClose}>
-            <Text style={styles.buttonText}>Entendido</Text>
-          </TouchableOpacity>
+    <HojaInferior visible={visible} onClose={onClose}>
+      <View>
+        <View style={styles.iconWrap}>
+          <Ionicons name="lock-closed" size={22} color={colors.warning} />
         </View>
+        <Text style={styles.title}>Notificaciones bloqueadas</Text>
+        <Text style={styles.text}>
+          Bloqueaste las notificaciones de Greenfit en este navegador. Para volver a activarlas:
+        </Text>
+        <View style={styles.steps}>
+          <Text style={styles.step}>1. Tocá el ícono de candado 🔒 (o "ⓘ") en la barra de direcciones.</Text>
+          <Text style={styles.step}>2. Buscá "Notificaciones" y cambiá el permiso a "Permitir".</Text>
+          <Text style={styles.step}>3. Volvé a esta pantalla y activá el switch de nuevo.</Text>
+        </View>
+        <Tocable style={styles.button} onPress={onClose}>
+          <Text style={styles.buttonText}>Entendido</Text>
+        </Tocable>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   iconWrap: {
     width: 40,
     height: 40,

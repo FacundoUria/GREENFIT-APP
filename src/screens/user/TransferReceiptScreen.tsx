@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Image } from 'react-native';
+import Tocable from '../../components/Tocable';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -84,9 +85,9 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={8} accessibilityLabel="Volver">
+        <Tocable onPress={() => navigation.goBack()} hitSlop={8} accessibilityLabel="Volver">
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
-        </TouchableOpacity>
+        </Tocable>
         <Text style={styles.title}>Pagar por transferencia</Text>
       </View>
 
@@ -101,7 +102,7 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
             <Text style={styles.dataValue}>{configuracion.aliasCvu || 'No cargado todavía'}</Text>
           </View>
           {!!configuracion.aliasCvu && (
-            <TouchableOpacity style={styles.copyButton} onPress={handleCopiarAlias}>
+            <Tocable style={styles.copyButton} onPress={handleCopiarAlias}>
               <Ionicons
                 name={copied ? 'checkmark' : 'copy-outline'}
                 size={16}
@@ -110,7 +111,7 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
               <Text style={[styles.copyButtonText, copied && { color: colors.primary }]}>
                 {copied ? '¡Copiado!' : 'Copiar'}
               </Text>
-            </TouchableOpacity>
+            </Tocable>
           )}
         </View>
         {!!configuracion.titularCuenta && (
@@ -129,24 +130,24 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
       {imageUri ? (
         <View style={styles.previewWrap}>
           <Image source={{ uri: imageUri }} style={styles.preview} />
-          <TouchableOpacity style={styles.changeButton} onPress={() => setImageUri(null)}>
+          <Tocable style={styles.changeButton} onPress={() => setImageUri(null)}>
             <Text style={styles.changeButtonText}>Cambiar foto</Text>
-          </TouchableOpacity>
+          </Tocable>
         </View>
       ) : (
         <View style={styles.pickerRow}>
-          <TouchableOpacity style={styles.pickerButton} onPress={handleTomarFoto}>
+          <Tocable style={styles.pickerButton} onPress={handleTomarFoto}>
             <Ionicons name="camera-outline" size={20} color={colors.textPrimary} />
             <Text style={styles.pickerButtonText}>Sacar foto</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.pickerButton} onPress={handleElegirFoto}>
+          </Tocable>
+          <Tocable style={styles.pickerButton} onPress={handleElegirFoto}>
             <Ionicons name="image-outline" size={20} color={colors.textPrimary} />
             <Text style={styles.pickerButtonText}>Elegir de galería</Text>
-          </TouchableOpacity>
+          </Tocable>
         </View>
       )}
 
-      <TouchableOpacity
+      <Tocable
         style={[styles.submitButton, (!imageUri || submitting) && styles.submitButtonDisabled]}
         disabled={!imageUri || submitting}
         onPress={handleEnviar}
@@ -156,7 +157,7 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
         ) : (
           <Text style={styles.submitButtonText}>Enviar comprobante</Text>
         )}
-      </TouchableOpacity>
+      </Tocable>
     </ScrollView>
   );
 }

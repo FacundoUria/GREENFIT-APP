@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { CONSENT_TEXT_SHORT } from '../lib/consentApi';
@@ -50,72 +52,62 @@ export default function BookingConfirmModal({
     if (visible) setReafirmado(false);
   }, [visible]);
 
-  if (!target) return null;
+  // Mientras la hoja se cierra (200 ms) se sigue mostrando la última clase,
+  // aunque el padre ya haya limpiado `target`.
+  const ultimo = useRef(target);
+  if (target) ultimo.current = target;
+  const clase = target ?? ultimo.current;
+  if (!clase) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Reservar {target.title}</Text>
-          <Text style={styles.fecha}>{target.dateLabel}</Text>
-          <Text style={styles.subtitle}>
-            {target.startLabel}
-            {target.endLabel ? ` - ${target.endLabel}` : ''} hs
-            {target.instructor ? ` · Prof. ${target.instructor}` : ''}
-            {target.location ? ` · ${target.location}` : ''}
-          </Text>
-          {!!target.aviso && <Text style={styles.aviso}>{target.aviso}</Text>}
-          <Text style={styles.question}>¿Confirmás tu lugar en esta clase?</Text>
+    <HojaInferior visible={visible && !!target} onClose={onClose} cerrable={!isSubmitting}>
+      <View>
+        <Text style={styles.title}>Reservar {clase.title}</Text>
+        <Text style={styles.fecha}>{clase.dateLabel}</Text>
+        <Text style={styles.subtitle}>
+          {clase.startLabel}
+          {clase.endLabel ? ` - ${clase.endLabel}` : ''} hs
+          {clase.instructor ? ` · Prof. ${clase.instructor}` : ''}
+          {clase.location ? ` · ${clase.location}` : ''}
+        </Text>
+        {!!clase.aviso && <Text style={styles.aviso}>{clase.aviso}</Text>}
+        <Text style={styles.question}>¿Confirmás tu lugar en esta clase?</Text>
 
-          <TouchableOpacity
-            style={styles.checkboxRow}
-            onPress={() => setReafirmado((v) => !v)}
-            disabled={isSubmitting}
+        <Tocable
+          style={styles.checkboxRow}
+          onPress={() => setReafirmado((v) => !v)}
+          disabled={isSubmitting}
+        >
+          <Ionicons
+            name={reafirmado ? 'checkbox' : 'square-outline'}
+            size={20}
+            color={reafirmado ? colors.primary : colors.textSecondary}
+          />
+          <Text style={styles.checkboxLabel}>{CONSENT_TEXT_SHORT}</Text>
+        </Tocable>
+
+        <View style={styles.buttonRow}>
+          <Tocable style={styles.secondaryButton} onPress={onClose} disabled={isSubmitting}>
+            <Text style={styles.secondaryButtonText}>Cancelar</Text>
+          </Tocable>
+          <Tocable
+            style={[styles.primaryButton, !reafirmado && styles.primaryButtonDisabled]}
+            onPress={onConfirm}
+            disabled={!reafirmado || isSubmitting}
           >
-            <Ionicons
-              name={reafirmado ? 'checkbox' : 'square-outline'}
-              size={20}
-              color={reafirmado ? colors.primary : colors.textSecondary}
-            />
-            <Text style={styles.checkboxLabel}>{CONSENT_TEXT_SHORT}</Text>
-          </TouchableOpacity>
-
-          <View style={styles.buttonRow}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={onClose} disabled={isSubmitting}>
-              <Text style={styles.secondaryButtonText}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.primaryButton, !reafirmado && styles.primaryButtonDisabled]}
-              onPress={onConfirm}
-              disabled={!reafirmado || isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator color={colors.onPrimary} size="small" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Confirmar</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+            {isSubmitting ? (
+              <ActivityIndicator color={colors.onPrimary} size="small" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Confirmar</Text>
+            )}
+          </Tocable>
         </View>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   // La fecha va destacada (verde, negrita): es lo que el socio tiene que
   // poder chequear de un vistazo antes de confirmar.

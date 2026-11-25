@@ -1,5 +1,7 @@
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 
@@ -15,49 +17,34 @@ interface PushNeedsInstallModalProps {
 // en usePushPermission) y guía al socio a instalar la app primero.
 export default function PushNeedsInstallModal({ visible, onClose }: PushNeedsInstallModalProps) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="download-outline" size={22} color={colors.primary} />
-          </View>
-          <Text style={styles.title}>Instalá Greenfit para activarlas</Text>
-          <Text style={styles.text}>
-            En iPhone, las notificaciones solo funcionan si agregás Greenfit a tu pantalla de inicio:
-          </Text>
-          <View style={styles.steps}>
-            <Text style={styles.step}>
-              1. Tocá <Text style={styles.bold}>Compartir</Text>{' '}
-              <Ionicons name="arrow-redo-outline" size={13} color={colors.textPrimary} /> en la barra del navegador.
-            </Text>
-            <Text style={styles.step}>
-              2. Elegí <Text style={styles.bold}>"Agregar a inicio"</Text>.
-            </Text>
-            <Text style={styles.step}>3. Abrí Greenfit desde ese ícono nuevo y activá el switch de nuevo.</Text>
-          </View>
-          <TouchableOpacity style={styles.button} onPress={onClose}>
-            <Text style={styles.buttonText}>Entendido</Text>
-          </TouchableOpacity>
+    <HojaInferior visible={visible} onClose={onClose}>
+      <View>
+        <View style={styles.iconWrap}>
+          <Ionicons name="download-outline" size={22} color={colors.primary} />
         </View>
+        <Text style={styles.title}>Instalá Greenfit para activarlas</Text>
+        <Text style={styles.text}>
+          En iPhone, las notificaciones solo funcionan si agregás Greenfit a tu pantalla de inicio:
+        </Text>
+        <View style={styles.steps}>
+          <Text style={styles.step}>
+            1. Tocá <Text style={styles.bold}>Compartir</Text>{' '}
+            <Ionicons name="arrow-redo-outline" size={13} color={colors.textPrimary} /> en la barra del navegador.
+          </Text>
+          <Text style={styles.step}>
+            2. Elegí <Text style={styles.bold}>"Agregar a inicio"</Text>.
+          </Text>
+          <Text style={styles.step}>3. Abrí Greenfit desde ese ícono nuevo y activá el switch de nuevo.</Text>
+        </View>
+        <Tocable style={styles.button} onPress={onClose}>
+          <Text style={styles.buttonText}>Entendido</Text>
+        </Tocable>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   iconWrap: {
     width: 40,
     height: 40,

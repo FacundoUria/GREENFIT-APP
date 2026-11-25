@@ -6,13 +6,13 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Modal,
   Linking,
   Platform,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
 import Aparecer from '../../components/Aparecer';
 import { EsqueletoCreditos } from '../../components/Esqueletos';
+import HojaInferior from '../../components/HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -476,52 +476,43 @@ export default function HomeScreen({ navigation }: any) {
         onConfirm={confirmCancel}
       />
 
-      <Modal
-        visible={showBuyModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowBuyModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Elegí tu pack</Text>
-              <Tocable onPress={() => setShowBuyModal(false)}>
-                <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </Tocable>
-            </View>
-
-            {packs.length === 0 && <Text style={styles.text}>No hay packs disponibles todavía.</Text>}
-
-            <ScrollView>
-              {packs.map((p) => (
-                <Tocable
-                  key={p.id}
-                  style={styles.packRow}
-                  onPress={() => {
-                    // Fase 4: Mercado Pago se desconectó de la interfaz --
-                    // transferencia es el único camino real hoy, así que ya
-                    // no tiene sentido preguntar "¿cómo querés pagar?" con
-                    // una sola opción. Tocar el pack va directo a la
-                    // pantalla del comprobante. handleSelectPack (Mercado
-                    // Pago) NO se borró -- sigue ahí para cuando se
-                    // reconecte o se limpie en un ticket aparte, solo dejó
-                    // de estar cableado a ningún botón visible.
-                    setShowBuyModal(false);
-                    navigation.navigate('TransferReceipt', { packId: p.id, packName: p.name, monto: p.price });
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.packRowName}>{p.name}</Text>
-                    <Text style={styles.packRowSub}>{buildPackSubtitle(p)}</Text>
-                  </View>
-                  <Text style={styles.packRowPrice}>{formatCurrency(p.price)}</Text>
-                </Tocable>
-              ))}
-            </ScrollView>
-          </View>
+      <HojaInferior visible={showBuyModal} onClose={() => setShowBuyModal(false)} style={styles.modalSheet}>
+        <View style={styles.modalHeaderRow}>
+          <Text style={styles.modalTitle}>Elegí tu pack</Text>
+          <Tocable onPress={() => setShowBuyModal(false)} style={styles.modalCerrar} accessibilityLabel="Cerrar">
+            <Ionicons name="close" size={22} color={colors.textPrimary} />
+          </Tocable>
         </View>
-      </Modal>
+
+        {packs.length === 0 && <Text style={styles.text}>No hay packs disponibles todavía.</Text>}
+
+        <ScrollView>
+          {packs.map((p) => (
+            <Tocable
+              key={p.id}
+              style={styles.packRow}
+              onPress={() => {
+                // Fase 4: Mercado Pago se desconectó de la interfaz --
+                // transferencia es el único camino real hoy, así que ya
+                // no tiene sentido preguntar "¿cómo querés pagar?" con
+                // una sola opción. Tocar el pack va directo a la
+                // pantalla del comprobante. handleSelectPack (Mercado
+                // Pago) NO se borró -- sigue ahí para cuando se
+                // reconecte o se limpie en un ticket aparte, solo dejó
+                // de estar cableado a ningún botón visible.
+                setShowBuyModal(false);
+                navigation.navigate('TransferReceipt', { packId: p.id, packName: p.name, monto: p.price });
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.packRowName}>{p.name}</Text>
+                <Text style={styles.packRowSub}>{buildPackSubtitle(p)}</Text>
+              </View>
+              <Text style={styles.packRowPrice}>{formatCurrency(p.price)}</Text>
+            </Tocable>
+          ))}
+        </ScrollView>
+      </HojaInferior>
 
       <XpInfoModal visible={xpInfoVisible} onClose={() => setXpInfoVisible(false)} />
       <GlobalAlertBanner activa={configuracion.alertaActiva} mensaje={configuracion.alertaMensaje} />
@@ -688,14 +679,10 @@ const styles = StyleSheet.create({
   upcomingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.textSecondary },
   upcomingText: { color: colors.textSecondary, fontSize: 13, flex: 1 },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '70%',
-  },
+  // Hoja de packs: fondo más oscuro que las filas (contraste de siempre).
+  modalSheet: { backgroundColor: colors.background, maxHeight: '70%' },
+  // 44 x 44 (área mínima de toque) sin mover la X.
+  modalCerrar: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', margin: -11 },
   modalHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

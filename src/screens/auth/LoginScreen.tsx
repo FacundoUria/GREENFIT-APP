@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
@@ -51,25 +52,25 @@ export default function LoginScreen() {
           value={password}
           onChangeText={setPassword}
         />
-        <TouchableOpacity
+        <Tocable
           style={styles.eyeButton}
           onPress={() => setShowPassword((prev) => !prev)}
           hitSlop={10}
           accessibilityLabel={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
         >
           <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Tocable>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoading}>
+      <Tocable style={styles.button} onPress={handleLogin} disabled={isLoading}>
         {isLoading ? (
           <ActivityIndicator color={colors.onPrimary} />
         ) : (
           <Text style={styles.buttonText}>Ingresar</Text>
         )}
-      </TouchableOpacity>
+      </Tocable>
 
       <Text style={styles.hint}>Ingresá con tu DNI.</Text>
 

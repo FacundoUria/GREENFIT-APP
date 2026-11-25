@@ -1,5 +1,7 @@
 import React from 'react';
-import { View, Text, Modal, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { XP_POR_NIVEL } from '../lib/xpApi';
@@ -40,41 +42,33 @@ interface XpInfoModalProps {
 
 export default function XpInfoModal({ visible, onClose }: XpInfoModalProps) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>¿Cómo ganar XP?</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={10}>
-              <Ionicons name="close" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.subtitle}>Cada {XP_POR_NIVEL} XP subís de nivel.</Text>
-          {REGLAS_XP.map((regla) => (
-            <View key={regla.label} style={styles.ruleRow}>
-              <Text style={styles.ruleEmoji}>{regla.emoji}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.ruleLabel}>{regla.label}</Text>
-                <Text style={styles.ruleDetalle}>{regla.detalle}</Text>
-              </View>
-            </View>
-          ))}
+    <HojaInferior visible={visible} onClose={onClose}>
+      <View>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>¿Cómo ganar XP?</Text>
+          <Tocable onPress={onClose} style={styles.cerrar} accessibilityLabel="Cerrar">
+            <Ionicons name="close" size={22} color={colors.textSecondary} />
+          </Tocable>
         </View>
+        <Text style={styles.subtitle}>Cada {XP_POR_NIVEL} XP subís de nivel.</Text>
+        {REGLAS_XP.map((regla) => (
+          <View key={regla.label} style={styles.ruleRow}>
+            <Text style={styles.ruleEmoji}>{regla.emoji}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.ruleLabel}>{regla.label}</Text>
+              <Text style={styles.ruleDetalle}>{regla.detalle}</Text>
+            </View>
+          </View>
+        ))}
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // 44 x 44 (área mínima de toque) sin mover la X: el margen negativo compensa.
+  cerrar: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', margin: -11 },
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '800' },
   subtitle: { color: colors.textSecondary, fontSize: 12.5, marginTop: 4, marginBottom: 16 },
   ruleRow: {

@@ -1,5 +1,7 @@
-import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { colors } from '../theme/colors';
 
 export interface MessageModalContent {
@@ -40,53 +42,42 @@ const TONE_BUTTON_TEXT: Record<NonNullable<MessageModalContent['tone']>, string>
 // que ya renderiza bien en Web (ver CancelBookingModal/
 // ReservaConfirmadaModal) y mantiene la estética del resto de la app.
 export default function MessageModal({ content, onClose }: MessageModalProps) {
-  if (!content) return null;
-  const tone = content.tone ?? 'info';
+  // Mientras la hoja se cierra (200 ms) se sigue mostrando el último mensaje.
+  const ultimo = useRef(content);
+  if (content) ultimo.current = content;
+  const mensaje = content ?? ultimo.current;
+  if (!mensaje) return null;
+  const tone = mensaje.tone ?? 'info';
   const color = TONE_COLOR[tone];
   const buttonTextColor = TONE_BUTTON_TEXT[tone];
 
   return (
-    <Modal visible={!!content} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <Text style={[styles.title, { color }]}>{content.title}</Text>
-          <Text style={styles.message}>{content.message}</Text>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: color }]}
-            onPress={() => {
-              // Cierra primero -- el modal no debe quedar visible detrás de
-              // la pantalla a la que onAction navega.
-              onClose();
-              content.onAction?.();
-            }}
-          >
-            <Text style={[styles.buttonText, { color: buttonTextColor }]}>{content.actionLabel ?? 'Entendido'}</Text>
-          </TouchableOpacity>
-          {!!content.onAction && (
-            <TouchableOpacity style={styles.secondaryButton} onPress={onClose}>
-              <Text style={styles.secondaryButtonText}>Cerrar</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+    <HojaInferior visible={!!content} onClose={onClose}>
+      <View>
+        <Text style={[styles.title, { color }]}>{mensaje.title}</Text>
+        <Text style={styles.message}>{mensaje.message}</Text>
+        <Tocable
+          style={[styles.button, { backgroundColor: color }]}
+          onPress={() => {
+            // Cierra primero -- el modal no debe quedar visible detrás de
+            // la pantalla a la que onAction navega.
+            onClose();
+            mensaje.onAction?.();
+          }}
+        >
+          <Text style={[styles.buttonText, { color: buttonTextColor }]}>{mensaje.actionLabel ?? 'Entendido'}</Text>
+        </Tocable>
+        {!!mensaje.onAction && (
+          <Tocable style={styles.secondaryButton} onPress={onClose}>
+            <Text style={styles.secondaryButtonText}>Cerrar</Text>
+          </Tocable>
+        )}
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-  },
   title: { fontSize: 17, fontWeight: '700', marginBottom: 8 },
   message: { color: colors.textSecondary, fontSize: 13.5, lineHeight: 19, marginBottom: 18 },
   button: { borderRadius: 10, paddingVertical: 13, alignItems: 'center' },

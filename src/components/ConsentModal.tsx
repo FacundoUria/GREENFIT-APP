@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { CONSENT_TEXT } from '../lib/consentApi';
@@ -40,12 +42,12 @@ export default function ConsentModal({ visible, isSubmitting, onClose, onAccept 
   }
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <HojaInferior visible={visible} onClose={onClose} cerrable={!isSubmitting} style={styles.hoja}>
       <View style={styles.container}>
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
           <Text style={styles.legalText}>{CONSENT_TEXT}</Text>
 
-          <TouchableOpacity
+          <Tocable
             style={styles.checkboxRow}
             onPress={() => setChoice('acepto')}
             disabled={isSubmitting}
@@ -58,9 +60,9 @@ export default function ConsentModal({ visible, isSubmitting, onClose, onAccept 
             <Text style={styles.checkboxLabel}>
               Acepto la declaración de salud, el consentimiento informado y las condiciones de participación.
             </Text>
-          </TouchableOpacity>
+          </Tocable>
 
-          <TouchableOpacity
+          <Tocable
             style={styles.checkboxRow}
             onPress={() => setChoice('no_acepto')}
             disabled={isSubmitting}
@@ -71,7 +73,7 @@ export default function ConsentModal({ visible, isSubmitting, onClose, onAccept 
               color={choice === 'no_acepto' ? colors.danger : colors.textSecondary}
             />
             <Text style={styles.checkboxLabel}>No acepto.</Text>
-          </TouchableOpacity>
+          </Tocable>
 
           <Text style={styles.footerNote}>
             La aceptación de estas condiciones es necesaria para realizar reservas de clases.
@@ -79,10 +81,10 @@ export default function ConsentModal({ visible, isSubmitting, onClose, onAccept 
         </ScrollView>
 
         <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={onClose} disabled={isSubmitting}>
+          <Tocable style={styles.secondaryButton} onPress={onClose} disabled={isSubmitting}>
             <Text style={styles.secondaryButtonText}>Volver</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </Tocable>
+          <Tocable
             style={[styles.primaryButton, choice !== 'acepto' && styles.primaryButtonDisabled]}
             onPress={handleAccept}
             disabled={choice !== 'acepto' || isSubmitting}
@@ -92,17 +94,20 @@ export default function ConsentModal({ visible, isSubmitting, onClose, onAccept 
             ) : (
               <Text style={styles.primaryButtonText}>Continuar</Text>
             )}
-          </TouchableOpacity>
+          </Tocable>
         </View>
       </View>
-    </Modal>
+    </HojaInferior>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  // Hoja alta (el texto legal es largo): alto fijo para que la lista con
+  // scroll ocupe lo que queda entre la manija y los botones.
+  hoja: { height: '92%', paddingHorizontal: 0 },
+  container: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 20, paddingBottom: 32 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
   legalText: { color: colors.textPrimary, fontSize: 13.5, lineHeight: 20 },
   checkboxRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20 },
   checkboxLabel: { flex: 1, color: colors.textPrimary, fontSize: 13.5, lineHeight: 19, fontWeight: '600' },
@@ -110,7 +115,8 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: 'row',
     gap: 10,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.surfaceAlt,
   },

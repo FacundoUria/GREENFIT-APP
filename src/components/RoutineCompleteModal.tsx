@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, View, Text, Image, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
 import { colors } from '../theme/colors';
 import Confetti from './Confetti';
 
@@ -36,9 +37,9 @@ export default function RoutineCompleteModal({ visible, completos, total, onClos
           <Text style={styles.title}>{titulo}</Text>
           <Text style={styles.subtitle}>{subtitulo}</Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={onClose}>
+          <Tocable style={styles.primaryButton} onPress={onClose}>
             <Text style={styles.primaryButtonText}>Genial</Text>
-          </TouchableOpacity>
+          </Tocable>
         </View>
       </View>
     </Modal>

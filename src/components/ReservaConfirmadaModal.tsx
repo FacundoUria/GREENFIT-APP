@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, Image, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
+import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import Confetti from './Confetti';
@@ -37,80 +39,82 @@ export default function ReservaConfirmadaModal({ visible, reserva, onClose }: Re
     if (visible) setShareFeedback(null);
   }, [visible]);
 
-  if (!reserva) return null;
+  // Mientras la hoja se cierra (200 ms) se sigue mostrando la última reserva.
+  const ultima = useRef(reserva);
+  if (reserva) ultima.current = reserva;
+  const datos = reserva ?? ultima.current;
+  if (!datos) return null;
 
   const fecha = capitalize(
-    new Date(reserva.startAt).toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit', month: 'long' })
+    new Date(datos.startAt).toLocaleDateString('es-AR', { weekday: 'long', day: '2-digit', month: 'long' })
   );
-  const horaInicio = new Date(reserva.startAt).toLocaleTimeString('es-AR', {
+  const horaInicio = new Date(datos.startAt).toLocaleTimeString('es-AR', {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   });
-  const horaFin = reserva.endAt
-    ? new Date(reserva.endAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const horaFin = datos.endAt
+    ? new Date(datos.endAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
     : null;
 
   async function handleAddToCalendar() {
     await addToCalendar({
-      disciplina: reserva!.disciplina,
-      startAt: reserva!.startAt,
-      endAt: reserva!.endAt,
-      location: reserva!.location,
+      disciplina: datos.disciplina,
+      startAt: datos.startAt,
+      endAt: datos.endAt,
+      location: datos.location,
     });
   }
 
   async function handleShare() {
     const result = await shareReserva({
-      disciplina: reserva!.disciplina,
-      startAt: reserva!.startAt,
-      location: reserva!.location,
+      disciplina: datos.disciplina,
+      startAt: datos.startAt,
+      location: datos.location,
     });
     setShareFeedback(SHARE_FEEDBACK[result]);
   }
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <Confetti active={visible} />
+    <HojaInferior visible={visible && !!reserva} onClose={onClose}>
+      <View style={styles.contenido}>
+        <Confetti active={visible} />
 
-          <TouchableOpacity style={styles.closeButton} onPress={onClose} hitSlop={10}>
-            <Ionicons name="close" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
+        <Image source={require('../../assets/perro.png')} style={styles.mascot} resizeMode="contain" />
 
-          <Image source={require('../../assets/perro.png')} style={styles.mascot} resizeMode="contain" />
+        <Text style={styles.title}>¡Reserva confirmada!</Text>
+        <Text style={styles.subtitle}>¡Nos vemos en el box! 💪</Text>
 
-          <Text style={styles.title}>¡Reserva confirmada!</Text>
-          <Text style={styles.subtitle}>¡Nos vemos en el box! 💪</Text>
-
-          <View style={styles.summary}>
-            <SummaryRow icon="barbell-outline" label={reserva.disciplina} />
-            <SummaryRow icon="calendar-outline" label={fecha} />
-            <SummaryRow icon="time-outline" label={horaFin ? `${horaInicio} - ${horaFin} hs` : `${horaInicio} hs`} />
-            {!!reserva.instructor && <SummaryRow icon="person-outline" label={`Prof. ${reserva.instructor}`} />}
-            {!!reserva.location && <SummaryRow icon="location-outline" label={reserva.location} />}
-          </View>
-
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleAddToCalendar}>
-              <Ionicons name="calendar" size={16} color={colors.textPrimary} />
-              <Text style={styles.secondaryButtonText}>Agendar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleShare}>
-              <Ionicons name="share-social" size={16} color={colors.textPrimary} />
-              <Text style={styles.secondaryButtonText}>Compartir</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!!shareFeedback && <Text style={styles.feedback}>{shareFeedback}</Text>}
-
-          <TouchableOpacity style={styles.primaryButton} onPress={onClose}>
-            <Text style={styles.primaryButtonText}>Listo</Text>
-          </TouchableOpacity>
+        <View style={styles.summary}>
+          <SummaryRow icon="barbell-outline" label={datos.disciplina} />
+          <SummaryRow icon="calendar-outline" label={fecha} />
+          <SummaryRow icon="time-outline" label={horaFin ? `${horaInicio} - ${horaFin} hs` : `${horaInicio} hs`} />
+          {!!datos.instructor && <SummaryRow icon="person-outline" label={`Prof. ${datos.instructor}`} />}
+          {!!datos.location && <SummaryRow icon="location-outline" label={datos.location} />}
         </View>
+
+        <View style={styles.actionsRow}>
+          <Tocable style={styles.secondaryButton} onPress={handleAddToCalendar}>
+            <Ionicons name="calendar" size={16} color={colors.textPrimary} />
+            <Text style={styles.secondaryButtonText}>Agendar</Text>
+          </Tocable>
+          <Tocable style={styles.secondaryButton} onPress={handleShare}>
+            <Ionicons name="share-social" size={16} color={colors.textPrimary} />
+            <Text style={styles.secondaryButtonText}>Compartir</Text>
+          </Tocable>
+        </View>
+
+        {!!shareFeedback && <Text style={styles.feedback}>{shareFeedback}</Text>}
+
+        <Tocable style={styles.primaryButton} onPress={onClose}>
+          <Text style={styles.primaryButtonText}>Listo</Text>
+        </Tocable>
       </View>
-    </Modal>
+      {/* Fuera del contenido (que recorta el confeti): se ubica contra la hoja. */}
+      <Tocable style={styles.closeButton} onPress={onClose} accessibilityLabel="Cerrar">
+        <Ionicons name="close" size={20} color={colors.textSecondary} />
+      </Tocable>
+    </HojaInferior>
   );
 }
 
@@ -126,22 +130,19 @@ function SummaryRow({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; lab
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 24,
+  // Centrado, y recorta el confeti (que cae desde arriba del contenido).
+  contenido: { alignItems: 'center', overflow: 'hidden', paddingTop: 4 },
+  // 44 x 44, arriba a la derecha de la hoja (a la altura de la manija).
+  closeButton: {
+    position: 'absolute',
+    top: 4,
+    right: 8,
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.surfaceAlt,
-    overflow: 'hidden',
+    justifyContent: 'center',
+    zIndex: 2,
   },
-  closeButton: { position: 'absolute', top: 14, right: 14, zIndex: 2 },
   mascot: { width: 96, height: 96, marginBottom: 10 },
   title: { color: colors.textPrimary, fontSize: 20, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: colors.textSecondary, fontSize: 13.5, marginTop: 4, marginBottom: 18, textAlign: 'center' },

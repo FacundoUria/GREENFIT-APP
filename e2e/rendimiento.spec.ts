@@ -346,6 +346,75 @@ for (const perfil of PERFILES) {
 
       for (const m of [esqueletoInicio, aparicionInicio, esqueletoAgenda, cascadaAgenda, entradaRutina, scrollConApariciones]) cumple(m);
     });
+
+    test('parte 3 (hojas): abrir, arrastrar y soltar, cerrar tocando afuera y cerrar arrastrando', async ({ page }) => {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Performance.enable');
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: perfil.cpu });
+      await page.addInitScript(() => {
+        window.localStorage.setItem('greenfit:ios-install-banner-dismissed-at', String(Date.now()));
+      });
+      await loginComoSocio(page, {
+        tables: {
+          ...tablasBase(),
+          classes: clasesDeHoy(3),
+          user_credits: [{ id: 'uc', user_id: SOCIO_DEMO.id, discipline: DISCIPLINA_CROSSFIT, remaining_credits: 5, expires_at: EN_30_DIAS, created_at: '2026-01-01T00:00:00.000Z' }],
+        },
+      });
+      await irATab(page, 'Agenda');
+      const tarjeta = page.getByTestId('agenda-card-perf-clase-0');
+      await expect(tarjeta).toBeVisible();
+      await page.waitForTimeout(1200);
+      const hoja = page.getByTestId('hoja-inferior');
+      const pregunta = page.getByText('¿Confirmás tu lugar en esta clase?');
+
+      // Abrir: sube en 600 ms (incluye dibujar el contenido de la hoja).
+      const abrir = await medir(page, cdp, async () => {
+        await tarjeta.click();
+        await expect(pregunta).toBeVisible();
+        await page.waitForTimeout(900);
+      });
+      informar(perfil.nombre, 'Hoja, abrir', abrir);
+
+      // Arrastrar con el dedo un 15 % y soltar: sigue al dedo y vuelve a su lugar.
+      const caja = (await hoja.boundingBox())!;
+      const dedo = async (dy: number, pasos: number) => {
+        const y0 = caja.y + 40;
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: caja.x + caja.width / 2, y: y0 }] });
+        for (let i = 1; i <= pasos; i++) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: caja.x + caja.width / 2, y: y0 + (dy * i) / pasos }] });
+          await page.waitForTimeout(16);
+        }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      };
+      const arrastrarYSoltar = await medir(page, cdp, async () => {
+        await dedo(caja.height * 0.15, 12);
+        await page.waitForTimeout(500);
+      });
+      informar(perfil.nombre, 'Hoja, arrastrar 15 % y soltar (vuelve)', arrastrarYSoltar);
+      await expect(pregunta).toBeVisible();
+
+      // Cerrar tocando afuera: baja en 200 ms.
+      const cerrarAfuera = await medir(page, cdp, async () => {
+        await page.mouse.click(caja.x + caja.width / 2, 40);
+        await expect(pregunta).toHaveCount(0);
+        await page.waitForTimeout(300);
+      });
+      informar(perfil.nombre, 'Hoja, cerrar tocando afuera', cerrarAfuera);
+
+      // Volver a abrir y cerrarla arrastrando con el dedo.
+      await tarjeta.click();
+      await expect(pregunta).toBeVisible();
+      await page.waitForTimeout(900);
+      const cerrarArrastrando = await medir(page, cdp, async () => {
+        await dedo(caja.height * 0.6, 15);
+        await expect(pregunta).toHaveCount(0);
+        await page.waitForTimeout(300);
+      });
+      informar(perfil.nombre, 'Hoja, cerrar arrastrando con el dedo', cerrarArrastrando);
+
+      for (const m of [abrir, arrastrarYSoltar, cerrarAfuera, cerrarArrastrando]) cumple(m);
+    });
   });
 }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
@@ -88,9 +89,9 @@ export default function AndroidInstallBanner() {
   return (
     <View style={styles.overlay}>
       <View style={styles.card}>
-        <TouchableOpacity style={styles.closeButton} onPress={dismiss} hitSlop={10}>
+        <Tocable style={styles.closeButton} onPress={dismiss} hitSlop={10}>
           <Ionicons name="close" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Tocable>
 
         <View style={styles.iconCircle}>
           <Ionicons name="download-outline" size={28} color={colors.primary} />
@@ -99,12 +100,12 @@ export default function AndroidInstallBanner() {
         <Text style={styles.title}>Instalá Greenfit</Text>
         <Text style={styles.text}>Reservá tus clases más rápido con la app instalada en tu celular.</Text>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleInstall}>
+        <Tocable style={styles.primaryButton} onPress={handleInstall}>
           <Text style={styles.primaryButtonText}>Instalar App</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={dismiss} hitSlop={10} style={styles.dismissLink}>
+        </Tocable>
+        <Tocable onPress={dismiss} hitSlop={10} style={styles.dismissLink}>
           <Text style={styles.dismissLinkText}>Ahora no</Text>
-        </TouchableOpacity>
+        </Tocable>
       </View>
     </View>
   );

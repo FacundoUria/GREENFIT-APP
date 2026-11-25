@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, SectionList, ActivityIndicator, RefreshControl } from 'react-native';
+import Tocable from '../../components/Tocable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -252,7 +253,7 @@ export default function NotificacionesMobileView() {
     <View style={styles.container}>
       <View style={styles.tabsRow}>
         {FILTROS.map((f) => (
-          <TouchableOpacity
+          <Tocable
             key={f.key}
             style={[styles.tab, filtro === f.key && styles.tabActive]}
             onPress={() => setFiltro(f.key)}
@@ -261,15 +262,15 @@ export default function NotificacionesMobileView() {
               {f.label}
               {f.key === 'no-leidas' && unreadCount > 0 ? ` (${unreadCount})` : ''}
             </Text>
-          </TouchableOpacity>
+          </Tocable>
         ))}
       </View>
 
       {unreadCount > 0 && (
-        <TouchableOpacity style={styles.markAllRow} onPress={markAllAsRead}>
+        <Tocable style={styles.markAllRow} onPress={markAllAsRead}>
           <Ionicons name="checkmark-done-outline" size={14} color={colors.primary} />
           <Text style={styles.markAllText}>Marcar todas como leídas</Text>
-        </TouchableOpacity>
+        </Tocable>
       )}
 
       {isLoading && items.length === 0 && (
@@ -289,10 +290,9 @@ export default function NotificacionesMobileView() {
         renderItem={({ item, section }) => {
           const meta = CATEGORIA_META[item.categoria];
           return (
-            <TouchableOpacity
+            <Tocable
               testID={`notif-card-${item.id}`}
               style={[styles.card, !item.leida && styles.cardUnread]}
-              activeOpacity={0.85}
               onPress={() => openDetail(item)}
             >
               {!item.leida && <View style={styles.unreadDot} />}
@@ -313,7 +313,7 @@ export default function NotificacionesMobileView() {
                   <Text style={[styles.categoriaChipText, { color: meta.color }]}>{meta.label}</Text>
                 </View>
               </View>
-            </TouchableOpacity>
+            </Tocable>
           );
         }}
       />

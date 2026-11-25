@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme/colors';
@@ -39,9 +40,9 @@ export default function IosInstallBanner() {
   return (
     <View style={styles.overlay}>
       <View style={styles.card}>
-        <TouchableOpacity style={styles.closeButton} onPress={dismiss} hitSlop={10}>
+        <Tocable style={styles.closeButton} onPress={dismiss} hitSlop={10}>
           <Ionicons name="close" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Tocable>
 
         <View style={styles.iconCircle}>
           <Ionicons name="download-outline" size={28} color={colors.primary} />
@@ -54,9 +55,9 @@ export default function IosInstallBanner() {
           <Text style={styles.bold}>"Agregar a inicio"</Text> para tenerla siempre a mano.
         </Text>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={dismiss}>
+        <Tocable style={styles.primaryButton} onPress={dismiss}>
           <Text style={styles.primaryButtonText}>Entendido</Text>
-        </TouchableOpacity>
+        </Tocable>
       </View>
     </View>
   );

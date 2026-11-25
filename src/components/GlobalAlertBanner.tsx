@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { Modal, View, Text, StyleSheet, Platform } from 'react-native';
+import Tocable from './Tocable';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -68,14 +69,14 @@ export default function GlobalAlertBanner({ activa, mensaje }: GlobalAlertBanner
             <Ionicons name="megaphone" size={18} color={colors.primary} />
           </View>
           <Text style={styles.mensaje}>{mensaje.trim()}</Text>
-          <TouchableOpacity
+          <Tocable
             onPress={handleDescartar}
             hitSlop={10}
             accessibilityLabel="Cerrar aviso"
             style={styles.closeButton}
           >
             <Ionicons name="close" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
+          </Tocable>
         </View>
       </View>
     </Modal>

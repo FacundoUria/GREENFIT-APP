@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Modal, View, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
@@ -23,9 +24,9 @@ export default function VideoModal({ visible, videoUrl, onClose }: VideoModalPro
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
-        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+        <Tocable style={styles.closeButton} onPress={onClose}>
           <Ionicons name="close" size={22} color={colors.textPrimary} />
-        </TouchableOpacity>
+        </Tocable>
         <WebView
           source={{ uri: getEmbedUrl(videoUrl) }}
           style={styles.webview}
