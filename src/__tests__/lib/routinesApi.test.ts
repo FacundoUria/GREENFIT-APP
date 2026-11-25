@@ -13,8 +13,11 @@ import {
   agruparHistorial,
   markExerciseCompleted,
   unmarkExerciseCompleted,
+  getUserRoutine,
+  getMisRutinasAnteriores,
+  getSesionesDeRutina,
 } from '../../lib/routinesApi';
-import { esViolacionDeFk } from '../../lib/supabaseErrors';
+import { esViolacionDeFk, esRutinaCerrada, errorConCodigo } from '../../lib/supabaseErrors';
 
 const mockedFrom = supabase.from as jest.Mock;
 const mockedRpc = supabase.rpc as jest.Mock;
@@ -22,9 +25,10 @@ const mockedRpc = supabase.rpc as jest.Mock;
 function makeChain(result: any) {
   const chain: any = {};
   const self = () => chain;
-  ['select', 'eq', 'upsert', 'order', 'limit', 'insert', 'delete'].forEach((m) => {
+  ['select', 'eq', 'is', 'upsert', 'order', 'limit', 'insert', 'delete'].forEach((m) => {
     chain[m] = jest.fn(self);
   });
+  chain.maybeSingle = jest.fn(() => Promise.resolve(result));
   chain.then = (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject);
   return chain;
 }
@@ -331,5 +335,189 @@ describe('markExerciseCompleted / unmarkExerciseCompleted (conservan el código 
     expect(esViolacionDeFk(null)).toBe(false);
     expect(esViolacionDeFk(undefined)).toBe(false);
     expect(esViolacionDeFk(new Error('x'))).toBe(false);
+  });
+});
+
+// -- Historial de rutinas (F1) --------------------------------------------------------
+
+describe('getUserRoutine: la rutina VIGENTE (vigente_hasta null), no "la más nueva"', () => {
+  const filaRutina = {
+    id: 'r-2', user_id: 'user-1', title: 'Fuerza', coach_name: null, notes: null,
+    created_at: '2026-10-01T10:00:00Z', vigente_desde: '2026-10-01T10:00:00Z', vigente_hasta: null,
+  };
+
+  it('filtra por vigente_hasta null y devuelve las fechas de vigencia', async () => {
+    const rutinas = makeChain({ data: filaRutina, error: null });
+    const dias = makeChain({ data: [], error: null });
+    mockedFrom.mockImplementation((tabla: string) => (tabla === 'routines' ? rutinas : dias));
+
+    const r = await getUserRoutine('user-1');
+
+    expect(rutinas.is).toHaveBeenCalledWith('vigente_hasta', null);
+    expect(r).toMatchObject({ id: 'r-2', vigenteDesde: '2026-10-01T10:00:00Z', vigenteHasta: null });
+  });
+
+  it('sin la migración (columna inexistente): cae a la más nueva, con console.warn (Mi Rutina no se rompe)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const sinColumna = makeChain({ data: null, error: { code: '42703', message: 'column routines.vigente_hasta does not exist' } });
+    const vieja = makeChain({ data: { ...filaRutina, vigente_desde: undefined, vigente_hasta: undefined }, error: null });
+    const dias = makeChain({ data: [], error: null });
+    let pedidosRutina = 0;
+    mockedFrom.mockImplementation((tabla: string) => {
+      if (tabla !== 'routines') return dias;
+      pedidosRutina += 1;
+      return pedidosRutina === 1 ? sinColumna : vieja;
+    });
+
+    const r = await getUserRoutine('user-1');
+
+    expect(r?.id).toBe('r-2');
+    expect(vieja.is).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('supabase_migration_historial_rutinas_f1.sql'), expect.any(String));
+    warn.mockRestore();
+  });
+});
+
+describe('getMisRutinasAnteriores ("Mis rutinas": historial de rutinas del socio)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('solo las anteriores, sin archivadas, la más nueva primero, con sus entrenamientos (sin los ocultos)', async () => {
+    const rutinas = makeChain({
+      data: [
+        { id: 'r-1', title: 'Adaptación', coach_name: null, created_at: '2026-06-01', vigente_desde: '2026-06-01T10:00:00Z', vigente_hasta: '2026-08-01T10:00:00Z' },
+        { id: 'r-3', title: 'Actual', coach_name: null, created_at: '2026-10-01', vigente_desde: '2026-10-01T10:00:00Z', vigente_hasta: null },
+        { id: 'r-2', title: 'Fuerza', coach_name: null, created_at: '2026-08-01', vigente_desde: '2026-08-01T10:00:00Z', vigente_hasta: '2026-10-01T10:00:00Z' },
+      ],
+      error: null,
+    });
+    const sesiones = makeChain({
+      data: [
+        { routine_id: 'r-2', sesion_id: 's-1' },
+        { routine_id: 'r-2', sesion_id: 's-1' },
+        { routine_id: 'r-2', sesion_id: 's-2' },
+        { routine_id: null, sesion_id: 's-vieja' },
+      ],
+      error: null,
+    });
+    mockedFrom.mockImplementation((tabla: string) => (tabla === 'routines' ? rutinas : sesiones));
+
+    const lista = await getMisRutinasAnteriores('user-1');
+
+    expect(rutinas.eq).toHaveBeenCalledWith('user_id', 'user-1');
+    expect(rutinas.is).toHaveBeenCalledWith('archivada_en', null);
+    expect(sesiones.is).toHaveBeenCalledWith('oculta_en', null);
+    expect(lista.map((r) => r.id)).toEqual(['r-2', 'r-1']);
+    expect(lista[0]).toMatchObject({ title: 'Fuerza', vigenteHasta: '2026-10-01T10:00:00Z', entrenamientos: 2 });
+    expect(lista[1].entrenamientos).toBe(0);
+  });
+
+  it('si falla el conteo de entrenamientos, la lista sale igual (con 0)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const rutinas = makeChain({
+      data: [{ id: 'r-1', title: 'Vieja', coach_name: null, created_at: '2026-06-01', vigente_desde: '2026-06-01T10:00:00Z', vigente_hasta: '2026-08-01T10:00:00Z' }],
+      error: null,
+    });
+    const sesiones = makeChain({ data: null, error: { message: 'timeout' } });
+    mockedFrom.mockImplementation((tabla: string) => (tabla === 'routines' ? rutinas : sesiones));
+
+    await expect(getMisRutinasAnteriores('user-1')).resolves.toEqual([
+      expect.objectContaining({ id: 'r-1', entrenamientos: 0 }),
+    ]);
+    warn.mockRestore();
+  });
+
+  it('sin la migración: lista vacía con console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedFrom.mockImplementation(() =>
+      makeChain({ data: null, error: { code: '42703', message: 'column routines.archivada_en does not exist' } })
+    );
+    await expect(getMisRutinasAnteriores('user-1')).resolves.toEqual([]);
+    warn.mockRestore();
+  });
+});
+
+describe('getSesionesDeRutina (entrenamientos de UNA rutina, sin los ocultos)', () => {
+  it('lee por routine_id, sin las ocultas, y agrupa como la pestaña Historial', async () => {
+    const chain = makeChain({ data: [fila({ id: 'a', sesion_id: 's-1' })], error: null });
+    mockedFrom.mockImplementation(() => chain);
+
+    const dias = await getSesionesDeRutina('r-2');
+
+    expect(chain.eq).toHaveBeenCalledWith('routine_id', 'r-2');
+    expect(chain.is).toHaveBeenCalledWith('oculta_en', null);
+    expect(dias[0].sesiones[0].sesionId).toBe('s-1');
+  });
+});
+
+describe('getRoutineHistory: sin las sesiones ocultas ("Eliminar" ya no borra)', () => {
+  it('filtra oculta_en null', async () => {
+    const chain = makeChain({ data: [], error: null });
+    mockedFrom.mockImplementation(() => chain);
+    await getRoutineHistory('user-1');
+    expect(chain.is).toHaveBeenCalledWith('oculta_en', null);
+  });
+
+  it('sin la columna oculta_en (migración sin correr): lee como antes, con console.warn', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const sinColumna = makeChain({ data: null, error: { code: '42703', message: 'column routine_history.oculta_en does not exist' } });
+    const comoAntes = makeChain({ data: [fila({})], error: null });
+    mockedFrom.mockImplementationOnce(() => sinColumna).mockImplementationOnce(() => comoAntes);
+
+    const dias = await getRoutineHistory('user-1');
+
+    expect(dias).toHaveLength(1);
+    expect(comoAntes.is).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('finalizarEntrenamiento con la rutina en la que se hizo (p_routine_id)', () => {
+  const items = [{ nombre: 'Sentadilla', grupo: 'Piernas', series: 4, repeticiones: '10', peso: '60kg' }];
+  beforeEach(() => jest.clearAllMocks());
+
+  it('manda p_routine_id', async () => {
+    mockedRpc.mockResolvedValue({ data: { registrado: true, sesion_id: 's-1' }, error: null });
+    await finalizarEntrenamiento('Día 1', 5, items, 'r-2');
+    expect(mockedRpc).toHaveBeenCalledWith('finalizar_entrenamiento', {
+      p_titulo_dia: 'Día 1',
+      p_total_ejercicios: 5,
+      p_items: items,
+      p_routine_id: 'r-2',
+    });
+  });
+
+  it('servidor sin la versión nueva (función no encontrada): reintenta sin p_routine_id y registra igual', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockedRpc
+      .mockResolvedValueOnce({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } })
+      .mockResolvedValueOnce({ data: { registrado: true, sesion_id: 's-1' }, error: null });
+
+    await expect(finalizarEntrenamiento('Día 1', 5, items, 'r-2')).resolves.toEqual({ estado: 'registrado' });
+    expect(mockedRpc).toHaveBeenCalledTimes(2);
+    expect(mockedRpc.mock.calls[1][1]).not.toHaveProperty('p_routine_id');
+    warn.mockRestore();
+  });
+
+  it('un error real (rutina ajena) no se reintenta: se propaga', async () => {
+    mockedRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'Esa rutina no es tuya.' } });
+    await expect(finalizarEntrenamiento('Día 1', 5, items, 'r-ajena')).rejects.toThrow('Esa rutina no es tuya.');
+    expect(mockedRpc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('esRutinaCerrada (GFR01: la rutina pasó al historial)', () => {
+  it('reconoce GFR01 y nada más', () => {
+    expect(esRutinaCerrada(errorConCodigo({ code: 'GFR01', message: 'solo lectura' }))).toBe(true);
+    expect(esRutinaCerrada(errorConCodigo({ code: '23503', message: 'fk' }))).toBe(false);
+    expect(esRutinaCerrada(null)).toBe(false);
+    expect(esRutinaCerrada(new Error('x'))).toBe(false);
+  });
+
+  it('marcar en una rutina del historial lanza con GFR01 (la pantalla recarga)', async () => {
+    mockedFrom.mockImplementation(() =>
+      makeChain({ error: { code: 'GFR01', message: 'Esa rutina ya no es la vigente: es de solo lectura.' } })
+    );
+    const err = await markExerciseCompleted('user-1', 're-viejo', '2026-10-06').catch((e) => e);
+    expect(esRutinaCerrada(err)).toBe(true);
   });
 });

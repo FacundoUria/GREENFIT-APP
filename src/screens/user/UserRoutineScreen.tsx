@@ -33,11 +33,12 @@ import {
   SesionHistorial,
 } from '../../lib/routinesApi';
 import { formatDateOnly } from '../../lib/classesApi';
-import { esViolacionDeFk } from '../../lib/supabaseErrors';
+import { esRutinaCerrada, esViolacionDeFk } from '../../lib/supabaseErrors';
 import { Routine, RoutineExercise } from '../../types';
 import Avatar from '../../components/Avatar';
 import VideoModal from '../../components/VideoModal';
 import RoutineCompleteModal from '../../components/RoutineCompleteModal';
+import MisRutinasView from '../../components/MisRutinasView';
 
 const CONTACTO_WHATSAPP = 'https://wa.me/5492617139662';
 
@@ -281,8 +282,9 @@ function ExerciseRow({
 
 // Tarjeta del historial = UNA finalización (una sesion_id). Si ese día hubo
 // dos (mañana y tarde), son dos tarjetas separadas, cada una con su hora.
-// Nada se edita: la única acción es "Eliminar" la sesión completa (con
-// confirmación). Ni "repetir" ni favoritos.
+// Nada se edita: la única acción es "Quitar de mi historial" la sesión completa
+// (con confirmación). No se borra: el servidor la oculta para el socio y el
+// gimnasio la sigue viendo. Ni "repetir" ni favoritos.
 function SesionCard({
   fecha,
   sesion,
@@ -334,10 +336,10 @@ function SesionCard({
         onPress={onEliminar}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={`Eliminar entrenamiento del ${formatFechaHistorial(fecha)} a las ${hora}`}
+        accessibilityLabel={`Quitar de mi historial el entrenamiento del ${formatFechaHistorial(fecha)} a las ${hora}`}
       >
-        <Ionicons name="trash-outline" size={14} color={colors.danger} />
-        <Text style={styles.eliminarButtonText}>Eliminar</Text>
+        <Ionicons name="eye-off-outline" size={14} color={colors.danger} />
+        <Text style={styles.eliminarButtonText}>Quitar de mi historial</Text>
       </TouchableOpacity>
     </View>
   );
@@ -348,7 +350,7 @@ export interface SesionAEliminar {
   sesion: SesionHistorial;
 }
 
-// Confirmación antes de borrar -- el borrado no se puede deshacer. Modal
+// Confirmación antes de quitar una sesión del historial del socio. Modal
 // propio (no Alert.alert, que en react-native-web es un no-op).
 function EliminarSesionModal({
   objetivo,
@@ -367,18 +369,14 @@ function EliminarSesionModal({
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <View style={styles.modalIcon}>
-            <Ionicons name="trash-outline" size={24} color={colors.danger} />
+            <Ionicons name="eye-off-outline" size={24} color={colors.danger} />
           </View>
-          <Text style={styles.modalTitulo}>¿Eliminar este entrenamiento?</Text>
+          <Text style={styles.modalTitulo}>¿Quitar este entrenamiento de tu historial?</Text>
           {!!objetivo && !!s && (
             <Text style={styles.modalTexto}>
               {`${formatFechaHistorial(objetivo.fecha)} · ${formatHoraArgentina(s.creadoEn)} hs\n${
                 s.tituloDia || 'Entrenamiento'
-              }\n\n${
-                s.ejercicios.length === 1
-                  ? 'Se borra el ejercicio de esta sesión.'
-                  : `Se borran los ${s.ejercicios.length} ejercicios de esta sesión.`
-              } No se puede deshacer.`}
+              }\n\nVas a dejar de verlo en tu historial. Queda guardado para tu entrenador.`}
             </Text>
           )}
           <View style={styles.modalBotones}>
@@ -389,12 +387,12 @@ function EliminarSesionModal({
               style={[styles.modalEliminar, eliminando && styles.finishButtonBusy]}
               onPress={onConfirmar}
               disabled={eliminando}
-              accessibilityLabel="Confirmar eliminar entrenamiento"
+              accessibilityLabel="Confirmar quitar el entrenamiento de mi historial"
             >
               {eliminando ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.modalEliminarText}>Eliminar</Text>
+                <Text style={styles.modalEliminarText}>Quitar</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -454,7 +452,7 @@ function HistorialView({
   );
 }
 
-type Vista = 'hoy' | 'historial';
+type Vista = 'hoy' | 'historial' | 'rutinas';
 
 // La rutina asignada al socio logueado (la más reciente), organizada por
 // días con checklist de ejercicios completados hoy, más la pestaña
@@ -476,6 +474,8 @@ export default function UserRoutineScreen() {
   // `pesoDe` más abajo), sin que eso cuente como "guardado".
   const [pesos, setPesos] = useState<Map<string, string>>(new Map());
   const [vista, setVista] = useState<Vista>('hoy');
+  // Tirar para refrescar en "Mis rutinas" sube este número (la vista recarga su lista).
+  const [recargaMisRutinas, setRecargaMisRutinas] = useState(0);
   // `finalizando` = esperando la respuesta del servidor (spinner).
   // `bloqueoFinalizar` = botón deshabilitado contra el doble toque: arranca al
   // tocar y dura BLOQUEO_FINALIZAR_MS o hasta que responde el servidor, lo
@@ -721,7 +721,12 @@ export default function UserRoutineScreen() {
         else next.delete(routineExerciseId);
         return next;
       });
-      if (esViolacionDeFk(err)) {
+      if (esRutinaCerrada(err)) {
+        // GFR01: esa rutina ya no es la vigente -- el entrenador asignó otra mientras la
+        // pantalla mostraba la anterior (que pasó al historial, de solo lectura).
+        refrescar(true);
+        showAlert('Tenés una rutina nueva', 'Tu entrenador te asignó una rutina nueva. Ya la tenés en pantalla.');
+      } else if (esViolacionDeFk(err)) {
         // El ejercicio ya no existe: el entrenador re-guardó la rutina. Se
         // recarga sola y se avisa en criollo, no con el texto de Postgres.
         refrescar(true);
@@ -788,7 +793,7 @@ export default function UserRoutineScreen() {
       await loadHistorial();
     } catch (err) {
       setSesionAEliminar(null);
-      setAvisoHistorial(`No se pudo eliminar: ${err instanceof Error ? err.message : 'intentá de nuevo.'}`);
+      setAvisoHistorial(`No se pudo quitar: ${err instanceof Error ? err.message : 'intentá de nuevo.'}`);
     } finally {
       setEliminando(false);
     }
@@ -817,7 +822,9 @@ export default function UserRoutineScreen() {
           series: e.sets ?? null,
           repeticiones: e.reps || null,
           peso: pesoDe(e).trim() || null,
-        }))
+        })),
+        // En qué rutina se hizo (historial de rutinas): la que muestra la pantalla.
+        routine?.id ?? null
       );
       if (resultado.estado === 'reciente') {
         setAvisoFinal('Ya registraste este entrenamiento recién.');
@@ -855,8 +862,17 @@ export default function UserRoutineScreen() {
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
-          refreshing={vista === 'hoy' ? isLoading : historialCargando}
-          onRefresh={vista === 'hoy' ? () => refrescar(true) : loadHistorial}
+          refreshing={vista === 'hoy' ? isLoading : vista === 'historial' ? historialCargando : false}
+          onRefresh={
+            vista === 'hoy'
+              ? () => refrescar(true)
+              : vista === 'historial'
+                ? loadHistorial
+                : () => {
+                    refrescar(true);
+                    setRecargaMisRutinas((n) => n + 1);
+                  }
+          }
           tintColor={colors.primary}
         />
       }
@@ -876,12 +892,13 @@ export default function UserRoutineScreen() {
         </Text>
       </View>
 
-      {/* Switcher de dos pestañas */}
+      {/* Switcher de tres pestañas */}
       <View style={styles.vistaTabs} accessibilityRole="tablist">
         {(
           [
             ['hoy', 'Rutina de hoy', 'flash'],
             ['historial', 'Historial', 'time'],
+            ['rutinas', 'Mis rutinas', 'albums'],
           ] as const
         ).map(([clave, etiqueta, icono]) => {
           const activa = vista === clave;
@@ -894,13 +911,22 @@ export default function UserRoutineScreen() {
               accessibilityState={{ selected: activa }}
             >
               <Ionicons name={icono} size={17} color={activa ? colors.onPrimary : colors.textSecondary} />
-              <Text style={[styles.vistaTabText, activa && styles.vistaTabTextActiva]}>{etiqueta}</Text>
+              <Text style={[styles.vistaTabText, activa && styles.vistaTabTextActiva]} numberOfLines={1}>
+                {etiqueta}
+              </Text>
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {vista === 'historial' ? (
+      {vista === 'rutinas' && user ? (
+        <MisRutinasView
+          userId={user.id}
+          rutinaActual={routine}
+          recarga={recargaMisRutinas}
+          onVerRutinaActual={() => setVista('hoy')}
+        />
+      ) : vista === 'historial' ? (
         <HistorialView
           dias={historial}
           cargando={historialCargando}
@@ -1088,17 +1114,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
+  // Tres pestañas: ícono arriba y texto abajo, para que entren en un teléfono angosto.
   vistaTab: {
     flex: 1,
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 12,
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
     borderRadius: 14,
   },
   vistaTabActiva: { backgroundColor: colors.primary, ...glowVerde(0.35, 16) },
-  vistaTabText: { color: colors.textSecondary, fontSize: 12.5, fontWeight: '800', letterSpacing: 0.3 },
+  vistaTabText: { color: colors.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
   vistaTabTextActiva: { color: colors.onPrimary },
 
   seccionLabel: { color: colors.primary, fontSize: 10.5, fontWeight: '800', letterSpacing: 1.5 },

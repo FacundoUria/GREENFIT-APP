@@ -187,6 +187,29 @@ describe('Mi Rutina -- la rutina se re-guarda con la pantalla abierta', () => {
     await waitFor(() => expect(m.markExerciseCompleted).toHaveBeenLastCalledWith('user-1', 're-1-nuevo', '2026-10-06'));
   });
 
+  // Historial de rutinas (F1): Seba asignó una rutina nueva con la pantalla abierta. La
+  // anterior sigue existiendo (ya no se borra), así que no hay 23503: la base contesta
+  // GFR01 (rutina del historial, solo lectura) y la pantalla recarga igual.
+  it('error GFR01 al marcar (le asignaron una rutina nueva): recarga sola, avisa y el tilde vuelve atrás', async () => {
+    m.markExerciseCompleted.mockRejectedValueOnce(
+      errorConCodigo({ code: 'GFR01', message: 'Esa rutina ya no es la vigente: es de solo lectura.' })
+    );
+    const { getByLabelText } = await renderPantalla();
+    m.getUserRoutine.mockResolvedValue(NUEVA as never);
+
+    fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
+
+    await waitFor(() =>
+      expect(mockShowAlert).toHaveBeenCalledWith(
+        'Tenés una rutina nueva',
+        'Tu entrenador te asignó una rutina nueva. Ya la tenés en pantalla.'
+      )
+    );
+    await waitFor(() => expect(m.getUserRoutine).toHaveBeenCalledTimes(2));
+    fireEvent.press(getByLabelText('Marcar Sentadilla como completado'));
+    await waitFor(() => expect(m.markExerciseCompleted).toHaveBeenLastCalledWith('user-1', 're-1-nuevo', '2026-10-06'));
+  });
+
   it('cualquier otro error al marcar se sigue mostrando (nunca en silencio) y NO recarga', async () => {
     m.markExerciseCompleted.mockRejectedValueOnce(errorConCodigo({ code: '42501', message: 'new row violates row-level security' }));
     const { getByLabelText } = await renderPantalla();

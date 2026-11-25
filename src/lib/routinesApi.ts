@@ -47,19 +47,57 @@ function mapExercise(row: {
   };
 }
 
-// La rutina vigente de un socio (la más reciente asignada), con sus días y
-// ejercicios en orden. null si todavía no tiene ninguna asignada.
+interface FilaRutina {
+  id: string;
+  user_id: string | null;
+  title: string;
+  coach_name: string | null;
+  notes: string | null;
+  created_at: string;
+  vigente_desde?: string | null;
+  vigente_hasta?: string | null;
+}
+
+const COLUMNAS_RUTINA = 'id, user_id, title, coach_name, notes, created_at, vigente_desde, vigente_hasta';
+
+// La rutina VIGENTE de un socio (vigente_hasta null: la base garantiza una sola), con sus
+// días y ejercicios en orden. null si todavía no tiene ninguna asignada.
+// Sin la migración del historial de rutinas (columnas nuevas inexistentes) cae a lo de
+// antes -- la más nueva por created_at, que es la misma -- con console.warn.
 export async function getUserRoutine(userId: string): Promise<Routine | null> {
-  const { data: routine, error: routineError } = await supabase
+  let { data: routine, error: routineError } = await supabase
     .from('routines')
-    .select('id, user_id, title, coach_name, notes, created_at')
+    .select(COLUMNAS_RUTINA)
     .eq('user_id', userId)
+    .is('vigente_hasta', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (routineError && isMissingRelationError(routineError)) {
+    avisarLecturaSinMigracion('Rutina vigente', 'supabase_migration_historial_rutinas_f1.sql', routineError);
+    ({ data: routine, error: routineError } = await supabase
+      .from('routines')
+      .select('id, user_id, title, coach_name, notes, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle());
+  }
   if (routineError) throw new Error(routineError.message);
   if (!routine) return null;
+  return cargarRutina(routine as FilaRutina);
+}
 
+// Una rutina del socio que llama (la vigente o una de su historial), en solo lectura.
+// La RLS solo deja leer las propias.
+export async function getRutina(routineId: string): Promise<Routine | null> {
+  const { data, error } = await supabase.from('routines').select(COLUMNAS_RUTINA).eq('id', routineId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return cargarRutina(data as FilaRutina);
+}
+
+async function cargarRutina(routine: FilaRutina): Promise<Routine> {
   const { data: days, error: daysError } = await supabase
     .from('routine_days')
     .select(
@@ -98,8 +136,90 @@ export async function getUserRoutine(userId: string): Promise<Routine | null> {
     coachName: routine.coach_name,
     notes: routine.notes,
     createdAt: routine.created_at,
+    vigenteDesde: routine.vigente_desde ?? null,
+    vigenteHasta: routine.vigente_hasta ?? null,
     days: mappedDays,
   };
+}
+
+// -- "Mis rutinas": el historial de rutinas del socio (solo lectura) --
+
+export interface RutinaAnterior {
+  id: string;
+  title: string;
+  coachName: string | null;
+  vigenteDesde: string;
+  vigenteHasta: string;
+  entrenamientos: number; // "Finalizar" registrados en esa rutina (sin los que ocultó)
+}
+
+// Las rutinas anteriores del socio, la más nueva primero. Las archivadas (copias vacías
+// que dejó el panel viejo) no aparecen. Sin la migración, lista vacía con console.warn.
+export async function getMisRutinasAnteriores(userId: string): Promise<RutinaAnterior[]> {
+  const { data, error } = await supabase
+    .from('routines')
+    .select('id, title, coach_name, created_at, vigente_desde, vigente_hasta')
+    .eq('user_id', userId)
+    .is('archivada_en', null)
+    .order('vigente_desde', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      avisarLecturaSinMigracion('Historial de rutinas', 'supabase_migration_historial_rutinas_f1.sql', error);
+      return [];
+    }
+    throw new Error(error.message);
+  }
+  const anteriores = ((data ?? []) as FilaRutina[]).filter((r) => !!r.vigente_hasta);
+  if (anteriores.length === 0) return [];
+
+  // Cuántos entrenamientos registró en cada una. Si falla, la lista se muestra igual.
+  const conteo = new Map<string, Set<string>>();
+  const { data: sesiones, error: sesionesError } = await supabase
+    .from('routine_history')
+    .select('routine_id, sesion_id')
+    .eq('user_id', userId)
+    .is('oculta_en', null);
+  if (sesionesError) {
+    console.warn('[GreenFit] No se pudieron contar los entrenamientos por rutina:', sesionesError.message);
+  } else {
+    for (const s of (sesiones ?? []) as { routine_id: string | null; sesion_id: string }[]) {
+      if (!s.routine_id) continue;
+      if (!conteo.has(s.routine_id)) conteo.set(s.routine_id, new Set());
+      conteo.get(s.routine_id)!.add(s.sesion_id);
+    }
+  }
+
+  return anteriores
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      coachName: r.coach_name,
+      vigenteDesde: r.vigente_desde ?? r.created_at,
+      vigenteHasta: r.vigente_hasta as string,
+      entrenamientos: conteo.get(r.id)?.size ?? 0,
+    }))
+    .sort((a, b) => (a.vigenteDesde < b.vigenteDesde ? 1 : a.vigenteDesde > b.vigenteDesde ? -1 : 0));
+}
+
+// Los entrenamientos que el socio registró en UNA rutina (sin los que ocultó), agrupados
+// igual que la pestaña Historial: con la carga que usó en cada uno.
+export async function getSesionesDeRutina(routineId: string): Promise<DiaHistorial[]> {
+  const { data, error } = await supabase
+    .from('routine_history')
+    .select(
+      'id, sesion_id, fecha, titulo_dia, nombre_ejercicio, grupo_muscular, series, repeticiones, peso, orden, total_ejercicios, completo, created_at'
+    )
+    .eq('routine_id', routineId)
+    .is('oculta_en', null)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      avisarLecturaSinMigracion('Entrenamientos por rutina', 'supabase_migration_historial_rutinas_f1.sql', error);
+      return [];
+    }
+    throw new Error(error.message);
+  }
+  return agruparHistorial((data ?? []) as FilaHistorial[]);
 }
 
 // IDs de routine_exercises marcados como completados HOY por este socio.
@@ -204,7 +324,7 @@ export async function saveExerciseWeight(userId: string, exerciseId: string, wei
 // routine_exercises) para que sobreviva a que el entrenador la edite. Solo
 // se escribe vía RPCs (supabase_migration_routine_history_v2.sql):
 // `finalizar_entrenamiento` (ventana anti doble-toque de 10 s + tope de 20
-// por día, del lado del servidor) y `eliminar_sesion_historial` (borra una
+// por día, del lado del servidor) y `eliminar_sesion_historial` (desde la F1 del historial de rutinas OCULTA una
 // sesión completa, nunca parcial). Cambiar un peso sin finalizar NO pasa por
 // acá (eso sigue siendo saveExerciseWeight, de arriba).
 
@@ -224,16 +344,25 @@ export type ResultadoFinalizar =
   // Ya registró 20 entrenamientos hoy.
   | { estado: 'tope_diario' };
 
+// `routineId`: la rutina que el socio está viendo (historial de rutinas: cada
+// entrenamiento queda vinculado a la rutina en la que se hizo). El servidor valida que
+// sea suya. Si el servidor todavía no tiene la versión con p_routine_id (migración sin
+// correr), se reintenta sin ella, con console.warn: finalizar nunca se rompe por esto.
 export async function finalizarEntrenamiento(
   tituloDia: string | null,
   totalEjercicios: number,
-  items: ItemEntrenamiento[]
+  items: ItemEntrenamiento[],
+  routineId: string | null = null
 ): Promise<ResultadoFinalizar> {
-  const { data, error } = await supabase.rpc('finalizar_entrenamiento', {
-    p_titulo_dia: tituloDia,
-    p_total_ejercicios: totalEjercicios,
-    p_items: items,
-  });
+  const base = { p_titulo_dia: tituloDia, p_total_ejercicios: totalEjercicios, p_items: items };
+  let { data, error } = await supabase.rpc(
+    'finalizar_entrenamiento',
+    routineId ? { ...base, p_routine_id: routineId } : base
+  );
+  if (error && routineId && isMissingRelationError(error)) {
+    avisarLecturaSinMigracion('Finalizar con rutina', 'supabase_migration_historial_rutinas_f1.sql', error);
+    ({ data, error } = await supabase.rpc('finalizar_entrenamiento', base));
+  }
   if (error) {
     if (isMissingRelationError(error)) {
       // Antes esto devolvía 'no_disponible' y la pantalla festejaba igual,
@@ -251,9 +380,10 @@ export async function finalizarEntrenamiento(
   return { estado: 'registrado' };
 }
 
-// Borra una sesión COMPLETA del historial (todas sus filas). El servidor
-// solo borra si es del socio que llama; devuelve cuántas filas borró (0 =
-// no existía o ya se había borrado).
+// "Eliminar" una sesión COMPLETA del historial (todas sus filas). Desde el historial de
+// rutinas (F1) el servidor ya no la borra: la OCULTA (oculta_en) -- el socio deja de
+// verla y el gimnasio la sigue viendo. Solo si es del socio que llama; devuelve cuántas
+// filas ocultó (0 = no existía o ya estaba oculta).
 export async function eliminarSesionHistorial(sesionId: string): Promise<number> {
   const { data, error } = await supabase.rpc('eliminar_sesion_historial', { p_sesion_id: sesionId });
   if (error) {
@@ -351,17 +481,29 @@ export function agruparHistorial(filas: FilaHistorial[]): DiaHistorial[] {
   return dias;
 }
 
-// Solo lectura. Si la tabla todavía no existe, devuelve un historial vacío
-// en vez de romper la pantalla.
+// Solo lectura, sin las sesiones que el socio ocultó ("Eliminar"). Si la tabla todavía no
+// existe, devuelve un historial vacío en vez de romper la pantalla. Sin la columna
+// oculta_en (migración del historial de rutinas sin correr) se lee como antes.
+const COLUMNAS_HISTORIAL =
+  'id, sesion_id, fecha, titulo_dia, nombre_ejercicio, grupo_muscular, series, repeticiones, peso, orden, total_ejercicios, completo, created_at';
+
 export async function getRoutineHistory(userId: string): Promise<DiaHistorial[]> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('routine_history')
-    .select(
-      'id, sesion_id, fecha, titulo_dia, nombre_ejercicio, grupo_muscular, series, repeticiones, peso, orden, total_ejercicios, completo, created_at'
-    )
+    .select(COLUMNAS_HISTORIAL)
     .eq('user_id', userId)
+    .is('oculta_en', null)
     .order('created_at', { ascending: false })
     .limit(1000);
+  if (error && isMissingRelationError(error) && (error.message ?? '').includes('oculta_en')) {
+    avisarLecturaSinMigracion('Sesiones ocultas', 'supabase_migration_historial_rutinas_f1.sql', error);
+    ({ data, error } = await supabase
+      .from('routine_history')
+      .select(COLUMNAS_HISTORIAL)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1000));
+  }
   if (error) {
     if (isMissingRelationError(error)) {
       avisarLecturaSinMigracion('Historial de entrenamientos', 'supabase_migration_routine_history.sql', error);

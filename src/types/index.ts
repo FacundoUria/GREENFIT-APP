@@ -160,6 +160,10 @@ export interface Routine {
   coachName: string | null;
   notes: string | null;
   createdAt: string;
+  // Historial de rutinas: desde cuándo es (o fue) la vigente, y hasta cuándo (null = la
+  // vigente). Las rutinas nunca se borran: al asignar otra, la actual pasa al historial.
+  vigenteDesde?: string | null;
+  vigenteHasta?: string | null;
   days: RoutineDay[];
 }
 

@@ -247,6 +247,8 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
       p_titulo_dia: 'Día 1',
       p_total_ejercicios: 2,
       p_items: [{ nombre: 'Press de banca', grupo: 'Pecho', series: 4, repeticiones: '10-12', peso: '25kg' }],
+      // Historial de rutinas: el entrenamiento queda con la rutina en la que se hizo.
+      p_routine_id: ROUTINE.id,
     });
     await page.getByText('Genial', { exact: true }).click();
 
@@ -298,7 +300,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     ).toBeVisible();
   });
 
-  test('Historial: "Eliminar" pide confirmación y borra la sesión completa por el RPC', async ({ page }) => {
+  test('Historial: "Quitar de mi historial" pide confirmación y la saca por el RPC (el servidor la oculta)', async ({ page }) => {
     const fila = (overrides: Record<string, unknown>) => ({
       user_id: SOCIO_DEMO.id,
       fecha: HOY_STR,
@@ -322,14 +324,15 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
       ] as any[],
     };
     const llamadas: any[] = [];
-    // Emula eliminar_sesion_historial(): borra TODAS las filas de esa sesión del socio.
+    // Emula eliminar_sesion_historial() del historial de rutinas F1: NO borra, marca
+    // oculta_en en TODAS las filas de esa sesión (la PWA lee solo las no ocultas).
     const rpc = {
       eliminar_sesion_historial: (request: any) => {
         const { p_sesion_id } = request.postDataJSON();
         llamadas.push(p_sesion_id);
-        const antes = tablas.routine_history.length;
-        tablas.routine_history = tablas.routine_history.filter((f) => f.sesion_id !== p_sesion_id);
-        return antes - tablas.routine_history.length;
+        const filas = tablas.routine_history.filter((f) => f.sesion_id === p_sesion_id && !f.oculta_en);
+        for (const f of filas) f.oculta_en = new Date().toISOString();
+        return filas.length;
       },
     };
     await loginComoSocio(page, { tables: tablas, rpc });
@@ -338,20 +341,23 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
 
     // La de las 09:05 (12:05 UTC) quedó duplicada/errónea: se elimina.
-    await page.getByLabel(/Eliminar entrenamiento del .* a las 09:05/).click();
-    await expect(page.getByText('¿Eliminar este entrenamiento?', { exact: true })).toBeVisible();
+    await page.getByLabel(/Quitar de mi historial el entrenamiento del .* a las 09:05/).click();
+    await expect(page.getByText('¿Quitar este entrenamiento de tu historial?', { exact: true })).toBeVisible();
 
     // Cancelar no borra nada.
     await page.getByText('Cancelar', { exact: true }).click();
-    await expect(page.getByText('¿Eliminar este entrenamiento?', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('¿Quitar este entrenamiento de tu historial?', { exact: true })).toHaveCount(0);
     expect(llamadas).toHaveLength(0);
 
-    await page.getByLabel(/Eliminar entrenamiento del .* a las 09:05/).click();
-    await page.getByLabel('Confirmar eliminar entrenamiento').click();
+    await page.getByLabel(/Quitar de mi historial el entrenamiento del .* a las 09:05/).click();
+    await page.getByLabel('Confirmar quitar el entrenamiento de mi historial').click();
 
     await expect(page.getByText('1 registrado', { exact: true })).toBeVisible();
     expect(llamadas).toEqual(['s-dup']);
     await expect(page.getByText('22kg', { exact: true })).toHaveCount(0);
+    // No se borró: las filas siguen, ocultas (el gimnasio las sigue viendo).
+    expect(tablas.routine_history.filter((f) => f.sesion_id === 's-dup').every((f) => !!f.oculta_en)).toBe(true);
+    expect(tablas.routine_history).toHaveLength(3);
     // La otra sesión sigue entera.
     await expect(page.getByText('24kg', { exact: true })).toBeVisible();
     await expect(page.getByText('Fondos en banco')).toBeVisible();
@@ -633,5 +639,139 @@ test.describe('PWA -- Mi Rutina: cambio de día con la app abierta', () => {
     await expect
       .poll(() => tablas.routine_completions.find((c: any) => c.routine_exercise_id === 'e2e-re-2')?.completed_date)
       .toBe(hoy);
+  });
+});
+
+// -- Historial de rutinas (Fase 1) ------------------------------------------------------
+
+const RUTINA_ANTERIOR = {
+  id: 'e2e-routine-0',
+  user_id: SOCIO_DEMO.id,
+  title: 'Rutina Fuerza',
+  coach_name: 'Seba',
+  notes: null,
+  created_at: '2026-08-01T13:00:00.000Z',
+  vigente_desde: '2026-08-01T13:00:00.000Z',
+  vigente_hasta: '2026-10-01T13:00:00.000Z',
+  archivada_en: null,
+};
+
+const DIA_ANTERIOR = {
+  id: 'e2e-day-0',
+  routine_id: RUTINA_ANTERIOR.id,
+  title: 'Tren inferior',
+  order_index: 0,
+  routine_exercises: [
+    {
+      id: 'e2e-re-0',
+      sets: 5,
+      reps: '5',
+      rest_seconds: 120,
+      weight_suggestion: '80kg',
+      notes: null,
+      order_index: 0,
+      exercise: { id: 'ex-9', name: 'Sentadilla', muscle_group: 'Piernas', description: null, video_url: null },
+    },
+  ],
+};
+
+test.describe('PWA -- Mi Rutina: Mis rutinas (historial de rutinas)', () => {
+  test('ve su rutina actual y las anteriores; una anterior se abre en solo lectura con sus entrenamientos (sin los ocultos)', async ({
+    page,
+  }) => {
+    const tablas = {
+      ...tablasBase(),
+      routines: [
+        { ...ROUTINE, vigente_desde: '2026-10-01T13:00:00.000Z', vigente_hasta: null, archivada_en: null },
+        RUTINA_ANTERIOR,
+      ],
+      routine_days: [DAY_1, DIA_ANTERIOR],
+      routine_completions: [],
+      user_exercise_weights: [],
+      routine_history: [
+        {
+          id: 'h-1', user_id: SOCIO_DEMO.id, routine_id: RUTINA_ANTERIOR.id, sesion_id: 's-1', fecha: '2026-09-10',
+          titulo_dia: 'Tren inferior', nombre_ejercicio: 'Sentadilla', grupo_muscular: 'Piernas', series: 5,
+          repeticiones: '5', peso: '82kg', orden: 0, total_ejercicios: 1, completo: true,
+          created_at: '2026-09-10T22:00:00.000Z', oculta_en: null,
+        },
+        {
+          id: 'h-2', user_id: SOCIO_DEMO.id, routine_id: RUTINA_ANTERIOR.id, sesion_id: 's-oculta', fecha: '2026-09-12',
+          titulo_dia: 'Tren inferior', nombre_ejercicio: 'Sentadilla', grupo_muscular: 'Piernas', series: 5,
+          repeticiones: '5', peso: '99kg', orden: 0, total_ejercicios: 1, completo: true,
+          created_at: '2026-09-12T22:00:00.000Z', oculta_en: '2026-09-13T10:00:00.000Z',
+        },
+      ],
+    };
+    await loginComoSocio(page, { tables: tablas });
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByText('Press de banca')).toBeVisible();
+
+    await page.getByText('Mis rutinas', { exact: true }).click();
+    await expect(page.getByText('RUTINA ACTUAL')).toBeVisible();
+    await expect(page.getByText('Rutina Full Body')).toBeVisible();
+    await expect(page.getByText('HISTORIAL DE RUTINAS')).toBeVisible();
+    await expect(page.getByText('Del 01/08/2026 al 01/10/2026')).toBeVisible();
+    // Solo cuenta el entrenamiento que no ocultó.
+    await expect(page.getByText('1 entrenamiento', { exact: true })).toBeVisible();
+
+    await page.getByLabel('Ver rutina Rutina Fuerza').click();
+    await expect(page.getByText('Solo lectura')).toBeVisible();
+    await expect(page.getByText('5 × 5 · Descanso 120 s · Sugerida 80kg')).toBeVisible();
+    await expect(page.getByText('5 × 5 · 82kg')).toBeVisible();
+    await expect(page.getByText(/99kg/)).toHaveCount(0);
+    // Nada para tildar ni escribir ni finalizar.
+    await expect(page.locator('input')).toHaveCount(0);
+    await expect(page.getByText('Finalizar Entrenamiento', { exact: true })).toHaveCount(0);
+
+    await page.getByLabel('Volver a Mis rutinas').click();
+    await expect(page.getByText('HISTORIAL DE RUTINAS')).toBeVisible();
+  });
+
+  test('le asignaron una rutina nueva con la pantalla abierta: tildar la vieja da GFR01, avisa y carga la nueva', async ({
+    page,
+  }) => {
+    const vigente = { ...ROUTINE, vigente_desde: '2026-08-01T00:00:00.000Z', vigente_hasta: null as string | null, archivada_en: null };
+    const tablas = {
+      ...tablasBase(),
+      routines: [vigente] as any[],
+      routine_days: [DAY_1] as any[],
+      routine_completions: [] as any[],
+      user_exercise_weights: [] as any[],
+    };
+    await loginComoSocio(page, { tables: tablas });
+    // La base rechaza tildes en una rutina que ya no es la vigente (trigger de la F1).
+    await page.route(
+      (url) => url.pathname === '/rest/v1/routine_completions',
+      async (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        const fila = route.request().postDataJSON();
+        const dia = tablas.routine_days.find((d: any) => d.routine_exercises.some((re: any) => re.id === fila.routine_exercise_id));
+        const rutina = tablas.routines.find((r: any) => r.id === dia?.routine_id);
+        if (!rutina?.vigente_hasta) return route.fallback();
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'GFR01', message: 'Esa rutina ya no es la vigente: es de solo lectura.', details: null, hint: null }),
+        });
+      }
+    );
+    await irATab(page, 'Mi Rutina');
+    await expect(page.getByText('Press de banca')).toBeVisible();
+
+    // Seba le asigna otra desde el panel: la actual pasa al historial (no se borra).
+    vigente.vigente_hasta = new Date().toISOString();
+    tablas.routines.push({ ...RUTINA_ANTERIOR, id: 'e2e-routine-nueva', title: 'Rutina Nueva', vigente_desde: vigente.vigente_hasta, vigente_hasta: null });
+    tablas.routine_days.push({ ...DIA_ANTERIOR, id: 'e2e-day-nueva', routine_id: 'e2e-routine-nueva' });
+
+    const dialogo = page.waitForEvent('dialog');
+    await page.getByLabel('Marcar Press de banca como completado').click();
+    const d = await dialogo;
+    expect(d.message()).toBe('Tenés una rutina nueva\n\nTu entrenador te asignó una rutina nueva. Ya la tenés en pantalla.');
+    await d.accept();
+
+    await expect(page.getByText('Sentadilla')).toBeVisible();
+    await expect(page.getByText('Press de banca')).toHaveCount(0);
+    expect(tablas.routine_completions).toHaveLength(0);
   });
 });

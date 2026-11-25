@@ -22,3 +22,12 @@ export const CODIGO_FK_VIOLADA = '23503';
 export function esViolacionDeFk(err: unknown): boolean {
   return (err as ErrorConCodigo | null)?.code === CODIGO_FK_VIOLADA;
 }
+
+// GFR01 (supabase_migration_historial_rutinas_f1.sql) = esa rutina ya no es la vigente:
+// es del historial, de solo lectura. En Mi Rutina significa que el entrenador le asignó
+// una rutina nueva mientras la pantalla seguía mostrando la anterior -> recargar.
+export const CODIGO_RUTINA_CERRADA = 'GFR01';
+
+export function esRutinaCerrada(err: unknown): boolean {
+  return (err as ErrorConCodigo | null)?.code === CODIGO_RUTINA_CERRADA;
+}

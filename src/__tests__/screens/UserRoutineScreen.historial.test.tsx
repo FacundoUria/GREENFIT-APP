@@ -139,10 +139,16 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     fireEvent.press(getByText('Finalizar Entrenamiento'));
 
     await waitFor(() => expect(m.finalizarEntrenamiento).toHaveBeenCalledTimes(1));
-    expect(m.finalizarEntrenamiento).toHaveBeenCalledWith('Día 1 - Tren Inferior', 3, [
-      { nombre: 'Sentadilla', grupo: 'Piernas', series: 4, repeticiones: '10-12', peso: '40kg' },
-      { nombre: 'Estocadas', grupo: 'Piernas', series: 4, repeticiones: '10-12', peso: '20kg' },
-    ]);
+    expect(m.finalizarEntrenamiento).toHaveBeenCalledWith(
+      'Día 1 - Tren Inferior',
+      3,
+      [
+        { nombre: 'Sentadilla', grupo: 'Piernas', series: 4, repeticiones: '10-12', peso: '40kg' },
+        { nombre: 'Estocadas', grupo: 'Piernas', series: 4, repeticiones: '10-12', peso: '20kg' },
+      ],
+      // Historial de rutinas: el entrenamiento queda con la rutina en la que se hizo.
+      'r-1'
+    );
     // Guardado parcial -> igual festeja, con el copy de progreso parcial.
     await waitFor(() => expect(getByText('¡Buen entrenamiento! 💪')).toBeTruthy());
   });
@@ -208,11 +214,12 @@ describe('Mi Rutina -- estilo HUD de "Rutina de hoy" (misma lógica)', () => {
     expect(m.markExerciseCompleted).toHaveBeenCalledWith('user-1', 're-2', expect.any(String));
   });
 
-  it('las dos pestañas se llaman "Rutina de hoy" e "Historial" (no los nombres del mockup)', async () => {
+  it('las pestañas se llaman "Rutina de hoy", "Historial" y "Mis rutinas" (no los nombres del mockup)', async () => {
     const { getByText, queryByText } = await renderPantalla();
 
     expect(getByText('Rutina de hoy')).toBeTruthy();
     expect(getByText('Historial')).toBeTruthy();
+    expect(getByText('Mis rutinas')).toBeTruthy();
     expect(queryByText(/Entrenar Ahora/i)).toBeNull();
     expect(queryByText(/Rutinas Guardadas/i)).toBeNull();
     expect(queryByText(/Favorita/i)).toBeNull();
@@ -319,30 +326,33 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     expect(getAllByText('Completo')).toHaveLength(2);
   });
 
-  it('no hay "Repetir" ni "Guardar como Rutina Favorita"; la única acción es "Eliminar" (una por tarjeta)', async () => {
+  it('no hay "Repetir" ni "Guardar como Rutina Favorita"; la única acción es "Quitar de mi historial" (una por tarjeta)', async () => {
     const { queryByText, getAllByText } = await abrirHistorial();
 
     expect(queryByText(/Repetir/i)).toBeNull();
     expect(queryByText(/Favorita/i)).toBeNull();
-    expect(getAllByText('Eliminar')).toHaveLength(3);
+    expect(getAllByText('Quitar de mi historial')).toHaveLength(3);
   });
 
   const labelEliminarManana = () =>
-    `Eliminar entrenamiento del ${formatFechaHistorial('2026-09-26')} a las ${formatHoraArgentina('2026-09-26T11:15:00Z')}`;
+    `Quitar de mi historial el entrenamiento del ${formatFechaHistorial('2026-09-26')} a las ${formatHoraArgentina('2026-09-26T11:15:00Z')}`;
 
-  it('"Eliminar" pide confirmación; "Cancelar" no borra nada', async () => {
+  it('"Quitar de mi historial" pide confirmación; "Cancelar" no quita nada', async () => {
     const { getByLabelText, getByText, queryByText } = await abrirHistorial();
 
     fireEvent.press(getByLabelText(labelEliminarManana()));
-    expect(getByText('¿Eliminar este entrenamiento?')).toBeTruthy();
-    expect(getByText(/Se borran los 2 ejercicios de esta sesión\. No se puede deshacer\./)).toBeTruthy();
+    expect(getByText('¿Quitar este entrenamiento de tu historial?')).toBeTruthy();
+    // Dice lo que pasa de verdad: no se borra, queda para el entrenador.
+    expect(getByText(/Vas a dejar de verlo en tu historial\. Queda guardado para tu entrenador\./)).toBeTruthy();
+    expect(queryByText(/No se puede deshacer/)).toBeNull();
+    expect(queryByText('Eliminar')).toBeNull();
 
     fireEvent.press(getByText('Cancelar'));
-    expect(queryByText('¿Eliminar este entrenamiento?')).toBeNull();
+    expect(queryByText('¿Quitar este entrenamiento de tu historial?')).toBeNull();
     expect(m.eliminarSesionHistorial).not.toHaveBeenCalled();
   });
 
-  it('confirmar borra la sesión COMPLETA (por sesion_id) y relee el historial del servidor', async () => {
+  it('confirmar saca la sesión COMPLETA (por sesion_id) y relee el historial del servidor', async () => {
     m.eliminarSesionHistorial.mockResolvedValue(2);
     const { getByLabelText, queryByText } = await abrirHistorial();
     // Lo que devuelve el servidor después del borrado: ya sin la sesión de la mañana.
@@ -352,7 +362,7 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     ]);
 
     fireEvent.press(getByLabelText(labelEliminarManana()));
-    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+    fireEvent.press(getByLabelText('Confirmar quitar el entrenamiento de mi historial'));
 
     // Espera la relectura del historial y recién ahí verifica lo que se ve.
     await waitFor(() => expect(m.getRoutineHistory).toHaveBeenCalledTimes(2));
@@ -360,7 +370,7 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     expect(m.eliminarSesionHistorial).toHaveBeenCalledTimes(1);
     expect(m.eliminarSesionHistorial).toHaveBeenCalledWith('manana');
     expect(queryByText('Sentadilla')).toBeNull();
-    expect(queryByText('¿Eliminar este entrenamiento?')).toBeNull();
+    expect(queryByText('¿Quitar este entrenamiento de tu historial?')).toBeNull();
   });
 
   it('si el servidor no borra nada (0 filas), avisa que ya no estaba', async () => {
@@ -368,7 +378,7 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     const { getByLabelText, getByText } = await abrirHistorial();
 
     fireEvent.press(getByLabelText(labelEliminarManana()));
-    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+    fireEvent.press(getByLabelText('Confirmar quitar el entrenamiento de mi historial'));
 
     await waitFor(() => expect(getByText('Ese entrenamiento ya no estaba en tu historial.')).toBeTruthy());
   });
@@ -378,9 +388,9 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
     const { getByLabelText, getByText } = await abrirHistorial();
 
     fireEvent.press(getByLabelText(labelEliminarManana()));
-    fireEvent.press(getByLabelText('Confirmar eliminar entrenamiento'));
+    fireEvent.press(getByLabelText('Confirmar quitar el entrenamiento de mi historial'));
 
-    await waitFor(() => expect(getByText('No se pudo eliminar: Network error')).toBeTruthy());
+    await waitFor(() => expect(getByText('No se pudo quitar: Network error')).toBeTruthy());
     expect(getByText('2 de 5 ejercicios')).toBeTruthy();
   });
 
