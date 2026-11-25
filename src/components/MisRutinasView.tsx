@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Tocable from './Tocable';
+import Aparecer from './Aparecer';
+import { EsqueletoTarjetas } from './Esqueletos';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { formatShortDate } from '../lib/dateFormat';
@@ -80,32 +82,37 @@ export default function MisRutinasView({
   return (
     <>
       <Text style={[styles.seccionLabel, { marginBottom: 10 }]}>RUTINA ACTUAL</Text>
+      {/* Cada tarjeta entra con <Aparecer>, en cascada. */}
       {rutinaActual ? (
-        <View style={[styles.card, styles.cardActual]}>
-          <Text style={styles.cardTitulo}>{rutinaActual.title}</Text>
-          <Text style={styles.cardMeta}>
-            {[
-              rutinaActual.vigenteDesde ? `Desde el ${formatShortDate(rutinaActual.vigenteDesde)}` : null,
-              `${rutinaActual.days.length} ${rutinaActual.days.length === 1 ? 'día' : 'días'}`,
-              `${totalEjercicios} ejercicios`,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
-          <Tocable
-            onPress={onVerRutinaActual}
-            style={styles.botonVerActual}
-            accessibilityRole="button"
-            accessibilityLabel="Ir a la rutina de hoy"
-          >
-            <Ionicons name="flash" size={15} color={colors.onPrimary} />
-            <Text style={styles.botonVerActualTexto}>Entrenar hoy</Text>
-          </Tocable>
-        </View>
+        <Aparecer>
+          <View style={[styles.card, styles.cardActual]}>
+            <Text style={styles.cardTitulo}>{rutinaActual.title}</Text>
+            <Text style={styles.cardMeta}>
+              {[
+                rutinaActual.vigenteDesde ? `Desde el ${formatShortDate(rutinaActual.vigenteDesde)}` : null,
+                `${rutinaActual.days.length} ${rutinaActual.days.length === 1 ? 'día' : 'días'}`,
+                `${totalEjercicios} ejercicios`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </Text>
+            <Tocable
+              onPress={onVerRutinaActual}
+              style={styles.botonVerActual}
+              accessibilityRole="button"
+              accessibilityLabel="Ir a la rutina de hoy"
+            >
+              <Ionicons name="flash" size={15} color={colors.onPrimary} />
+              <Text style={styles.botonVerActualTexto}>Entrenar hoy</Text>
+            </Tocable>
+          </View>
+        </Aparecer>
       ) : (
-        <View style={styles.card}>
-          <Text style={styles.cardMeta}>Todavía no tenés una rutina asignada.</Text>
-        </View>
+        <Aparecer>
+          <View style={styles.card}>
+            <Text style={styles.cardMeta}>Todavía no tenés una rutina asignada.</Text>
+          </View>
+        </Aparecer>
       )}
 
       <View style={styles.tituloRow}>
@@ -114,34 +121,37 @@ export default function MisRutinasView({
       </View>
 
       {cargando ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
+        <EsqueletoTarjetas testID="mis-rutinas-esqueleto" />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : anteriores.length === 0 ? (
-        <View style={styles.card}>
-          <Text style={styles.cardMeta}>
-            Todavía no tenés rutinas anteriores. Cuando tu entrenador te asigne una nueva, la actual va a quedar guardada
-            acá.
-          </Text>
-        </View>
+        <Aparecer>
+          <View style={styles.card}>
+            <Text style={styles.cardMeta}>
+              Todavía no tenés rutinas anteriores. Cuando tu entrenador te asigne una nueva, la actual va a quedar guardada
+              acá.
+            </Text>
+          </View>
+        </Aparecer>
       ) : (
         anteriores.map((r) => (
-          <Tocable
-            key={r.id}
-            onPress={() => setAbierta(r)}
-            style={styles.card}
-            accessibilityRole="button"
-            accessibilityLabel={`Ver rutina ${r.title}`}
-          >
-            <View style={styles.filaAnterior}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitulo}>{r.title}</Text>
-                <Text style={styles.cardMeta}>{rango(r.vigenteDesde, r.vigenteHasta)}</Text>
-                {r.entrenamientos > 0 && <Text style={styles.cardMeta}>{textoEntrenamientos(r.entrenamientos)}</Text>}
+          <Aparecer key={r.id}>
+            <Tocable
+              onPress={() => setAbierta(r)}
+              style={styles.card}
+              accessibilityRole="button"
+              accessibilityLabel={`Ver rutina ${r.title}`}
+            >
+              <View style={styles.filaAnterior}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitulo}>{r.title}</Text>
+                  <Text style={styles.cardMeta}>{rango(r.vigenteDesde, r.vigenteHasta)}</Text>
+                  {r.entrenamientos > 0 && <Text style={styles.cardMeta}>{textoEntrenamientos(r.entrenamientos)}</Text>}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
               </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </View>
-          </Tocable>
+            </Tocable>
+          </Aparecer>
         ))
       )}
     </>
@@ -199,30 +209,32 @@ function RutinaSoloLectura({ rutina, onVolver }: { rutina: RutinaAnterior; onVol
       </View>
 
       {cargando ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 16 }} />
+        <EsqueletoTarjetas cantidad={2} testID="rutina-detalle-esqueleto" />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : (
         <>
           {(detalle?.days ?? []).map((dia) => (
-            <View key={dia.id} style={styles.card}>
-              <Text style={[styles.seccionLabel, { marginBottom: 8 }]}>{(dia.title || 'Día').toUpperCase()}</Text>
-              {dia.exercises.map((e) => (
-                <View key={e.id} style={styles.ejercicio}>
-                  <Text style={styles.ejercicioNombre}>{e.exercise.name}</Text>
-                  <Text style={styles.ejercicioDatos}>
-                    {[
-                      `${e.sets ?? '-'} × ${e.reps || '-'}`,
-                      e.restSeconds ? `Descanso ${e.restSeconds} s` : null,
-                      e.weightSuggestion ? `Sugerida ${e.weightSuggestion}` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </Text>
-                  {!!e.notes && <Text style={styles.ejercicioNotas}>{e.notes}</Text>}
-                </View>
-              ))}
-            </View>
+            <Aparecer key={dia.id}>
+              <View style={styles.card}>
+                <Text style={[styles.seccionLabel, { marginBottom: 8 }]}>{(dia.title || 'Día').toUpperCase()}</Text>
+                {dia.exercises.map((e) => (
+                  <View key={e.id} style={styles.ejercicio}>
+                    <Text style={styles.ejercicioNombre}>{e.exercise.name}</Text>
+                    <Text style={styles.ejercicioDatos}>
+                      {[
+                        `${e.sets ?? '-'} × ${e.reps || '-'}`,
+                        e.restSeconds ? `Descanso ${e.restSeconds} s` : null,
+                        e.weightSuggestion ? `Sugerida ${e.weightSuggestion}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                    {!!e.notes && <Text style={styles.ejercicioNotas}>{e.notes}</Text>}
+                  </View>
+                ))}
+              </View>
+            </Aparecer>
           ))}
 
           <View style={styles.tituloRow}>
@@ -235,20 +247,22 @@ function RutinaSoloLectura({ rutina, onVolver }: { rutina: RutinaAnterior; onVol
             </View>
           ) : (
             listaSesiones.map(({ fecha, sesion }) => (
-              <View key={sesion.sesionId} style={styles.card}>
-                <Text style={styles.cardTitulo}>
-                  {`${formatShortDate(fecha)} · ${horaArgentina(sesion.creadoEn)} hs`}
-                </Text>
-                {!!sesion.tituloDia && <Text style={styles.cardMeta}>{sesion.tituloDia}</Text>}
-                {sesion.ejercicios.map((e) => (
-                  <View key={e.id} style={styles.sesionEjercicio}>
-                    <Text style={styles.sesionEjercicioNombre}>{e.nombre}</Text>
-                    <Text style={styles.sesionEjercicioDatos}>
-                      {`${e.series ?? '-'} × ${e.repeticiones || '-'} · ${e.peso || 'Sin carga'}`}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              <Aparecer key={sesion.sesionId}>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitulo}>
+                    {`${formatShortDate(fecha)} · ${horaArgentina(sesion.creadoEn)} hs`}
+                  </Text>
+                  {!!sesion.tituloDia && <Text style={styles.cardMeta}>{sesion.tituloDia}</Text>}
+                  {sesion.ejercicios.map((e) => (
+                    <View key={e.id} style={styles.sesionEjercicio}>
+                      <Text style={styles.sesionEjercicioNombre}>{e.nombre}</Text>
+                      <Text style={styles.sesionEjercicioDatos}>
+                        {`${e.series ?? '-'} × ${e.repeticiones || '-'} · ${e.peso || 'Sin carga'}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </Aparecer>
             ))
           )}
         </>

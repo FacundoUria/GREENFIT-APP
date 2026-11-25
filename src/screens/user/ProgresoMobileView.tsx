@@ -4,12 +4,12 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Modal,
   TextInput,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -255,10 +255,10 @@ function CargaChart({ data, onRegistrarClick }: { data: HistorialPunto[]; onRegi
             : 'Sumá otra actualización de PR para ver la curva completa.'}
         </Text>
         {data.length === 0 && (
-          <TouchableOpacity style={styles.chartCtaButton} onPress={onRegistrarClick}>
+          <Tocable style={styles.chartCtaButton} onPress={onRegistrarClick}>
             <Ionicons name="add-circle" size={16} color={colors.onPrimary} />
             <Text style={styles.chartCtaButtonText}>Registrar mi primer PR</Text>
-          </TouchableOpacity>
+          </Tocable>
         )}
       </View>
     );
@@ -352,12 +352,12 @@ function PRModal({
             autoFocus
           />
           <View style={styles.modalButtonRow}>
-            <TouchableOpacity style={styles.modalSecondaryButton} onPress={onClose}>
+            <Tocable style={styles.modalSecondaryButton} onPress={onClose}>
               <Text style={styles.modalSecondaryButtonText}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalPrimaryButton} onPress={handleSave}>
+            </Tocable>
+            <Tocable style={styles.modalPrimaryButton} onPress={handleSave}>
               <Text style={styles.modalPrimaryButtonText}>Guardar</Text>
-            </TouchableOpacity>
+            </Tocable>
           </View>
         </View>
       </View>
@@ -558,7 +558,7 @@ export default function ProgresoMobileView() {
         {prCatalogo.map((lift) => {
           const current = prs[lift.id] ?? null;
           return (
-            <TouchableOpacity key={lift.id} style={styles.prCard} onPress={() => setEditingLift(lift)}>
+            <Tocable key={lift.id} style={styles.prCard} onPress={() => setEditingLift(lift)}>
               <Text style={styles.prLabel} numberOfLines={1}>
                 {lift.label}
               </Text>
@@ -575,7 +575,7 @@ export default function ProgresoMobileView() {
                   <Text style={styles.prEmptyText}>Registrar</Text>
                 </View>
               )}
-            </TouchableOpacity>
+            </Tocable>
           );
         })}
       </View>
@@ -600,7 +600,7 @@ export default function ProgresoMobileView() {
                   Creada el {formatFechaCorta(metaActiva.createdAt)} ·{' '}
                   {faltan > 0 ? `podés completarla en ${faltan} ${faltan === 1 ? 'día' : 'días'}` : 'ya podés completarla'}
                 </Text>
-                <TouchableOpacity
+                <Tocable
                   style={[styles.metaButton, faltan > 0 && styles.metaButtonDisabled]}
                   disabled={faltan > 0 || completandoMeta}
                   onPress={handleCompletarMeta}
@@ -612,7 +612,7 @@ export default function ProgresoMobileView() {
                       {faltan > 0 ? `Disponible en ${faltan} ${faltan === 1 ? 'día' : 'días'}` : 'Marcar como completada (+300 XP)'}
                     </Text>
                   )}
-                </TouchableOpacity>
+                </Tocable>
               </>
             );
           })()
@@ -625,7 +625,7 @@ export default function ProgresoMobileView() {
               value={nuevaMetaTexto}
               onChangeText={setNuevaMetaTexto}
             />
-            <TouchableOpacity
+            <Tocable
               style={[styles.metaButton, !nuevaMetaTexto.trim() && styles.metaButtonDisabled]}
               disabled={!nuevaMetaTexto.trim() || creandoMeta}
               onPress={handleCrearMeta}
@@ -635,7 +635,7 @@ export default function ProgresoMobileView() {
               ) : (
                 <Text style={styles.metaButtonText}>Crear meta</Text>
               )}
-            </TouchableOpacity>
+            </Tocable>
           </>
         )}
       </View>

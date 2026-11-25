@@ -9,6 +9,8 @@ import {
   Platform,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
+import Aparecer from '../../components/Aparecer';
+import { EsqueletoAgenda } from '../../components/Esqueletos';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
@@ -427,50 +429,52 @@ export default function AgendaMobileView({ navigation }: any) {
     ].filter(Boolean) as string[];
 
     return (
-      <Tocable
-        testID={`agenda-card-${item.id}`}
-        style={[styles.card, isFull && styles.cardSinCupo, item.isBooked && styles.cardReservada]}
-        onPress={() => handlePress(item)}
-        disabled={isPending}
-      >
-        <View style={styles.cardBody}>
-          <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
-            {item.title}
-          </Text>
-          <Text style={[styles.hora, isFull && styles.horaSinCupo]}>
-            {startLabel}
-            <Text style={styles.horaHs}> hs</Text>
-          </Text>
-          <Text style={styles.detalles} numberOfLines={1}>
-            {detalles.join(' · ')}
-            {enCurso ? (
-              <>
-                {' · '}
-                <Text style={styles.enCurso}>{`En curso · termina ${formatClassTime(finDeClase(item))}`}</Text>
-              </>
-            ) : (
-              !countdown.isPast && (
+      <Aparecer>
+        <Tocable
+          testID={`agenda-card-${item.id}`}
+          style={[styles.card, isFull && styles.cardSinCupo, item.isBooked && styles.cardReservada]}
+          onPress={() => handlePress(item)}
+          disabled={isPending}
+        >
+          <View style={styles.cardBody}>
+            <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
+              {item.title}
+            </Text>
+            <Text style={[styles.hora, isFull && styles.horaSinCupo]}>
+              {startLabel}
+              <Text style={styles.horaHs}> hs</Text>
+            </Text>
+            <Text style={styles.detalles} numberOfLines={1}>
+              {detalles.join(' · ')}
+              {enCurso ? (
                 <>
                   {' · '}
-                  <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+                  <Text style={styles.enCurso}>{`En curso · termina ${formatClassTime(finDeClase(item))}`}</Text>
                 </>
-              )
-            )}
-          </Text>
-        </View>
+              ) : (
+                !countdown.isPast && (
+                  <>
+                    {' · '}
+                    <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+                  </>
+                )
+              )}
+            </Text>
+          </View>
 
-        <View style={styles.pillSlot} pointerEvents="none">
-          {isPending ? (
-            <View style={[styles.pill, styles.pillSinCupo]} testID={`agenda-card-cargando-${item.id}`}>
-              <ActivityIndicator size="small" color={mockup.primaryContainer} />
-            </View>
-          ) : (
-            <View style={[styles.pill, pill.caja]}>
-              <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
-            </View>
-          )}
-        </View>
-      </Tocable>
+          <View style={styles.pillSlot} pointerEvents="none">
+            {isPending ? (
+              <View style={[styles.pill, styles.pillSinCupo]} testID={`agenda-card-cargando-${item.id}`}>
+                <ActivityIndicator size="small" color={mockup.primaryContainer} />
+              </View>
+            ) : (
+              <View style={[styles.pill, pill.caja]}>
+                <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
+              </View>
+            )}
+          </View>
+        </Tocable>
+      </Aparecer>
     );
   }
 
@@ -522,10 +526,8 @@ export default function AgendaMobileView({ navigation }: any) {
         </View>
       ) : (
         <>
-          {/* Ruedita: cargando, o todavía sin la respuesta del día elegido. */}
-          {(isLoading || (!hayDatosDelDia && !error)) && classes.length === 0 && (
-            <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />
-          )}
+          {/* Esqueleto: cargando, o todavía sin la respuesta del día elegido. */}
+          {(isLoading || (!hayDatosDelDia && !error)) && classes.length === 0 && <EsqueletoAgenda />}
           {!!error && <Text style={styles.error}>{error}</Text>}
           {!isLoading && !error && hayDatosDelDia && classes.length === 0 && (
             <Text style={styles.empty}>No hay clases programadas para este día.</Text>

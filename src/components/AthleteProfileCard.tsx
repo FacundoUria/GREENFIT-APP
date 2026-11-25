@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { XP_POR_NIVEL } from '../lib/xpApi';
@@ -64,7 +65,7 @@ export default function AthleteProfileCard({
       <View style={styles.athleteHeroRow}>
         <View style={styles.athleteInfoCol}>
           <View style={styles.athleteTopRow}>
-            <TouchableOpacity
+            <Tocable
               onPress={onAvatarPress}
               disabled={isUploadingAvatar}
               accessibilityLabel="Cambiar foto de perfil"
@@ -78,7 +79,7 @@ export default function AthleteProfileCard({
                   <Ionicons name="camera" size={12} color={colors.onPrimary} />
                 )}
               </View>
-            </TouchableOpacity>
+            </Tocable>
             <View style={{ flex: 1 }}>
               <Text style={styles.athleteName} numberOfLines={1}>
                 {name}
@@ -88,9 +89,9 @@ export default function AthleteProfileCard({
                   <Ionicons name="flash" size={11} color={colors.onPrimary} />
                   <Text style={styles.levelBadgeText}>NIVEL {nivel}</Text>
                 </View>
-                <TouchableOpacity onPress={onXpInfoPress} hitSlop={8} accessibilityLabel="¿Cómo ganar XP?">
+                <Tocable onPress={onXpInfoPress} hitSlop={8} accessibilityLabel="¿Cómo ganar XP?">
                   <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
+                </Tocable>
               </View>
             </View>
           </View>

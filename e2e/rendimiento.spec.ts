@@ -1,6 +1,6 @@
 import { test, expect, devices, Page, CDPSession } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, DISCIPLINA_CROSSFIT, EN_30_DIAS } from './support/fixtures';
+import { tablasBase, DISCIPLINA_CROSSFIT, DISCIPLINA_APARATOS, EN_30_DIAS } from './support/fixtures';
 import { irATab } from './support/nav';
 
 // Prueba de RENDIMIENTO de la tanda visual (no corre en la suite normal):
@@ -265,5 +265,101 @@ for (const perfil of PERFILES) {
 
       for (const m of [toqueAgenda, scrollAgenda, toqueRutina, scrollRutina]) cumple(m);
     });
+
+    test('parte 2 (apariciones y esqueletos): Inicio, Agenda y Mi Rutina', async ({ page }) => {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Performance.enable');
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: perfil.cpu });
+      await page.addInitScript(() => {
+        window.localStorage.setItem('greenfit:ios-install-banner-dismissed-at', String(Date.now()));
+      });
+
+      // Inicio: los créditos llegan tarde (esqueleto) y después entran las
+      // tarjetas y las secciones en cascada.
+      let soltarCreditos!: () => void;
+      await loginComoSocio(page, {
+        tables: {
+          ...tablasBase(),
+          classes: clasesDeHoy(9),
+          user_credits: [
+            { id: 'uc', user_id: SOCIO_DEMO.id, discipline: DISCIPLINA_CROSSFIT, remaining_credits: 5, expires_at: EN_30_DIAS, created_at: '2026-01-01T00:00:00.000Z' },
+            { id: 'uc-2', user_id: SOCIO_DEMO.id, discipline: DISCIPLINA_APARATOS, remaining_credits: null, expires_at: EN_30_DIAS, created_at: '2026-01-01T00:00:00.000Z' },
+          ],
+          ...rutinaLarga(),
+        },
+        antesDeEntrar: async () => {
+          soltarCreditos = await retener(page, '/rest/v1/user_credits');
+        },
+      });
+      await expect(page.getByTestId('creditos-esqueleto')).toBeVisible();
+      await page.waitForTimeout(600);
+      const esqueletoInicio = await medir(page, cdp, () => page.waitForTimeout(1200));
+      informar(perfil.nombre, 'Inicio, esqueleto de créditos pulsando', esqueletoInicio);
+      // Dibujar los datos que llegan (React) y la cascada se miden por
+      // separado: el dibujo ya podía dar una tarea larga en un Android lento
+      // ANTES de esta parte (medido contra la versión anterior); lo que se
+      // exige sin tareas largas es la animación.
+      const dibujoInicio = await medir(page, cdp, async () => {
+        soltarCreditos();
+        await expect(page.getByTestId(`credito-card-${DISCIPLINA_CROSSFIT.id}`)).toBeVisible();
+      });
+      informar(perfil.nombre, 'Inicio, dibujar los créditos que llegan (informativo)', dibujoInicio);
+      const aparicionInicio = await medir(page, cdp, () => page.waitForTimeout(1300));
+      informar(perfil.nombre, 'Inicio, tarjetas y secciones en cascada', aparicionInicio);
+
+      // Agenda: cambiar de día con la respuesta demorada (esqueleto) y
+      // después las 9 tarjetas en cascada.
+      await irATab(page, 'Agenda');
+      await expect(page.getByTestId('agenda-card-perf-clase-0')).toBeVisible();
+      await page.waitForTimeout(1200);
+      const soltarClases = await retener(page, '/rest/v1/classes');
+      const manana = new Date(Date.now() + 86_400_000);
+      await page.getByText(String(manana.getDate()), { exact: true }).first().click();
+      await expect(page.getByTestId('agenda-esqueleto')).toBeVisible();
+      await page.waitForTimeout(300);
+      const esqueletoAgenda = await medir(page, cdp, () => page.waitForTimeout(1200));
+      informar(perfil.nombre, 'Agenda, esqueleto pulsando', esqueletoAgenda);
+      const cascadaAgenda = await medir(page, cdp, async () => {
+        soltarClases();
+        await expect(page.getByTestId('agenda-card-perf-clase-0')).toBeVisible();
+        await page.waitForTimeout(1300);
+      });
+      informar(perfil.nombre, 'Agenda, 9 tarjetas en cascada al cambiar de día', cascadaAgenda);
+
+      // Mi Rutina: entrar (montar la pantalla: informativo, mismo criterio que
+      // en Inicio) y los ejercicios en cascada; después deslizar: las tarjetas
+      // de abajo aparecen al entrar en pantalla.
+      const montajeRutina = await medir(page, cdp, async () => {
+        await irATab(page, 'Mi Rutina');
+        await expect(page.getByLabel('Marcar Ejercicio 1 como completado')).toBeVisible();
+      });
+      informar(perfil.nombre, 'Mi Rutina, montar la pantalla al entrar (informativo)', montajeRutina);
+      const entradaRutina = await medir(page, cdp, () => page.waitForTimeout(1300));
+      informar(perfil.nombre, 'Mi Rutina, ejercicios en cascada', entradaRutina);
+      const zonaRutina = await zonaDesplazable('[aria-label="Marcar Ejercicio 1 como completado"]', page);
+      const scrollConApariciones = await medir(page, cdp, async () => {
+        await deslizar(page, cdp, zonaRutina);
+        await page.waitForTimeout(900);
+      });
+      informar(perfil.nombre, 'Mi Rutina, deslizar (aparecen las de abajo)', scrollConApariciones);
+      expect(await scrollDeLaZona(page, zonaRutina), 'Mi Rutina se desplazó de verdad').toBeGreaterThan(100);
+
+      for (const m of [esqueletoInicio, aparicionInicio, esqueletoAgenda, cascadaAgenda, entradaRutina, scrollConApariciones]) cumple(m);
+    });
   });
+}
+
+// Retiene las respuestas de una tabla del mock hasta soltar() (para ver y
+// medir un esqueleto). Se registra después del mock: va por delante de él.
+async function retener(page: Page, ruta: string): Promise<() => void> {
+  let soltar!: () => void;
+  const abierta = new Promise<void>((r) => (soltar = r));
+  await page.route(
+    (url) => url.pathname === ruta,
+    async (route) => {
+      await abierta;
+      await route.fallback();
+    }
+  );
+  return soltar;
 }

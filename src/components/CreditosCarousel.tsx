@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
 import { UserCredit } from '../types';
+import Aparecer from './Aparecer';
 
 // Carrusel horizontal de créditos de Inicio: UNA tarjeta por disciplina
 // activa del socio, en el orden que devuelve fetchUserBalances() -- ninguna
@@ -58,7 +59,9 @@ export default function CreditosCarousel({ balances }: CreditosCarouselProps) {
       testID="creditos-carrusel"
     >
       {balances.map((b) => (
-        <CreditoCard key={b.discipline.id} balance={b} />
+        <Aparecer key={b.discipline.id}>
+          <CreditoCard balance={b} />
+        </Aparecer>
       ))}
     </ScrollView>
   );

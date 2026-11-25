@@ -11,6 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
+import Aparecer from '../../components/Aparecer';
+import { EsqueletoCreditos } from '../../components/Esqueletos';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -295,62 +297,72 @@ export default function HomeScreen({ navigation }: any) {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
     >
-      {/* Header: avatar (toca para cambiar la foto) + saludo + credencial + campanita */}
-      <View style={styles.headerRow}>
-        <Tocable
-          onPress={handleAvatarPress}
-          disabled={isUploadingAvatar}
-          accessibilityLabel="Cambiar foto de perfil"
-          style={styles.avatarTouchable}
-        >
-          <Avatar uri={user?.avatarUrl} name={user?.name ?? ''} size={44} />
-          {isUploadingAvatar && (
-            <View style={styles.avatarLoading}>
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          )}
-        </Tocable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.greeting} numberOfLines={1}>
-            Hola, {user?.name} 👋
-          </Text>
+      {/* Header: avatar (toca para cambiar la foto) + saludo + credencial + campanita.
+          Cada sección entra con <Aparecer>: en cascada, de arriba abajo. */}
+      <Aparecer>
+        <View style={styles.headerRow}>
+          <Tocable
+            onPress={handleAvatarPress}
+            disabled={isUploadingAvatar}
+            accessibilityLabel="Cambiar foto de perfil"
+            style={styles.avatarTouchable}
+          >
+            <Avatar uri={user?.avatarUrl} name={user?.name ?? ''} size={44} />
+            {isUploadingAvatar && (
+              <View style={styles.avatarLoading}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            )}
+          </Tocable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting} numberOfLines={1}>
+              Hola, {user?.name} 👋
+            </Text>
+          </View>
+          <Tocable
+            style={styles.iconButton}
+            onPress={() => navigation.navigate('Credential')}
+            aria-label="Ver mi credencial"
+          >
+            <Ionicons name="qr-code" size={19} color={colors.textPrimary} />
+          </Tocable>
+          <Tocable
+            style={styles.iconButton}
+            onPress={() => navigation.navigate('Notifications')}
+            aria-label="Ver notificaciones"
+          >
+            <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
+            {unreadCount > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
+          </Tocable>
         </View>
-        <Tocable
-          style={styles.iconButton}
-          onPress={() => navigation.navigate('Credential')}
-          aria-label="Ver mi credencial"
-        >
-          <Ionicons name="qr-code" size={19} color={colors.textPrimary} />
-        </Tocable>
-        <Tocable
-          style={styles.iconButton}
-          onPress={() => navigation.navigate('Notifications')}
-          aria-label="Ver notificaciones"
-        >
-          <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
-          {unreadCount > 0 && (
-            <View style={styles.bellBadge}>
-              <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
-            </View>
-          )}
-        </Tocable>
-      </View>
+      </Aparecer>
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      {/* Carrusel de créditos: una tarjeta por disciplina activa */}
+      {/* Carrusel de créditos: una tarjeta por disciplina activa (cada una
+          aparece sola, ver CreditosCarousel). Mientras carga, su esqueleto. */}
       {isLoading && balances.length === 0 ? (
-        <ActivityIndicator color={colors.primary} style={{ marginVertical: 24 }} />
+        <EsqueletoCreditos />
       ) : balances.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
-        </View>
+        <Aparecer>
+          <View style={styles.emptyCard}>
+            <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
+          </View>
+        </Aparecer>
       ) : (
         <CreditosCarousel balances={balances} />
       )}
 
       {/* Vencimiento: UNA sola fecha (user_credits), badge de membershipStatus.ts */}
-      {fechaPlan && <VencimientoCard fechaISO={fechaPlan.fechaISO} status={getExpiryStatus(fechaPlan.fechaISO)} />}
+      {fechaPlan && (
+        <Aparecer>
+          <VencimientoCard fechaISO={fechaPlan.fechaISO} status={getExpiryStatus(fechaPlan.fechaISO)} />
+        </Aparecer>
+      )}
 
       {hayVencido ? (
         <View style={styles.heroVencidoActions}>
@@ -370,76 +382,87 @@ export default function HomeScreen({ navigation }: any) {
         // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
         // toda la PWA para llegar a "Elegí tu pack".
         !isLoading && (
-          <Tocable style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
-            <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
-            <Text style={styles.addPackButtonText}>{balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}</Text>
-          </Tocable>
+          <Aparecer>
+            <Tocable style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+              <Text style={styles.addPackButtonText}>{balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}</Text>
+            </Tocable>
+          </Aparecer>
         )
       )}
 
       {/* Anillo de nivel: solo el número de nivel; el arco es el % real de XP dentro del nivel */}
       {user && (
-        <View style={styles.ringSection}>
-          <XpProgressRing
-            xpEnNivel={resumenXp.xpEnNivel}
-            xpParaNivel={XP_POR_NIVEL}
-            nivel={resumenXp.nivel}
-            size={208}
-            strokeWidth={7}
-          />
-          <Tocable
-            style={styles.ringInfo}
-            onPress={() => setXpInfoVisible(true)}
-            hitSlop={8}
-            accessibilityLabel="¿Cómo ganar XP?"
-          >
-            <Ionicons name="information-circle-outline" size={22} color={colors.textSecondary} />
-          </Tocable>
-        </View>
-      )}
-
-      {!isLoading &&
-        (nextBooking ? (
-          // "Ticket" limpio: disciplina + día + hora nada más -- sin la
-          // etiqueta "Tu próxima clase" ni el countdown como texto aparte.
-          <View style={styles.banner}>
-            <View style={styles.bannerIcon}>
-              <Ionicons name="calendar" size={20} color={colors.primary} />
-            </View>
-            <Text style={styles.bannerValue}>
-              {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
-            </Text>
-            <Tocable style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
-              <Text style={styles.bannerCancelText}>Cancelar</Text>
+        <Aparecer>
+          <View style={styles.ringSection}>
+            <XpProgressRing
+              xpEnNivel={resumenXp.xpEnNivel}
+              xpParaNivel={XP_POR_NIVEL}
+              nivel={resumenXp.nivel}
+              size={208}
+              strokeWidth={7}
+            />
+            <Tocable
+              style={styles.ringInfo}
+              onPress={() => setXpInfoVisible(true)}
+              hitSlop={8}
+              accessibilityLabel="¿Cómo ganar XP?"
+            >
+              <Ionicons name="information-circle-outline" size={22} color={colors.textSecondary} />
             </Tocable>
           </View>
-        ) : (
-          // Botón grande de acción directa -- reemplaza al bloque de texto
-          // gris "Todavía no tenés reservas".
-          <Tocable style={styles.reserveButton} onPress={() => navigation.navigate('Reservas')}>
-            <Text style={styles.reserveButtonText}>📅 Reservar próxima clase</Text>
-          </Tocable>
-        ))}
+        </Aparecer>
+      )}
+
+      {!isLoading && (
+        <Aparecer>
+          {nextBooking ? (
+            // "Ticket" limpio: disciplina + día + hora nada más -- sin la
+            // etiqueta "Tu próxima clase" ni el countdown como texto aparte.
+            <View style={styles.banner}>
+              <View style={styles.bannerIcon}>
+                <Ionicons name="calendar" size={20} color={colors.primary} />
+              </View>
+              <Text style={styles.bannerValue}>
+                {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
+              </Text>
+              <Tocable style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
+                <Text style={styles.bannerCancelText}>Cancelar</Text>
+              </Tocable>
+            </View>
+          ) : (
+            // Botón grande de acción directa -- reemplaza al bloque de texto
+            // gris "Todavía no tenés reservas".
+            <Tocable style={styles.reserveButton} onPress={() => navigation.navigate('Reservas')}>
+              <Text style={styles.reserveButtonText}>📅 Reservar próxima clase</Text>
+            </Tocable>
+          )}
+        </Aparecer>
+      )}
 
       {!isLoading && restoDeProximas.length > 0 && (
-        <View style={styles.upcomingList}>
-          {restoDeProximas.map((b) => (
-            <View key={`${b.classId}-${b.bookingDate}`} style={styles.upcomingRow}>
-              <View style={styles.upcomingDot} />
-              <Text style={styles.upcomingText}>
-                {b.title} · {formatDayLabel(b.startTime)} {formatClassTime(b.startTime)} hs
-              </Text>
-            </View>
-          ))}
-        </View>
+        <Aparecer>
+          <View style={styles.upcomingList}>
+            {restoDeProximas.map((b) => (
+              <View key={`${b.classId}-${b.bookingDate}`} style={styles.upcomingRow}>
+                <View style={styles.upcomingDot} />
+                <Text style={styles.upcomingText}>
+                  {b.title} · {formatDayLabel(b.startTime)} {formatClassTime(b.startTime)} hs
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Aparecer>
       )}
 
       {user && !isLoading && (
-        <HoyEntreneButton
-          disciplinasActivas={disciplinasActivas}
-          entrenamientosHoy={entrenamientosHoy}
-          onRegistrado={handleHoyEntrenoRegistrado}
-        />
+        <Aparecer>
+          <HoyEntreneButton
+            disciplinasActivas={disciplinasActivas}
+            entrenamientosHoy={entrenamientosHoy}
+            onRegistrado={handleHoyEntrenoRegistrado}
+          />
+        </Aparecer>
       )}
 
       <CancelBookingModal

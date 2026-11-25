@@ -4,11 +4,11 @@ import {
   Text,
   TextInput,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   ActivityIndicator,
   Switch,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { showAlert } from '../../lib/crossPlatformAlert';
@@ -283,13 +283,13 @@ export default function ProfileScreen({ navigation }: any) {
         />
       </SectionCard>
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+      <Tocable style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
         {isSaving ? (
           <ActivityIndicator color={colors.onPrimary} />
         ) : (
           <Text style={styles.saveButtonText}>Guardar cambios</Text>
         )}
-      </TouchableOpacity>
+      </Tocable>
 
       {(pushPermission.supported || pushPermission.iosNeedsInstall) && (
         <SectionCard icon="notifications-outline" title="Notificaciones">
@@ -307,15 +307,15 @@ export default function ProfileScreen({ navigation }: any) {
             {pushPermission.isLoading ? (
               <ActivityIndicator color={colors.primary} size="small" />
             ) : pushPermission.iosNeedsInstall ? (
-              <TouchableOpacity style={styles.howToButton} onPress={() => setShowInstallModal(true)}>
+              <Tocable style={styles.howToButton} onPress={() => setShowInstallModal(true)}>
                 <Ionicons name="download-outline" size={13} color={colors.primary} />
                 <Text style={styles.howToButtonText}>¿Cómo activarlas?</Text>
-              </TouchableOpacity>
+              </Tocable>
             ) : pushBloqueado ? (
-              <TouchableOpacity style={styles.howToButton} onPress={() => setShowPushBlockedModal(true)}>
+              <Tocable style={styles.howToButton} onPress={() => setShowPushBlockedModal(true)}>
                 <Ionicons name="lock-closed" size={13} color={colors.warning} />
                 <Text style={styles.howToButtonText}>¿Cómo activarlas?</Text>
-              </TouchableOpacity>
+              </Tocable>
             ) : (
               <Switch
                 value={pushPermission.enabled}
@@ -337,17 +337,17 @@ export default function ProfileScreen({ navigation }: any) {
           ProfileStack.tsx), esa ruta no está registrada ahí. */}
       {!bloqueado && (
         <SectionCard icon="ellipsis-horizontal-circle-outline" title="Más opciones">
-          <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('History')}>
+          <Tocable style={styles.linkRow} onPress={() => navigation.navigate('History')}>
             <Text style={styles.rowText}>Ver historial de clases</Text>
             <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
+          </Tocable>
         </SectionCard>
       )}
 
-      <TouchableOpacity style={styles.logout} onPress={logout}>
+      <Tocable style={styles.logout} onPress={logout}>
         <Ionicons name="log-out-outline" size={16} color={colors.danger} />
         <Text style={styles.logoutText}>Cerrar sesión</Text>
-      </TouchableOpacity>
+      </Tocable>
     </ScrollView>
     <InstallAppButton bottomOffset={78} />
     </>

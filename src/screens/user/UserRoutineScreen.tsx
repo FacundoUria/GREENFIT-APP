@@ -14,6 +14,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
+import Aparecer from '../../components/Aparecer';
+import { EsqueletoEntrenamientos, EsqueletoRutina } from '../../components/Esqueletos';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -420,7 +422,9 @@ function HistorialView({
 }) {
   const sesiones = dias.flatMap((d) => d.sesiones.map((s) => ({ fecha: d.fecha, sesion: s })));
 
-  if (cargando && sesiones.length === 0) return <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />;
+  if (cargando && sesiones.length === 0) {
+    return <EsqueletoEntrenamientos />;
+  }
   if (error) return <Text style={styles.error}>{error}</Text>;
 
   if (sesiones.length === 0) {
@@ -447,7 +451,9 @@ function HistorialView({
       </View>
       {!!aviso && <Text style={styles.avisoHistorial}>{aviso}</Text>}
       {sesiones.map(({ fecha, sesion }) => (
-        <SesionCard key={sesion.sesionId} fecha={fecha} sesion={sesion} onEliminar={() => onEliminar({ fecha, sesion })} />
+        <Aparecer key={sesion.sesionId}>
+          <SesionCard fecha={fecha} sesion={sesion} onEliminar={() => onEliminar({ fecha, sesion })} />
+        </Aparecer>
       ))}
     </>
   );
@@ -948,117 +954,128 @@ export default function UserRoutineScreen() {
         />
       ) : (
         <>
-          {isLoading && !routine && <ActivityIndicator color={colors.primary} style={{ marginTop: 20 }} />}
+          {isLoading && !routine && <EsqueletoRutina />}
           {error && <Text style={styles.error}>{error}</Text>}
 
           {!isLoading && !error && !routine && (
-            <View style={styles.emptyCard}>
-              <View style={styles.emptyIconCircle}>
-                <Ionicons name="barbell-outline" size={32} color={colors.primary} />
+            <Aparecer>
+              <View style={styles.emptyCard}>
+                <View style={styles.emptyIconCircle}>
+                  <Ionicons name="barbell-outline" size={32} color={colors.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>Todavía no tenés una rutina</Text>
+                <Text style={styles.emptyText}>
+                  Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
+                </Text>
+                <Tocable style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+                  <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
+                  <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
+                </Tocable>
               </View>
-              <Text style={styles.emptyTitle}>Todavía no tenés una rutina</Text>
-              <Text style={styles.emptyText}>
-                Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
-              </Text>
-              <Tocable style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
-                <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
-                <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
-              </Tocable>
-            </View>
+            </Aparecer>
           )}
 
           {routine && diaActual && (
             <>
-              {/* Barra de sesión: día de hoy + "X/Y" + barra de progreso. */}
-              <View style={styles.sesionBar}>
-                <View style={styles.sesionBarTop}>
-                  <View style={styles.sesionBarTitulo}>
-                    <View style={[styles.sesionDot, diaCompleto && styles.sesionDotDone]} />
-                    <View style={styles.sesionBarTituloText}>
-                      <Text style={styles.seccionLabel}>SESIÓN DE HOY</Text>
-                      <Text style={styles.sesionBarDia} numberOfLines={2}>
-                        {diaActual.title?.trim() || 'Entrenamiento de hoy'}
-                      </Text>
+              {/* Barra de sesión: día de hoy + "X/Y" + barra de progreso.
+                  La barra, los días, cada ejercicio y "Finalizar" entran con
+                  <Aparecer>, en cascada. */}
+              <Aparecer>
+                <View style={styles.sesionBar}>
+                  <View style={styles.sesionBarTop}>
+                    <View style={styles.sesionBarTitulo}>
+                      <View style={[styles.sesionDot, diaCompleto && styles.sesionDotDone]} />
+                      <View style={styles.sesionBarTituloText}>
+                        <Text style={styles.seccionLabel}>SESIÓN DE HOY</Text>
+                        <Text style={styles.sesionBarDia} numberOfLines={2}>
+                          {diaActual.title?.trim() || 'Entrenamiento de hoy'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.sesionBarContador}>
+                      <Text style={styles.sesionBarNumero}>{`${completadosDia}/${totalDia}`}</Text>
+                      <Text style={styles.sesionBarNumeroLabel}>COMPLETADOS</Text>
                     </View>
                   </View>
-                  <View style={styles.sesionBarContador}>
-                    <Text style={styles.sesionBarNumero}>{`${completadosDia}/${totalDia}`}</Text>
-                    <Text style={styles.sesionBarNumeroLabel}>COMPLETADOS</Text>
+                  <View
+                    style={styles.progressTrack}
+                    accessibilityRole="progressbar"
+                    accessibilityValue={{ min: 0, max: totalDia, now: completadosDia }}
+                  >
+                    <View style={[styles.progressFill, { width: `${Math.round(progreso * 100)}%` }]} />
                   </View>
                 </View>
-                <View
-                  style={styles.progressTrack}
-                  accessibilityRole="progressbar"
-                  accessibilityValue={{ min: 0, max: totalDia, now: completadosDia }}
-                >
-                  <View style={[styles.progressFill, { width: `${Math.round(progreso * 100)}%` }]} />
-                </View>
-              </View>
+              </Aparecer>
 
               {/* Selector de días */}
               {routine.days.length > 1 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.dayTabsRow}
-                  style={styles.dayTabsScroll}
-                >
-                  {routine.days.map((d, idx) => {
-                    const seleccionado = idx === selectedDayIdx;
-                    return (
-                      <Tocable
-                        key={d.id}
-                        onPress={() => {
-                          diaElegidoAMano.current = true;
-                          setSelectedDayIdx(idx);
-                          setAvisoFinal(null);
-                        }}
-                        style={[styles.dayTab, seleccionado && styles.dayTabSelected]}
-                      >
-                        <Text style={[styles.dayTabText, seleccionado && styles.dayTabTextSelected]} numberOfLines={1}>
-                          {d.title}
-                        </Text>
-                      </Tocable>
-                    );
-                  })}
-                </ScrollView>
+                <Aparecer>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.dayTabsRow}
+                    style={styles.dayTabsScroll}
+                  >
+                    {routine.days.map((d, idx) => {
+                      const seleccionado = idx === selectedDayIdx;
+                      return (
+                        <Tocable
+                          key={d.id}
+                          onPress={() => {
+                            diaElegidoAMano.current = true;
+                            setSelectedDayIdx(idx);
+                            setAvisoFinal(null);
+                          }}
+                          style={[styles.dayTab, seleccionado && styles.dayTabSelected]}
+                        >
+                          <Text style={[styles.dayTabText, seleccionado && styles.dayTabTextSelected]} numberOfLines={1}>
+                            {d.title}
+                          </Text>
+                        </Tocable>
+                      );
+                    })}
+                  </ScrollView>
+                </Aparecer>
               )}
 
               {ejerciciosDelDia.length === 0 ? (
                 <Text style={styles.empty}>Este día todavía no tiene ejercicios cargados.</Text>
               ) : (
                 ejerciciosDelDia.map((bloque, idx) => (
-                  <ExerciseRow
-                    key={bloque.id}
-                    bloque={bloque}
-                    numero={idx + 1}
-                    completado={completados.has(bloque.id)}
-                    peso={pesoDe(bloque)}
-                    borradorPeso={borradoresPeso.get(bloque.exercise.id)}
-                    onToggle={() => handleToggle(bloque.id)}
-                    onCambiarPeso={(texto) => cambiarBorradorPeso(bloque.exercise.id, texto)}
-                    onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.exercise.id, nuevoValor)}
-                    onDescartarPeso={() => cambiarBorradorPeso(bloque.exercise.id, undefined)}
-                    onVerDemo={setVideoUrl}
-                  />
+                  <Aparecer key={bloque.id}>
+                    <ExerciseRow
+                      bloque={bloque}
+                      numero={idx + 1}
+                      completado={completados.has(bloque.id)}
+                      peso={pesoDe(bloque)}
+                      borradorPeso={borradoresPeso.get(bloque.exercise.id)}
+                      onToggle={() => handleToggle(bloque.id)}
+                      onCambiarPeso={(texto) => cambiarBorradorPeso(bloque.exercise.id, texto)}
+                      onGuardarPeso={(nuevoValor) => handleGuardarPeso(bloque.exercise.id, nuevoValor)}
+                      onDescartarPeso={() => cambiarBorradorPeso(bloque.exercise.id, undefined)}
+                      onVerDemo={setVideoUrl}
+                    />
+                  </Aparecer>
                 ))
               )}
 
-              <Tocable
-                style={[styles.finishButton, bloqueoFinalizar && styles.finishButtonBusy]}
-                onPress={handleFinalizar}
-                disabled={bloqueoFinalizar}
-                accessibilityState={{ disabled: bloqueoFinalizar }}
-              >
-                {finalizando ? (
-                  <ActivityIndicator color={colors.onPrimary} />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle" size={24} color={colors.onPrimary} />
-                    <Text style={styles.finishButtonText}>Finalizar Entrenamiento</Text>
-                  </>
-                )}
-              </Tocable>
+              <Aparecer>
+                <Tocable
+                  style={[styles.finishButton, bloqueoFinalizar && styles.finishButtonBusy]}
+                  onPress={handleFinalizar}
+                  disabled={bloqueoFinalizar}
+                  accessibilityState={{ disabled: bloqueoFinalizar }}
+                >
+                  {finalizando ? (
+                    <ActivityIndicator color={colors.onPrimary} />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={24} color={colors.onPrimary} />
+                      <Text style={styles.finishButtonText}>Finalizar Entrenamiento</Text>
+                    </>
+                  )}
+                </Tocable>
+              </Aparecer>
               {!!avisoFinal && <Text style={styles.avisoFinal}>{avisoFinal}</Text>}
             </>
           )}

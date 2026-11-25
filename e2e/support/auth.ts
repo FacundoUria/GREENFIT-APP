@@ -13,11 +13,22 @@ export const SOCIO_DEMO: MockSocio = {
 // Login real por UI (tipear DNI + contraseña + tocar "Ingresar") contra el
 // backend mockeado -- ejercita el flujo de punta a punta tal cual lo usa un
 // socio real, sin inyectar sesión "por atrás".
+//
+// `antesDeEntrar` corre DESPUÉS de montar el mock y antes de abrir la app: ahí
+// se registran rutas que tienen que ir por delante del mock (en Playwright la
+// última ruta registrada es la primera que atiende), por ejemplo para retener
+// una respuesta y ver un esqueleto de carga.
 export async function loginComoSocio(
   page: Page,
-  { user = SOCIO_DEMO, tables = {}, rpc = {} }: { user?: MockSocio; tables?: TablaFixtures; rpc?: RpcFixtures } = {}
+  {
+    user = SOCIO_DEMO,
+    tables = {},
+    rpc = {},
+    antesDeEntrar,
+  }: { user?: MockSocio; tables?: TablaFixtures; rpc?: RpcFixtures; antesDeEntrar?: () => Promise<void> } = {}
 ) {
   await mockSupabase(page, { user, tables, rpc });
+  await antesDeEntrar?.();
   await page.goto('/');
   await page.getByPlaceholder('DNI').fill(user.dni);
   await page.getByPlaceholder('Contraseña').fill(user.dni);

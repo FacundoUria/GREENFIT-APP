@@ -32,7 +32,14 @@ const CREDITO = {
 };
 
 // Todo lo tocable que se ve (o está apenas más abajo) y mide menos de 44x44.
+// Se mide con las apariciones (parte 2) ya terminadas: en plena animación el
+// rect sale con decimales (43.99) por el transform del envoltorio.
 async function tocablesChicos(page: Page): Promise<string[]> {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().iterations === Infinity)
+  );
   return page.evaluate(() => {
     const sel = '[role="button"],[role="tab"],[role="checkbox"],[role="link"],input,textarea,[tabindex="0"]';
     const out: string[] = [];
@@ -154,5 +161,34 @@ test.describe('PWA -- base de la tanda visual (toque, zonas seguras, theme-color
     await page.mouse.up();
     await expect.poll(() => tarjeta.evaluate((el) => getComputedStyle(el).transform)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
     await expect(page.getByText('Confirmar', { exact: true })).toHaveCount(0);
+  });
+
+  // Parte 2: Comunidad y Perfil también pasaron al achique (toda la app igual).
+  test('Comunidad y Perfil: los botones también se achican a 0.96 al apoyar el dedo', async ({ page }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+
+    // El botón tocable que contiene al elemento (el que tiene la transición).
+    const apoyarYMedir = async (elemento: ReturnType<Page['getByText']>) => {
+      await expect(elemento).toBeVisible();
+      const caja = (await elemento.boundingBox())!;
+      await page.mouse.move(caja.x + caja.width / 2, caja.y + caja.height / 2);
+      await page.mouse.down();
+      const medir = () =>
+        elemento.evaluate((el) => {
+          let n: HTMLElement | null = el as HTMLElement;
+          while (n && !getComputedStyle(n).transitionProperty.includes('transform')) n = n.parentElement;
+          return n ? getComputedStyle(n).transform : 'sin tocable';
+        });
+      await expect.poll(medir).toBe('matrix(0.96, 0, 0, 0.96, 0, 0)');
+      await page.mouse.move(2, 2);
+      await page.mouse.up();
+      await expect.poll(medir).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+    };
+
+    await irATab(page, 'Comunidad');
+    await apoyarYMedir(page.getByText('Ranking', { exact: true }));
+
+    await irATab(page, 'Perfil');
+    await apoyarYMedir(page.getByLabel('Cerrar sesión'));
   });
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import {
@@ -96,21 +97,21 @@ export default function InstallAppButton({ bottomOffset = 18 }: { bottomOffset?:
 
   return (
     <>
-      <TouchableOpacity
+      <Tocable
         style={[styles.button, { bottom: bottomOffset }, disponible && styles.buttonDisponible]}
         onPress={handlePress}
         accessibilityLabel="Instalar Greenfit como app"
         hitSlop={8}
       >
         <Ionicons name="download-outline" size={18} color={disponible ? colors.primary : colors.textSecondary} />
-      </TouchableOpacity>
+      </Tocable>
 
       {showManual && (
         <View style={styles.overlay}>
           <View style={styles.card}>
-            <TouchableOpacity style={styles.closeButton} onPress={() => setShowManual(false)} hitSlop={10}>
+            <Tocable style={styles.closeButton} onPress={() => setShowManual(false)} hitSlop={10}>
               <Ionicons name="close" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
+            </Tocable>
 
             <View style={styles.iconCircle}>
               <Ionicons name="download-outline" size={26} color={colors.primary} />
@@ -131,9 +132,9 @@ export default function InstallAppButton({ bottomOffset = 18 }: { bottomOffset?:
               </Text>
             )}
 
-            <TouchableOpacity style={styles.primaryButton} onPress={() => setShowManual(false)}>
+            <Tocable style={styles.primaryButton} onPress={() => setShowManual(false)}>
               <Text style={styles.primaryButtonText}>Entendido</Text>
-            </TouchableOpacity>
+            </Tocable>
           </View>
         </View>
       )}

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Linking } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -199,9 +200,9 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         {/* Sutil a propósito -- el logout "completo" ya vive en Mis Datos
             (ProfileScreen.tsx); esto es solo un atajo rápido desde el hub,
             sin llamar la atención con color de peligro ni texto. */}
-        <TouchableOpacity onPress={logout} hitSlop={10} accessibilityLabel="Cerrar sesión">
+        <Tocable onPress={logout} hitSlop={10} accessibilityLabel="Cerrar sesión">
           <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
+        </Tocable>
       </View>
 
       {!!error && <Text style={styles.error}>{error}</Text>}
@@ -258,10 +259,9 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
       </View>
       <View style={styles.grid}>
         {ACCESOS_DIRECTOS.map((acceso) => (
-          <TouchableOpacity
+          <Tocable
             key={acceso.key}
             style={styles.tile}
-            activeOpacity={0.8}
             onPress={() => handleTilePress(acceso)}
           >
             <View style={styles.tileIconCircle}>
@@ -270,7 +270,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
             <Text style={styles.tileLabel} numberOfLines={2}>
               {acceso.label}
             </Text>
-          </TouchableOpacity>
+          </Tocable>
         ))}
         {/* Espaciador invisible: completa la grilla 3x3 (8 accesos + 1
             hueco) para que la última fila no quede desbalanceada. */}

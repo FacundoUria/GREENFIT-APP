@@ -839,11 +839,14 @@ describe('AgendaMobileView -- cambio de día: respuestas viejas, lista y fecha a
     fireEvent.press(getAllByRole('button')[1]); // mañana, todavía cargando
 
     await waitFor(() => expect(queryByTestId('agenda-card-class-1')).toBeNull());
+    // Mientras carga, el esqueleto de las tarjetas (no la ruedita).
+    expect(getByTestId('agenda-esqueleto')).toBeTruthy();
 
     await act(async () => {
       lenta.resolver([DE_MANANA]);
     });
     await waitFor(() => expect(getByText(/0\/10 cupos/)).toBeTruthy());
+    expect(queryByTestId('agenda-esqueleto')).toBeNull();
   });
 
   it('recargar el MISMO día (después de reservar) NO vacía la lista: las tarjetas siguen ahí mientras refresca', async () => {

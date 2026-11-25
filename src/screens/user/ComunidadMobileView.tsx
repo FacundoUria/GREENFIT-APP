@@ -6,12 +6,12 @@ import {
   Image,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Modal,
   TextInput,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -385,13 +385,13 @@ export default function ComunidadMobileView() {
 
       <View style={styles.tabsRow}>
         {TABS.map((t) => (
-          <TouchableOpacity
+          <Tocable
             key={t.key}
             style={[styles.tab, tab === t.key && styles.tabActive]}
             onPress={() => setTab(t.key)}
           >
             <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
-          </TouchableOpacity>
+          </Tocable>
         ))}
       </View>
 
@@ -422,15 +422,15 @@ export default function ComunidadMobileView() {
                 return (
                   <View key={post.id} style={styles.postCard}>
                     <View style={styles.postHeaderRow}>
-                      <TouchableOpacity
+                      <Tocable
                         onPress={() => handleAbrirChatPrivado(post.authorId, post.authorName, post.authorAvatarUrl)}
                         disabled={post.authorId === user.id}
                         accessibilityLabel={`Chatear con ${post.authorName}`}
                       >
                         <Avatar uri={post.authorAvatarUrl} name={post.authorName} size={38} />
-                      </TouchableOpacity>
+                      </Tocable>
                       <View style={{ flex: 1 }}>
-                        <TouchableOpacity
+                        <Tocable
                           onPress={() => handleAbrirChatPrivado(post.authorId, post.authorName, post.authorAvatarUrl)}
                           disabled={post.authorId === user.id}
                         >
@@ -451,7 +451,7 @@ export default function ComunidadMobileView() {
                               </View>
                             )}
                           </View>
-                        </TouchableOpacity>
+                        </Tocable>
                         <Text style={styles.postTime}>{formatRelativeTime(post.createdAt)}</Text>
                       </View>
                     </View>
@@ -463,7 +463,7 @@ export default function ComunidadMobileView() {
                     )}
 
                     <View style={styles.postActionsRow}>
-                      <TouchableOpacity
+                      <Tocable
                         style={[styles.reactionButton, post.reactedByMe && styles.reactionButtonActive]}
                         onPress={() => handleToggleReaction(post)}
                         accessibilityLabel={post.reactedByMe ? 'Quitar reacción' : 'Reaccionar'}
@@ -472,13 +472,13 @@ export default function ComunidadMobileView() {
                         <Text style={[styles.reactionText, post.reactedByMe && styles.reactionTextActive]}>
                           {post.reactionCount}
                         </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.commentButton} onPress={() => toggleComentarios(post.id)}>
+                      </Tocable>
+                      <Tocable style={styles.commentButton} onPress={() => toggleComentarios(post.id)}>
                         <Ionicons name="chatbubble-outline" size={14} color={colors.textSecondary} />
                         <Text style={styles.commentButtonText}>
                           Comentarios{post.commentCount > 0 ? ` (${post.commentCount})` : ''}
                         </Text>
-                      </TouchableOpacity>
+                      </Tocable>
                     </View>
 
                     {comentarios && (
@@ -501,9 +501,9 @@ export default function ComunidadMobileView() {
                             value={commentDraft[post.id] ?? ''}
                             onChangeText={(v) => setCommentDraft((prev) => ({ ...prev, [post.id]: v }))}
                           />
-                          <TouchableOpacity onPress={() => handleEnviarComentario(post.id)}>
+                          <Tocable onPress={() => handleEnviarComentario(post.id)}>
                             <Ionicons name="send" size={18} color={colors.primary} />
-                          </TouchableOpacity>
+                          </Tocable>
                         </View>
                       </View>
                     )}
@@ -530,7 +530,7 @@ export default function ComunidadMobileView() {
                 </Text>
               )}
               {inboxMensajes.map((thread) => (
-                <TouchableOpacity key={thread.threadId} style={styles.inboxRow} onPress={() => abrirDesdeInbox(thread)}>
+                <Tocable key={thread.threadId} style={styles.inboxRow} onPress={() => abrirDesdeInbox(thread)}>
                   <Avatar uri={thread.otherAvatarUrl} name={thread.otherUserName} size={44} />
                   <View style={styles.inboxTextCol}>
                     <Text style={styles.inboxName} numberOfLines={1}>
@@ -541,7 +541,7 @@ export default function ComunidadMobileView() {
                     </Text>
                   </View>
                   <Text style={styles.inboxTime}>{formatRelativeTime(thread.lastCreatedAt)}</Text>
-                </TouchableOpacity>
+                </Tocable>
               ))}
             </>
           )}
@@ -572,14 +572,14 @@ export default function ComunidadMobileView() {
                     contentContainerStyle={styles.chipsRow}
                     style={{ marginBottom: 16 }}
                   >
-                    <TouchableOpacity
+                    <Tocable
                       style={[styles.filterChip, !rankingDisciplina && styles.filterChipActive]}
                       onPress={() => handleSeleccionarRankingDisciplina(null)}
                     >
                       <Text style={[styles.filterChipText, !rankingDisciplina && styles.filterChipTextActive]}>Todas</Text>
-                    </TouchableOpacity>
+                    </Tocable>
                     {disciplinasGrupales.map((d) => (
-                      <TouchableOpacity
+                      <Tocable
                         key={d.id}
                         style={[styles.filterChip, rankingDisciplina?.id === d.id && styles.filterChipActive]}
                         onPress={() => handleSeleccionarRankingDisciplina(d)}
@@ -589,7 +589,7 @@ export default function ComunidadMobileView() {
                         >
                           {d.name}
                         </Text>
-                      </TouchableOpacity>
+                      </Tocable>
                     ))}
                   </ScrollView>
                 )
@@ -601,7 +601,7 @@ export default function ComunidadMobileView() {
                 <>
                   <View style={styles.podiumRow}>
                     {podio.map((entry, i) => (
-                      <TouchableOpacity
+                      <Tocable
                         key={entry.userId}
                         style={[styles.podiumCol, i === 0 && styles.podiumColFirst]}
                         onPress={() => handleAbrirChatPrivado(entry.userId, entry.fullName, entry.avatarUrl)}
@@ -613,12 +613,12 @@ export default function ComunidadMobileView() {
                           {entry.fullName}
                         </Text>
                         <Text style={styles.podiumClases}>{entry.xp} XP</Text>
-                      </TouchableOpacity>
+                      </Tocable>
                     ))}
                   </View>
 
                   {resto.map((entry, i) => (
-                    <TouchableOpacity
+                    <Tocable
                       key={entry.userId}
                       style={styles.rankingRow}
                       onPress={() => handleAbrirChatPrivado(entry.userId, entry.fullName, entry.avatarUrl)}
@@ -630,7 +630,7 @@ export default function ComunidadMobileView() {
                         {entry.fullName}
                       </Text>
                       <Text style={styles.rankingClases}>{entry.xp} XP</Text>
-                    </TouchableOpacity>
+                    </Tocable>
                   ))}
                 </>
               )}
@@ -640,9 +640,9 @@ export default function ComunidadMobileView() {
       )}
 
       {tab === 'feed' && (
-        <TouchableOpacity style={styles.fab} onPress={() => setComposerVisible(true)} accessibilityLabel="Nueva publicación">
+        <Tocable style={styles.fab} onPress={() => setComposerVisible(true)} accessibilityLabel="Nueva publicación">
           <Ionicons name="add" size={26} color={colors.onPrimary} />
-        </TouchableOpacity>
+        </Tocable>
       )}
 
       <Modal visible={composerVisible} transparent animationType="fade" onRequestClose={() => setComposerVisible(false)}>
@@ -662,22 +662,22 @@ export default function ComunidadMobileView() {
             {composerImageUri ? (
               <View style={styles.imagePreviewRow}>
                 <Image source={{ uri: composerImageUri }} style={styles.imagePreview} resizeMode="cover" />
-                <TouchableOpacity style={styles.removeImageButton} onPress={() => setComposerImageUri(null)}>
+                <Tocable style={styles.removeImageButton} onPress={() => setComposerImageUri(null)}>
                   <Ionicons name="close-circle" size={22} color={colors.danger} />
-                </TouchableOpacity>
+                </Tocable>
               </View>
             ) : (
-              <TouchableOpacity style={styles.attachButton} onPress={handleElegirFoto}>
+              <Tocable style={styles.attachButton} onPress={handleElegirFoto}>
                 <Ionicons name="image-outline" size={16} color={colors.primary} />
                 <Text style={styles.attachButtonText}>Adjuntar foto</Text>
-              </TouchableOpacity>
+              </Tocable>
             )}
 
             <View style={styles.composerButtonRow}>
-              <TouchableOpacity style={styles.composerSecondaryButton} onPress={() => setComposerVisible(false)}>
+              <Tocable style={styles.composerSecondaryButton} onPress={() => setComposerVisible(false)}>
                 <Text style={styles.composerSecondaryButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </Tocable>
+              <Tocable
                 style={styles.composerPrimaryButton}
                 onPress={handlePublicar}
                 disabled={isPosting || !composerText.trim()}
@@ -687,7 +687,7 @@ export default function ComunidadMobileView() {
                 ) : (
                   <Text style={styles.composerPrimaryButtonText}>Publicar</Text>
                 )}
-              </TouchableOpacity>
+              </Tocable>
             </View>
           </View>
         </View>
@@ -701,9 +701,9 @@ export default function ComunidadMobileView() {
               <Text style={styles.chatTitle} numberOfLines={1}>
                 {dmChat?.otherUserName}
               </Text>
-              <TouchableOpacity onPress={() => setDmChat(null)} hitSlop={10}>
+              <Tocable onPress={() => setDmChat(null)} hitSlop={10}>
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </TouchableOpacity>
+              </Tocable>
             </View>
             <ScrollView style={styles.chatMessages}>
               {dmLoading ? (
@@ -732,9 +732,9 @@ export default function ComunidadMobileView() {
                 value={dmDraft}
                 onChangeText={setDmDraft}
               />
-              <TouchableOpacity onPress={handleEnviarMensajePrivado}>
+              <Tocable onPress={handleEnviarMensajePrivado}>
                 <Ionicons name="send" size={20} color={colors.primary} />
-              </TouchableOpacity>
+              </Tocable>
             </View>
           </View>
         </View>

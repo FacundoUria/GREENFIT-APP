@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
+import { View, Text, StyleSheet, Linking } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 
@@ -20,9 +21,8 @@ function getGoogleReviewUrl(): string {
 // invitación, no una acción gamificada.
 export default function GoogleReviewCard() {
   return (
-    <TouchableOpacity
+    <Tocable
       style={styles.card}
-      activeOpacity={0.85}
       onPress={() => Linking.openURL(getGoogleReviewUrl())}
       accessibilityLabel="Dejanos tu reseña en Google"
     >
@@ -34,7 +34,7 @@ export default function GoogleReviewCard() {
         <Text style={styles.subtitle}>Dejanos tu reseña en Google -- ¡nos ayuda un montón! ⭐</Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-    </TouchableOpacity>
+    </Tocable>
   );
 }
 
