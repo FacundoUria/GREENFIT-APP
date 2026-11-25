@@ -6,7 +6,7 @@ import { colors } from '../../theme/colors';
 // Historial de rutina: "Finalizar Entrenamiento" guarda una foto de los
 // ejercicios MARCADOS del día que se está viendo (con el peso de ese
 // momento), bloquea con 0 marcados, muestra lo que responde el servidor
-// (ventana de 10 s / tope diario), y la pestaña "Historial" muestra lo
+// (ventana de 10 s / tope diario), y la pestaña "Entrenamientos" muestra lo
 // guardado, una tarjeta por sesión, con la opción de eliminar una sesión
 // completa (con confirmación).
 
@@ -214,12 +214,13 @@ describe('Mi Rutina -- estilo HUD de "Rutina de hoy" (misma lógica)', () => {
     expect(m.markExerciseCompleted).toHaveBeenCalledWith('user-1', 're-2', expect.any(String));
   });
 
-  it('las pestañas se llaman "Rutina de hoy", "Historial" y "Mis rutinas" (no los nombres del mockup)', async () => {
+  it('las pestañas se llaman "Rutina de hoy", "Entrenamientos" y "Mis rutinas" (no "Historial", que se confundía con el historial de rutinas)', async () => {
     const { getByText, queryByText } = await renderPantalla();
 
     expect(getByText('Rutina de hoy')).toBeTruthy();
-    expect(getByText('Historial')).toBeTruthy();
+    expect(getByText('Entrenamientos')).toBeTruthy();
     expect(getByText('Mis rutinas')).toBeTruthy();
+    expect(queryByText('Historial')).toBeNull();
     expect(queryByText(/Entrenar Ahora/i)).toBeNull();
     expect(queryByText(/Rutinas Guardadas/i)).toBeNull();
     expect(queryByText(/Favorita/i)).toBeNull();
@@ -270,8 +271,8 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
   async function abrirHistorial() {
     m.getRoutineHistory.mockResolvedValue(HISTORIAL);
     const utils = await renderPantalla();
-    fireEvent.press(utils.getByText('Historial'));
-    await waitFor(() => expect(utils.getByText('HISTORIAL DE ENTRENAMIENTOS')).toBeTruthy());
+    fireEvent.press(utils.getByText('Entrenamientos'));
+    await waitFor(() => expect(utils.getByText('TUS ENTRENAMIENTOS')).toBeTruthy());
     return utils;
   }
 
@@ -397,7 +398,7 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
   it('sin entrenamientos guardados, muestra el estado vacío', async () => {
     const { getByText } = await renderPantalla();
 
-    fireEvent.press(getByText('Historial'));
+    fireEvent.press(getByText('Entrenamientos'));
 
     await waitFor(() => expect(getByText('Todavía no hay entrenamientos')).toBeTruthy());
     expect(m.getRoutineHistory).toHaveBeenCalledWith('user-1');
@@ -406,7 +407,7 @@ describe('Mi Rutina -- pestaña Historial (una tarjeta por sesión)', () => {
   it('volver a "Rutina de hoy" muestra la rutina de nuevo', async () => {
     const { getByText } = await renderPantalla();
 
-    fireEvent.press(getByText('Historial'));
+    fireEvent.press(getByText('Entrenamientos'));
     await waitFor(() => expect(getByText('Todavía no hay entrenamientos')).toBeTruthy());
     fireEvent.press(getByText('Rutina de hoy'));
 

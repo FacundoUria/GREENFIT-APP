@@ -12,6 +12,7 @@ import {
   Animated,
   Modal,
   AppState,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -402,7 +403,7 @@ function EliminarSesionModal({
   );
 }
 
-// Pestaña "Historial": una tarjeta por entrenamiento finalizado, la más
+// Pestaña "Entrenamientos": una tarjeta por entrenamiento finalizado, la más
 // reciente arriba.
 function HistorialView({
   dias,
@@ -439,7 +440,7 @@ function HistorialView({
   return (
     <>
       <View style={styles.historialTituloRow}>
-        <Text style={styles.seccionLabel}>HISTORIAL DE ENTRENAMIENTOS</Text>
+        <Text style={styles.seccionLabel}>TUS ENTRENAMIENTOS</Text>
         <Text style={styles.historialCantidad}>
           {sesiones.length === 1 ? '1 registrado' : `${sesiones.length} registrados`}
         </Text>
@@ -456,7 +457,8 @@ type Vista = 'hoy' | 'historial' | 'rutinas';
 
 // La rutina asignada al socio logueado (la más reciente), organizada por
 // días con checklist de ejercicios completados hoy, más la pestaña
-// "Historial" con los entrenamientos finalizados.
+// "Entrenamientos" con los entrenamientos finalizados y "Mis rutinas" con el
+// historial de rutinas.
 export default function UserRoutineScreen() {
   const { user } = useAuth();
   const [routine, setRoutine] = useState<Routine | null>(null);
@@ -474,6 +476,12 @@ export default function UserRoutineScreen() {
   // `pesoDe` más abajo), sin que eso cuente como "guardado".
   const [pesos, setPesos] = useState<Map<string, string>>(new Map());
   const [vista, setVista] = useState<Vista>('hoy');
+  // Las tres etiquetas tienen que entrar enteras: medido en el navegador,
+  // "Entrenamientos" a 12 px ocupa 96 px y se cortaba a 360 px de ancho (y
+  // "Rutina de hoy" a 320 px). En pantallas angostas se achica un poco la letra.
+  const { width: anchoPantalla } = useWindowDimensions();
+  const textoTabAngosto =
+    anchoPantalla < 340 ? styles.vistaTabTextMuyAngosto : anchoPantalla < 380 ? styles.vistaTabTextAngosto : null;
   // Tirar para refrescar en "Mis rutinas" sube este número (la vista recarga su lista).
   const [recargaMisRutinas, setRecargaMisRutinas] = useState(0);
   // `finalizando` = esperando la respuesta del servidor (spinner).
@@ -650,7 +658,7 @@ export default function UserRoutineScreen() {
     try {
       setHistorial(await getRoutineHistory(user.id));
     } catch (err) {
-      setHistorialError(err instanceof Error ? err.message : 'No se pudo cargar tu historial.');
+      setHistorialError(err instanceof Error ? err.message : 'No se pudieron cargar tus entrenamientos.');
     } finally {
       setHistorialCargando(false);
     }
@@ -897,7 +905,8 @@ export default function UserRoutineScreen() {
         {(
           [
             ['hoy', 'Rutina de hoy', 'flash'],
-            ['historial', 'Historial', 'time'],
+            // "Entrenamientos" (antes "Historial": se confundía con el historial de rutinas de "Mis rutinas").
+            ['historial', 'Entrenamientos', 'time'],
             ['rutinas', 'Mis rutinas', 'albums'],
           ] as const
         ).map(([clave, etiqueta, icono]) => {
@@ -911,7 +920,7 @@ export default function UserRoutineScreen() {
               accessibilityState={{ selected: activa }}
             >
               <Ionicons name={icono} size={17} color={activa ? colors.onPrimary : colors.textSecondary} />
-              <Text style={[styles.vistaTabText, activa && styles.vistaTabTextActiva]} numberOfLines={1}>
+              <Text style={[styles.vistaTabText, textoTabAngosto, activa && styles.vistaTabTextActiva]} numberOfLines={1}>
                 {etiqueta}
               </Text>
             </TouchableOpacity>
@@ -1106,10 +1115,10 @@ const styles = StyleSheet.create({
   // ---- Switcher de pestañas ----
   vistaTabs: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 4,
     backgroundColor: colors.surface,
     borderRadius: 20,
-    padding: 6,
+    padding: 4,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
@@ -1122,9 +1131,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 4,
     paddingVertical: 10,
-    paddingHorizontal: 4,
-    borderRadius: 14,
+    paddingHorizontal: 2,
+    borderRadius: 16,
   },
+  vistaTabTextAngosto: { fontSize: 11, letterSpacing: 0 },
+  vistaTabTextMuyAngosto: { fontSize: 10, letterSpacing: 0 },
   vistaTabActiva: { backgroundColor: colors.primary, ...glowVerde(0.35, 16) },
   vistaTabText: { color: colors.textSecondary, fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
   vistaTabTextActiva: { color: colors.onPrimary },

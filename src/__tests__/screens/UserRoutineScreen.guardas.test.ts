@@ -29,7 +29,7 @@ const PROHIBIDOS: [string, RegExp][] = [
   // Fuera de alcance
   ['botón "Repetir"', /Repetir/i],
   ['"Guardar como Rutina Favorita"', /Favorit/i],
-  // Nombres de pestañas del mockup (se usan "Rutina de hoy" / "Historial")
+  // Nombres de pestañas del mockup (se usan "Rutina de hoy" / "Entrenamientos" / "Mis rutinas")
   ['pestaña "Entrenar Ahora"', /Entrenar Ahora/i],
   ['pestaña "Rutinas Guardadas"', /Rutinas Guardadas/i],
   ['botón "Terminar y Registrar"', /Terminar y Registrar/i],
@@ -52,6 +52,7 @@ describe('rediseño de Mi Rutina -- guardas', () => {
   it('usa los nombres de pestañas acordados', () => {
     const codigo = codigoSinComentarios();
     expect(codigo).toContain("'Rutina de hoy'");
-    expect(codigo).toContain("'Historial'");
+    expect(codigo).toContain("'Entrenamientos'");
+    expect(codigo).not.toContain("'Historial'");
   });
 });

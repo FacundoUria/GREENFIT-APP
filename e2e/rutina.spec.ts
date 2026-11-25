@@ -187,7 +187,7 @@ test.describe('PWA -- Mi Rutina (rediseño checklist accesible)', () => {
 });
 
 test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
-  test('Finalizar guarda lo marcado (con el peso actual) y aparece en la pestaña Historial', async ({ page }) => {
+  test('Finalizar guarda lo marcado (con el peso actual) y aparece en la pestaña Entrenamientos', async ({ page }) => {
     const tablas = {
       ...tablasBase(),
       routines: [ROUTINE],
@@ -252,7 +252,10 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     });
     await page.getByText('Genial', { exact: true }).click();
 
-    await page.getByText('Historial', { exact: true }).click();
+    await page.getByText('Entrenamientos', { exact: true }).click();
+    // Pestaña y título sin "Historial" (se confundía con el historial de rutinas).
+    await expect(page.getByText('TUS ENTRENAMIENTOS', { exact: true })).toBeVisible();
+    await expect(page.getByText('Historial', { exact: true })).toHaveCount(0);
     await expect(page.getByText('Press de banca')).toBeVisible();
     await expect(page.getByText('25kg')).toBeVisible();
     await expect(page.getByText('4 × 10-12')).toBeVisible();
@@ -337,7 +340,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     };
     await loginComoSocio(page, { tables: tablas, rpc });
     await irATab(page, 'Mi Rutina');
-    await page.getByText('Historial', { exact: true }).click();
+    await page.getByText('Entrenamientos', { exact: true }).click();
     await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
 
     // La de las 09:05 (12:05 UTC) quedó duplicada/errónea: se elimina.
@@ -401,7 +404,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
       },
     });
     await irATab(page, 'Mi Rutina');
-    await page.getByText('Historial', { exact: true }).click();
+    await page.getByText('Entrenamientos', { exact: true }).click();
 
     await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
     // Una hora por tarjeta (09:05 y 18:40 en Argentina).

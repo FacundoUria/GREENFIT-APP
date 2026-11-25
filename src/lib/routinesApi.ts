@@ -316,7 +316,7 @@ export async function saveExerciseWeight(userId: string, exerciseId: string, wei
   }
 }
 
-// -- Historial de entrenamientos (pestaña "Historial" de Mi Rutina) --
+// -- Historial de entrenamientos (pestaña "Entrenamientos" de Mi Rutina) --
 //
 // Tabla `routine_history` (backend/supabase_migration_routine_history.sql):
 // una FOTO de cada "Finalizar Entrenamiento", independiente de la rutina
