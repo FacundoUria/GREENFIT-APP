@@ -283,7 +283,7 @@ function ExerciseRow({
 
 // Tarjeta del historial = UNA finalización (una sesion_id). Si ese día hubo
 // dos (mañana y tarde), son dos tarjetas separadas, cada una con su hora.
-// Nada se edita: la única acción es "Quitar de mi historial" la sesión completa
+// Nada se edita: la única acción es "Quitar de mis entrenamientos" la sesión completa
 // (con confirmación). No se borra: el servidor la oculta para el socio y el
 // gimnasio la sigue viendo. Ni "repetir" ni favoritos.
 function SesionCard({
@@ -337,10 +337,10 @@ function SesionCard({
         onPress={onEliminar}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={`Quitar de mi historial el entrenamiento del ${formatFechaHistorial(fecha)} a las ${hora}`}
+        accessibilityLabel={`Quitar de mis entrenamientos el del ${formatFechaHistorial(fecha)} a las ${hora}`}
       >
         <Ionicons name="eye-off-outline" size={14} color={colors.danger} />
-        <Text style={styles.eliminarButtonText}>Quitar de mi historial</Text>
+        <Text style={styles.eliminarButtonText}>Quitar de mis entrenamientos</Text>
       </TouchableOpacity>
     </View>
   );
@@ -351,7 +351,7 @@ export interface SesionAEliminar {
   sesion: SesionHistorial;
 }
 
-// Confirmación antes de quitar una sesión del historial del socio. Modal
+// Confirmación antes de quitar una sesión de la lista del socio. Modal
 // propio (no Alert.alert, que en react-native-web es un no-op).
 function EliminarSesionModal({
   objetivo,
@@ -372,12 +372,12 @@ function EliminarSesionModal({
           <View style={styles.modalIcon}>
             <Ionicons name="eye-off-outline" size={24} color={colors.danger} />
           </View>
-          <Text style={styles.modalTitulo}>¿Quitar este entrenamiento de tu historial?</Text>
+          <Text style={styles.modalTitulo}>¿Quitar este entrenamiento de tu lista?</Text>
           {!!objetivo && !!s && (
             <Text style={styles.modalTexto}>
               {`${formatFechaHistorial(objetivo.fecha)} · ${formatHoraArgentina(s.creadoEn)} hs\n${
                 s.tituloDia || 'Entrenamiento'
-              }\n\nVas a dejar de verlo en tu historial. Queda guardado para tu entrenador.`}
+              }\n\nVas a dejar de verlo. Queda guardado para tu entrenador.`}
             </Text>
           )}
           <View style={styles.modalBotones}>
@@ -388,7 +388,7 @@ function EliminarSesionModal({
               style={[styles.modalEliminar, eliminando && styles.finishButtonBusy]}
               onPress={onConfirmar}
               disabled={eliminando}
-              accessibilityLabel="Confirmar quitar el entrenamiento de mi historial"
+              accessibilityLabel="Confirmar quitar el entrenamiento de mi lista"
             >
               {eliminando ? (
                 <ActivityIndicator color={colors.white} />
@@ -796,7 +796,7 @@ export default function UserRoutineScreen() {
     setAvisoHistorial(null);
     try {
       const borradas = await eliminarSesionHistorial(sesionAEliminar.sesion.sesionId);
-      if (borradas === 0) setAvisoHistorial('Ese entrenamiento ya no estaba en tu historial.');
+      if (borradas === 0) setAvisoHistorial('Ese entrenamiento ya no estaba en tu lista.');
       setSesionAEliminar(null);
       await loadHistorial();
     } catch (err) {

@@ -303,7 +303,7 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     ).toBeVisible();
   });
 
-  test('Historial: "Quitar de mi historial" pide confirmación y la saca por el RPC (el servidor la oculta)', async ({ page }) => {
+  test('Entrenamientos: "Quitar de mis entrenamientos" pide confirmación y la saca por el RPC (el servidor la oculta)', async ({ page }) => {
     const fila = (overrides: Record<string, unknown>) => ({
       user_id: SOCIO_DEMO.id,
       fecha: HOY_STR,
@@ -344,16 +344,16 @@ test.describe('PWA -- Mi Rutina: historial de entrenamientos', () => {
     await expect(page.getByText('2 registrados', { exact: true })).toBeVisible();
 
     // La de las 09:05 (12:05 UTC) quedó duplicada/errónea: se elimina.
-    await page.getByLabel(/Quitar de mi historial el entrenamiento del .* a las 09:05/).click();
-    await expect(page.getByText('¿Quitar este entrenamiento de tu historial?', { exact: true })).toBeVisible();
+    await page.getByLabel(/Quitar de mis entrenamientos el del .* a las 09:05/).click();
+    await expect(page.getByText('¿Quitar este entrenamiento de tu lista?', { exact: true })).toBeVisible();
 
     // Cancelar no borra nada.
     await page.getByText('Cancelar', { exact: true }).click();
-    await expect(page.getByText('¿Quitar este entrenamiento de tu historial?', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('¿Quitar este entrenamiento de tu lista?', { exact: true })).toHaveCount(0);
     expect(llamadas).toHaveLength(0);
 
-    await page.getByLabel(/Quitar de mi historial el entrenamiento del .* a las 09:05/).click();
-    await page.getByLabel('Confirmar quitar el entrenamiento de mi historial').click();
+    await page.getByLabel(/Quitar de mis entrenamientos el del .* a las 09:05/).click();
+    await page.getByLabel('Confirmar quitar el entrenamiento de mi lista').click();
 
     await expect(page.getByText('1 registrado', { exact: true })).toBeVisible();
     expect(llamadas).toEqual(['s-dup']);
