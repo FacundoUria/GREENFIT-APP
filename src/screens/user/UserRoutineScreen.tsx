@@ -5,7 +5,6 @@ import {
   TextInput,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Linking,
@@ -14,6 +13,7 @@ import {
   AppState,
   useWindowDimensions,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -260,14 +260,14 @@ function ExerciseRow({
         )}
 
         {!!bloque.exercise.videoUrl && (
-          <TouchableOpacity style={styles.videoButton} onPress={() => onVerDemo(bloque.exercise.videoUrl!)}>
+          <Tocable style={styles.videoButton} onPress={() => onVerDemo(bloque.exercise.videoUrl!)}>
             <Ionicons name="play-circle" size={16} color={colors.primary} />
             <Text style={styles.videoButtonText}>Ver Demo</Text>
-          </TouchableOpacity>
+          </Tocable>
         )}
       </View>
 
-      <TouchableOpacity
+      <Tocable
         onPress={onToggle}
         hitSlop={6}
         style={[styles.checkButton, completado && styles.checkButtonDone]}
@@ -276,7 +276,7 @@ function ExerciseRow({
         accessibilityLabel={completado ? `${bloque.exercise.name}, completado` : `Marcar ${bloque.exercise.name} como completado`}
       >
         <Ionicons name="checkmark" size={28} color={completado ? colors.onPrimary : colors.surfaceAlt} />
-      </TouchableOpacity>
+      </Tocable>
     </Animated.View>
   );
 }
@@ -332,7 +332,7 @@ function SesionCard({
         ))}
       </View>
 
-      <TouchableOpacity
+      <Tocable
         style={styles.eliminarButton}
         onPress={onEliminar}
         hitSlop={8}
@@ -341,7 +341,7 @@ function SesionCard({
       >
         <Ionicons name="eye-off-outline" size={14} color={colors.danger} />
         <Text style={styles.eliminarButtonText}>Quitar de mis entrenamientos</Text>
-      </TouchableOpacity>
+      </Tocable>
     </View>
   );
 }
@@ -381,10 +381,10 @@ function EliminarSesionModal({
             </Text>
           )}
           <View style={styles.modalBotones}>
-            <TouchableOpacity style={styles.modalCancelar} onPress={onCancelar} disabled={eliminando}>
+            <Tocable style={styles.modalCancelar} onPress={onCancelar} disabled={eliminando}>
               <Text style={styles.modalCancelarText}>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
+            </Tocable>
+            <Tocable
               style={[styles.modalEliminar, eliminando && styles.finishButtonBusy]}
               onPress={onConfirmar}
               disabled={eliminando}
@@ -395,7 +395,7 @@ function EliminarSesionModal({
               ) : (
                 <Text style={styles.modalEliminarText}>Quitar</Text>
               )}
-            </TouchableOpacity>
+            </Tocable>
           </View>
         </View>
       </View>
@@ -912,7 +912,7 @@ export default function UserRoutineScreen() {
         ).map(([clave, etiqueta, icono]) => {
           const activa = vista === clave;
           return (
-            <TouchableOpacity
+            <Tocable
               key={clave}
               onPress={() => setVista(clave)}
               style={[styles.vistaTab, activa && styles.vistaTabActiva]}
@@ -923,7 +923,7 @@ export default function UserRoutineScreen() {
               <Text style={[styles.vistaTabText, textoTabAngosto, activa && styles.vistaTabTextActiva]} numberOfLines={1}>
                 {etiqueta}
               </Text>
-            </TouchableOpacity>
+            </Tocable>
           );
         })}
       </View>
@@ -960,10 +960,10 @@ export default function UserRoutineScreen() {
               <Text style={styles.emptyText}>
                 Tu entrenador aún no te asignó un plan de ejercicios. Escribile para coordinar tu rutina personalizada.
               </Text>
-              <TouchableOpacity style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+              <Tocable style={styles.whatsappButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
                 <Ionicons name="logo-whatsapp" size={18} color={colors.onPrimary} />
                 <Text style={styles.whatsappButtonText}>Contactar a mi entrenador</Text>
-              </TouchableOpacity>
+              </Tocable>
             </View>
           )}
 
@@ -1006,7 +1006,7 @@ export default function UserRoutineScreen() {
                   {routine.days.map((d, idx) => {
                     const seleccionado = idx === selectedDayIdx;
                     return (
-                      <TouchableOpacity
+                      <Tocable
                         key={d.id}
                         onPress={() => {
                           diaElegidoAMano.current = true;
@@ -1018,7 +1018,7 @@ export default function UserRoutineScreen() {
                         <Text style={[styles.dayTabText, seleccionado && styles.dayTabTextSelected]} numberOfLines={1}>
                           {d.title}
                         </Text>
-                      </TouchableOpacity>
+                      </Tocable>
                     );
                   })}
                 </ScrollView>
@@ -1044,12 +1044,11 @@ export default function UserRoutineScreen() {
                 ))
               )}
 
-              <TouchableOpacity
+              <Tocable
                 style={[styles.finishButton, bloqueoFinalizar && styles.finishButtonBusy]}
                 onPress={handleFinalizar}
                 disabled={bloqueoFinalizar}
                 accessibilityState={{ disabled: bloqueoFinalizar }}
-                activeOpacity={0.85}
               >
                 {finalizando ? (
                   <ActivityIndicator color={colors.onPrimary} />
@@ -1059,7 +1058,7 @@ export default function UserRoutineScreen() {
                     <Text style={styles.finishButtonText}>Finalizar Entrenamiento</Text>
                   </>
                 )}
-              </TouchableOpacity>
+              </Tocable>
               {!!avisoFinal && <Text style={styles.avisoFinal}>{avisoFinal}</Text>}
             </>
           )}
@@ -1178,6 +1177,8 @@ const styles = StyleSheet.create({
   dayTab: {
     paddingHorizontal: 16,
     paddingVertical: 10,
+    minHeight: 44, // área mínima de toque (antes 38)
+    justifyContent: 'center',
     borderRadius: 14,
     backgroundColor: colors.surface,
     borderWidth: 1,
@@ -1242,6 +1243,10 @@ const styles = StyleSheet.create({
     // empujaba el chip a la línea de abajo; 64 alcanza para "42.5kg" o "2x14kg".
     width: 64,
     paddingVertical: 3,
+    // Área de toque de 44 px de alto sin agrandar el chip: el campo sobresale
+    // 11 px arriba y abajo (transparente) y los márgenes negativos lo compensan.
+    height: 44,
+    marginVertical: -11,
   },
   cargaInputVacio: { fontStyle: 'italic', fontWeight: '400' },
 
@@ -1255,7 +1260,18 @@ const styles = StyleSheet.create({
   },
   instructionsText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
 
-  videoButton: { flexDirection: 'row', gap: 6, alignItems: 'center', alignSelf: 'flex-start', marginTop: 12 },
+  // 44 px de alto con el texto en el mismo lugar que antes (marginTop 12 menos
+  // los ~13 px que crece arriba; abajo, margen negativo).
+  videoButton: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    paddingRight: 8,
+    marginTop: -1,
+    marginBottom: -14,
+  },
   videoButtonText: { color: colors.primary, fontWeight: '700', fontSize: 12.5 },
 
   // Check cuadrado gigante (56x56): bien separado del texto para que no haya
@@ -1341,8 +1357,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-end',
     gap: 5,
-    marginTop: 14,
-    paddingVertical: 4,
+    // 44 px de alto (antes 24) con el texto en el mismo lugar: crece 10 px
+    // arriba (marginTop 14 -> 4) y 10 abajo (margen negativo).
+    minHeight: 44,
+    marginTop: 4,
+    marginBottom: -10,
     paddingHorizontal: 2,
   },
   eliminarButtonText: { color: colors.danger, fontSize: 12.5, fontWeight: '700' },

@@ -3,7 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <!-- viewport-fit=cover: sin esto env(safe-area-inset-*) vale 0 y, con la app
+         instalada en iOS (barra de estado black-translucent), el contenido queda
+         debajo de la hora y la barra de pestañas debajo de la barra de gestos.
+         Las zonas seguras se aplican en ZonaSegura.tsx y MainTabs.tsx. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
+    <!-- Mismo color que el fondo de la app (colors.background): barra de estado
+         de Android y ventana de la app instalada sin un borde de otro tono. -->
+    <meta name="theme-color" content="#0D0D0E" />
     <title>%WEB_TITLE%</title>
     <!-- Favicon: sin esto el navegador muestra el ícono genérico en la pestaña -->
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -30,6 +37,11 @@
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {
         overflow: hidden;
+      }
+      /* Tanda visual: sin el recuadro gris/azul que pinta el navegador al tocar
+         (el toque lo indica cada botón con su escala, ver Tocable.tsx). */
+      html {
+        -webkit-tap-highlight-color: transparent;
       }
       /* These styles make the root element full-height */
       #root {

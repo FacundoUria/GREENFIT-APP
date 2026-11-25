@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { formatShortDate } from '../lib/dateFormat';
@@ -91,7 +92,7 @@ export default function MisRutinasView({
               .filter(Boolean)
               .join(' · ')}
           </Text>
-          <TouchableOpacity
+          <Tocable
             onPress={onVerRutinaActual}
             style={styles.botonVerActual}
             accessibilityRole="button"
@@ -99,7 +100,7 @@ export default function MisRutinasView({
           >
             <Ionicons name="flash" size={15} color={colors.onPrimary} />
             <Text style={styles.botonVerActualTexto}>Entrenar hoy</Text>
-          </TouchableOpacity>
+          </Tocable>
         </View>
       ) : (
         <View style={styles.card}>
@@ -125,7 +126,7 @@ export default function MisRutinasView({
         </View>
       ) : (
         anteriores.map((r) => (
-          <TouchableOpacity
+          <Tocable
             key={r.id}
             onPress={() => setAbierta(r)}
             style={styles.card}
@@ -140,7 +141,7 @@ export default function MisRutinasView({
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </View>
-          </TouchableOpacity>
+          </Tocable>
         ))
       )}
     </>
@@ -177,7 +178,7 @@ function RutinaSoloLectura({ rutina, onVolver }: { rutina: RutinaAnterior; onVol
 
   return (
     <>
-      <TouchableOpacity
+      <Tocable
         onPress={onVolver}
         style={styles.volver}
         accessibilityRole="button"
@@ -185,7 +186,7 @@ function RutinaSoloLectura({ rutina, onVolver }: { rutina: RutinaAnterior; onVol
       >
         <Ionicons name="chevron-back" size={18} color={colors.primary} />
         <Text style={styles.volverTexto}>Mis rutinas</Text>
-      </TouchableOpacity>
+      </Tocable>
 
       <View style={[styles.card, { marginBottom: 14 }]}>
         <Text style={styles.cardTitulo}>{rutina.title}</Text>
@@ -287,6 +288,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 9,
     paddingHorizontal: 14,
+    minHeight: 44, // área mínima de toque (antes 35)
   },
   botonVerActualTexto: { color: colors.onPrimary, fontSize: 13, fontWeight: '800' },
   filaAnterior: { flexDirection: 'row', alignItems: 'center', gap: 10 },

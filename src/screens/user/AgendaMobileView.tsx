@@ -4,11 +4,11 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Platform,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
@@ -403,7 +403,7 @@ export default function AgendaMobileView({ navigation }: any) {
 
     // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
     // con pointerEvents="none", así cualquier toque (incluido encima del
-    // pill) lo recibe el TouchableOpacity de la tarjeta y dispara el mismo
+    // pill) lo recibe el Tocable de la tarjeta y dispara el mismo
     // handlePress de siempre. Calcado del mockup: "RESERVAR" verde sólido y
     // "SIN CUPO" gris sólido; los dos estados que el mockup no tiene
     // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos, sin íconos.
@@ -427,9 +427,8 @@ export default function AgendaMobileView({ navigation }: any) {
     ].filter(Boolean) as string[];
 
     return (
-      <TouchableOpacity
+      <Tocable
         testID={`agenda-card-${item.id}`}
-        activeOpacity={0.85}
         style={[styles.card, isFull && styles.cardSinCupo, item.isBooked && styles.cardReservada]}
         onPress={() => handlePress(item)}
         disabled={isPending}
@@ -471,7 +470,7 @@ export default function AgendaMobileView({ navigation }: any) {
             </View>
           )}
         </View>
-      </TouchableOpacity>
+      </Tocable>
     );
   }
 

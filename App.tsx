@@ -8,6 +8,8 @@ import { registerPwa } from './src/pwa/registerPwa';
 import IosInstallBanner from './src/components/IosInstallBanner';
 import AndroidInstallBanner from './src/components/AndroidInstallBanner';
 import { colors } from './src/theme/colors';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import ZonaSegura from './src/components/ZonaSegura';
 
 export default function App() {
   useEffect(() => {
@@ -15,22 +17,26 @@ export default function App() {
   }, []);
 
   return (
-    <AuthProvider>
-      <ConfiguracionProvider>
-        <StatusBar style="light" />
-        {/* En escritorio/pantallas anchas (solo web), la app queda centrada con
-            ancho de celular en vez de estirarse de punta a punta -- mantiene
-            la experiencia nativa de PWA. En nativo esto no hace nada (flex:1
-            normal), el ancho del dispositivo ya es angosto. */}
-        <View style={styles.shell}>
-          <View style={styles.container}>
-            <RootNavigator />
-            <IosInstallBanner />
-            <AndroidInstallBanner />
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ConfiguracionProvider>
+          <StatusBar style="light" />
+          {/* En escritorio/pantallas anchas (solo web), la app queda centrada con
+              ancho de celular en vez de estirarse de punta a punta -- mantiene
+              la experiencia nativa de PWA. En nativo esto no hace nada (flex:1
+              normal), el ancho del dispositivo ya es angosto. */}
+          <View style={styles.shell}>
+            {/* Zona segura de arriba (notch / barra de estado de la app
+                instalada), aplicada una sola vez acá -- ver ZonaSegura.tsx. */}
+            <ZonaSegura style={styles.container}>
+              <RootNavigator />
+              <IosInstallBanner />
+              <AndroidInstallBanner />
+            </ZonaSegura>
           </View>
-        </View>
-      </ConfiguracionProvider>
-    </AuthProvider>
+        </ConfiguracionProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 

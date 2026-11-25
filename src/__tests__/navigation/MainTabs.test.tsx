@@ -76,3 +76,42 @@ describe('MainTabs -- barra flotante: mismas 5 pestañas, mismos nombres', () =>
     expect(queryByText('Progreso')).toBeNull();
   });
 });
+
+// Tanda visual (base): con la app instalada, la barra de gestos (zona segura de
+// abajo) no tapa la barra de pestañas -- se suma al alto y al relleno de abajo.
+describe('MainTabs -- zona segura de abajo', () => {
+  function alturasDeLaBarra(root: any) {
+    const { StyleSheet } = require('react-native');
+    return root
+      .findAll((n: any) => typeof n.type === 'string' && n.props?.style)
+      .map((n: any) => StyleSheet.flatten(n.props.style))
+      .filter((s: any) => s && s.height !== undefined && s.paddingBottom !== undefined)
+      .map((s: any) => ({ height: s.height, paddingBottom: s.paddingBottom }));
+  }
+
+  async function renderConInsets(bottom: number) {
+    const { SafeAreaProvider } = require('react-native-safe-area-context');
+    mockUser = { id: 'user-1', perfilCompleto: true };
+    const utils = render(
+      <SafeAreaProvider
+        initialMetrics={{ frame: { x: 0, y: 0, width: 390, height: 844 }, insets: { top: 0, bottom, left: 0, right: 0 } }}
+      >
+        <NavigationContainer>
+          <MainTabs />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    );
+    await waitFor(() => expect(utils.getByText('HomeStackStub')).toBeTruthy());
+    return utils;
+  }
+
+  it('sin barra de gestos: la barra mide lo de siempre (84 de alto, 18 abajo)', async () => {
+    const { UNSAFE_root } = await renderConInsets(0);
+    expect(alturasDeLaBarra(UNSAFE_root)).toContainEqual({ height: 84, paddingBottom: 18 });
+  });
+
+  it('con 34 px de barra de gestos: 118 de alto y 52 abajo', async () => {
+    const { UNSAFE_root } = await renderConInsets(34);
+    expect(alturasDeLaBarra(UNSAFE_root)).toContainEqual({ height: 118, paddingBottom: 52 });
+  });
+});

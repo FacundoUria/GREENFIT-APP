@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { colors } from '../theme/colors';
 
 function ensureTag(selector: string, build: () => HTMLElement) {
   if (document.head.querySelector(selector)) return;
@@ -30,7 +31,8 @@ function injectHeadTags() {
   ensureTag('meta[name="theme-color"]', () => {
     const meta = document.createElement('meta');
     meta.name = 'theme-color';
-    meta.content = '#0F0F0F';
+    // Mismo color que el fondo de la app (index.html ya lo trae; esto es el respaldo).
+    meta.content = colors.background;
     return meta;
   });
 

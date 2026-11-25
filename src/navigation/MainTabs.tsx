@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
+import { useInsetsSeguros } from '../components/ZonaSegura';
 
 import HomeStack from './HomeStack';
 import AgendaMobileView from '../screens/user/AgendaMobileView';
@@ -18,8 +19,11 @@ const Tab = createBottomTabNavigator();
 // Fondo de la barra flotante: la barra en sí ocupa todo el ancho con el color
 // de fondo de la app (si no, los márgenes de una barra "flotante" dejan ver el
 // fondo claro por defecto del navegador), y la píldora se dibuja acá adentro.
+// La píldora se corre hacia arriba lo que mida la barra de gestos (zona segura
+// de abajo), para no quedar debajo de ella con la app instalada.
 function FloatingTabBackground() {
-  return <View style={styles.pill} />;
+  const { bottom } = useInsetsSeguros();
+  return <View style={[styles.pill, { bottom: 12 + bottom }]} />;
 }
 
 const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -35,6 +39,8 @@ const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
 // Navigator (ver RootStack).
 export default function MainTabs() {
   const { user } = useAuth();
+  // Zona segura de abajo (barra de gestos de iPhone/Android con la app instalada).
+  const { bottom: insetAbajo } = useInsetsSeguros();
   // Popup local con sonido cuando entra una notificación relevante.
   useNotificationSubscription(user?.id);
   // Web Push real (con la app cerrada) — pide permiso una sola vez al loguearse.
@@ -66,8 +72,8 @@ export default function MainTabs() {
           borderTopWidth: 0,
           paddingHorizontal: 22,
           paddingTop: 12,
-          paddingBottom: 18,
-          height: 84,
+          paddingBottom: 18 + insetAbajo,
+          height: 84 + insetAbajo,
         },
         tabBarBackground: () => <FloatingTabBackground />,
         tabBarItemStyle: { borderRadius: 26, marginHorizontal: 2 },

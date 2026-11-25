@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Text, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { Text, StyleSheet, View, ActivityIndicator } from 'react-native';
+import Tocable from './Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { registrarHoyEntrene } from '../lib/xpApi';
@@ -62,7 +63,7 @@ export default function HoyEntreneButton({ disciplinasActivas, entrenamientosHoy
 
   return (
     <View style={styles.wrap}>
-      <TouchableOpacity
+      <Tocable
         style={[styles.button, agotado && styles.buttonAgotado]}
         onPress={handlePress}
         disabled={agotado || cargando}
@@ -85,7 +86,7 @@ export default function HoyEntreneButton({ disciplinasActivas, entrenamientosHoy
             )}
           </View>
         )}
-      </TouchableOpacity>
+      </Tocable>
       {!!feedback && <Text style={styles.feedback}>{feedback}</Text>}
     </View>
   );

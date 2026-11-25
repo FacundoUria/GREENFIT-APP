@@ -4,13 +4,13 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
   Modal,
   Linking,
   Platform,
 } from 'react-native';
+import Tocable from '../../components/Tocable';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -297,7 +297,7 @@ export default function HomeScreen({ navigation }: any) {
     >
       {/* Header: avatar (toca para cambiar la foto) + saludo + credencial + campanita */}
       <View style={styles.headerRow}>
-        <TouchableOpacity
+        <Tocable
           onPress={handleAvatarPress}
           disabled={isUploadingAvatar}
           accessibilityLabel="Cambiar foto de perfil"
@@ -309,27 +309,31 @@ export default function HomeScreen({ navigation }: any) {
               <ActivityIndicator size="small" color={colors.primary} />
             </View>
           )}
-        </TouchableOpacity>
+        </Tocable>
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting} numberOfLines={1}>
             Hola, {user?.name} 👋
           </Text>
         </View>
-        <TouchableOpacity
+        <Tocable
           style={styles.iconButton}
           onPress={() => navigation.navigate('Credential')}
           aria-label="Ver mi credencial"
         >
           <Ionicons name="qr-code" size={19} color={colors.textPrimary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Notifications')}>
+        </Tocable>
+        <Tocable
+          style={styles.iconButton}
+          onPress={() => navigation.navigate('Notifications')}
+          aria-label="Ver notificaciones"
+        >
           <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
           {unreadCount > 0 && (
             <View style={styles.bellBadge}>
               <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
             </View>
           )}
-        </TouchableOpacity>
+        </Tocable>
       </View>
 
       {error && <Text style={styles.error}>{error}</Text>}
@@ -350,13 +354,13 @@ export default function HomeScreen({ navigation }: any) {
 
       {hayVencido ? (
         <View style={styles.heroVencidoActions}>
-          <TouchableOpacity style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
+          <Tocable style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
             <Text style={styles.renewButtonText}>Renovar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+          </Tocable>
+          <Tocable style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
             <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
             <Text style={styles.contactButtonText}>Contactar</Text>
-          </TouchableOpacity>
+          </Tocable>
         </View>
       ) : (
         // Único punto de entrada real para comprar un pack cuando nada
@@ -366,10 +370,10 @@ export default function HomeScreen({ navigation }: any) {
         // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
         // toda la PWA para llegar a "Elegí tu pack".
         !isLoading && (
-          <TouchableOpacity style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
+          <Tocable style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>
             <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
             <Text style={styles.addPackButtonText}>{balances.length === 0 ? 'Elegir mi pack' : 'Agregar otro pack'}</Text>
-          </TouchableOpacity>
+          </Tocable>
         )
       )}
 
@@ -383,14 +387,14 @@ export default function HomeScreen({ navigation }: any) {
             size={208}
             strokeWidth={7}
           />
-          <TouchableOpacity
+          <Tocable
             style={styles.ringInfo}
             onPress={() => setXpInfoVisible(true)}
             hitSlop={8}
             accessibilityLabel="¿Cómo ganar XP?"
           >
             <Ionicons name="information-circle-outline" size={22} color={colors.textSecondary} />
-          </TouchableOpacity>
+          </Tocable>
         </View>
       )}
 
@@ -405,16 +409,16 @@ export default function HomeScreen({ navigation }: any) {
             <Text style={styles.bannerValue}>
               {nextBooking.title} · {formatDayLabel(nextBooking.startTime)} {formatClassTime(nextBooking.startTime)} hs
             </Text>
-            <TouchableOpacity style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
+            <Tocable style={styles.bannerCancel} onPress={() => setShowCancelModal(true)}>
               <Text style={styles.bannerCancelText}>Cancelar</Text>
-            </TouchableOpacity>
+            </Tocable>
           </View>
         ) : (
           // Botón grande de acción directa -- reemplaza al bloque de texto
           // gris "Todavía no tenés reservas".
-          <TouchableOpacity style={styles.reserveButton} onPress={() => navigation.navigate('Reservas')}>
+          <Tocable style={styles.reserveButton} onPress={() => navigation.navigate('Reservas')}>
             <Text style={styles.reserveButtonText}>📅 Reservar próxima clase</Text>
-          </TouchableOpacity>
+          </Tocable>
         ))}
 
       {!isLoading && restoDeProximas.length > 0 && (
@@ -459,16 +463,16 @@ export default function HomeScreen({ navigation }: any) {
           <View style={styles.modalSheet}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Elegí tu pack</Text>
-              <TouchableOpacity onPress={() => setShowBuyModal(false)}>
+              <Tocable onPress={() => setShowBuyModal(false)}>
                 <Ionicons name="close" size={22} color={colors.textPrimary} />
-              </TouchableOpacity>
+              </Tocable>
             </View>
 
             {packs.length === 0 && <Text style={styles.text}>No hay packs disponibles todavía.</Text>}
 
             <ScrollView>
               {packs.map((p) => (
-                <TouchableOpacity
+                <Tocable
                   key={p.id}
                   style={styles.packRow}
                   onPress={() => {
@@ -489,7 +493,7 @@ export default function HomeScreen({ navigation }: any) {
                     <Text style={styles.packRowSub}>{buildPackSubtitle(p)}</Text>
                   </View>
                   <Text style={styles.packRowPrice}>{formatCurrency(p.price)}</Text>
-                </TouchableOpacity>
+                </Tocable>
               ))}
             </ScrollView>
           </View>
@@ -515,10 +519,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   greeting: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
+  // 44x44: área mínima de toque (TOQUE.areaMinima). Antes 40x40.
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
@@ -558,7 +563,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderRadius: 12,
     paddingVertical: 12,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   renewButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 13 },
   // Variante "no urgente" de renewButton -- mismo lugar, mismo modal, pero
@@ -571,6 +578,7 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 12,
     paddingVertical: 12,
+    minHeight: 44,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.primary,
@@ -583,13 +591,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(37, 211, 102, 0.15)',
     borderRadius: 12,
     paddingVertical: 12,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   contactButtonText: { color: colors.textPrimary, fontWeight: '700', fontSize: 13 },
 
   ringSection: { alignItems: 'center', justifyContent: 'center', marginTop: 22, marginBottom: 6 },
-  ringInfo: { position: 'absolute', top: 4, right: 12 },
+  // Ícono de 22 px dentro de un área de 44x44 (antes 22x24 y el hitSlop no
+  // agranda nada en web). Mismo centro que antes: top 4 + 11 y right 12 + 11.
+  ringInfo: {
+    position: 'absolute',
+    top: -7,
+    right: 1,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   banner: {
     flexDirection: 'row',
@@ -624,7 +643,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bannerValue: { flex: 1, color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
-  bannerCancel: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.danger },
+  bannerCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: colors.danger,
+  },
   bannerCancelText: { color: colors.white, fontWeight: '700', fontSize: 12 },
   upcomingList: {
     backgroundColor: colors.surface,

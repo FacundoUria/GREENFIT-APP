@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { ScrollView, TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { ScrollView, Text, StyleSheet } from 'react-native';
+import Tocable from './Tocable';
 import { isSameDay } from '../lib/dateRange';
 import { mockup, alfa, fuentes } from '../theme/agendaMockup';
 
@@ -34,7 +35,7 @@ export default function DaySelector({ selectedDate, onSelect, daysAhead = 10 }: 
         const isToday = index === 0;
         const label = isToday ? 'Hoy' : WEEKDAYS[day.getDay()];
         return (
-          <TouchableOpacity
+          <Tocable
             key={day.toISOString()}
             style={[styles.chip, isSelected && styles.chipSelected]}
             onPress={() => onSelect(day)}
@@ -51,7 +52,7 @@ export default function DaySelector({ selectedDate, onSelect, daysAhead = 10 }: 
               {label}
             </Text>
             <Text style={[styles.chipNumber, isSelected && styles.chipNumberSelected]}>{day.getDate()}</Text>
-          </TouchableOpacity>
+          </Tocable>
         );
       })}
     </ScrollView>
