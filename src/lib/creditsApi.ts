@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { Pack, UserCredit, CreditoDePack, CreditLote } from '../types';
 import { formatShortDate } from './dateFormat';
 import { MembershipStatus } from './membershipStatus';
+import { resumirSinVigente, DisciplinaSinVigente, FilaCreditoConDisciplina } from './planSinVigente';
 
 // Un pack ahora es un combo: `creditos` (jsonb en la tabla) trae
 // [{discipline_id, credits}, ...] -- 0 a N disciplinas -- en vez del viejo
@@ -249,6 +250,17 @@ export async function fetchUserBalances(userId: string): Promise<UserCredit[]> {
   }
 
   return resultado;
+}
+
+// "Renovar" de Inicio: las disciplinas que el socio tuvo y hoy NO tiene
+// vigentes (fetchUserBalances() las descarta). Ver planSinVigente.ts.
+export async function fetchDisciplinasSinVigente(userId: string): Promise<DisciplinaSinVigente[]> {
+  const { data, error } = await supabase
+    .from('user_credits')
+    .select('remaining_credits, expires_at, discipline:disciplines(id, name, kind, is_active)')
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  return resumirSinVigente((data ?? []) as FilaCreditoConDisciplina[]);
 }
 
 // Lo que arma formatCreditosDisponibles() -- separado en dos porque con

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { colors } from '../theme/colors';
 import { UserCredit } from '../types';
+import { DisciplinaSinVigente } from '../lib/planSinVigente';
 import Aparecer from './Aparecer';
 
 // Carrusel horizontal de créditos de Inicio: UNA tarjeta por disciplina
@@ -12,9 +13,14 @@ import Aparecer from './Aparecer';
 //
 // Aparatos (kind='membership') es pase libre: sin número, "∞".
 // Créditos (kind='credits'): remainingCredits real (la suma de sus lotes).
+// Después de las activas, en gris, las que el socio tuvo y hoy no tiene
+// vigentes (`sinVigente`, caso parcial de "Renovar"): solo informativas.
 
 interface CreditosCarouselProps {
   balances: UserCredit[];
+  // Caso parcial de "Renovar": disciplinas que el socio tuvo y hoy no tiene
+  // vigentes. Van al final, en gris, solo informativas (no se tocan).
+  sinVigente?: DisciplinaSinVigente[];
 }
 
 function CreditoCard({ balance }: { balance: UserCredit }) {
@@ -47,7 +53,34 @@ function CreditoCard({ balance }: { balance: UserCredit }) {
   );
 }
 
-export default function CreditosCarousel({ balances }: CreditosCarouselProps) {
+// Tarjeta gris: misma forma que las demás, sin número real. Créditos: "0" y
+// "Sin créditos". Aparatos (pase libre vencido): "—" y "Vencido".
+function SinVigenteCard({ disciplina }: { disciplina: DisciplinaSinVigente }) {
+  const esPaseLibre = disciplina.kind === 'membership';
+  const etiqueta = esPaseLibre ? 'Vencido' : 'Sin créditos';
+  return (
+    <View
+      style={[styles.card, styles.cardSinVigente]}
+      testID={`credito-card-sin-vigente-${disciplina.disciplineId}`}
+      accessibilityLabel={`${disciplina.name}: ${etiqueta.toLowerCase()}`}
+    >
+      <View style={styles.pill}>
+        <Text style={styles.pillTexto} numberOfLines={1}>
+          {disciplina.name}
+        </Text>
+      </View>
+      <View style={styles.centro}>
+        <Text style={[styles.numero, styles.numeroSinVigente]}>{esPaseLibre ? '—' : '0'}</Text>
+      </View>
+      <View style={styles.pie}>
+        <View style={[styles.punto, styles.puntoSinVigente]} />
+        <Text style={styles.etiqueta}>{etiqueta}</Text>
+      </View>
+    </View>
+  );
+}
+
+export default function CreditosCarousel({ balances, sinVigente = [] }: CreditosCarouselProps) {
   if (balances.length === 0) return null;
 
   return (
@@ -61,6 +94,11 @@ export default function CreditosCarousel({ balances }: CreditosCarouselProps) {
       {balances.map((b) => (
         <Aparecer key={b.discipline.id}>
           <CreditoCard balance={b} />
+        </Aparecer>
+      ))}
+      {sinVigente.map((d) => (
+        <Aparecer key={`sin-vigente-${d.disciplineId}`}>
+          <SinVigenteCard disciplina={d} />
         </Aparecer>
       ))}
     </ScrollView>
@@ -99,4 +137,8 @@ const styles = StyleSheet.create({
   punto: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
   etiqueta: { color: colors.textSecondary, fontSize: 10, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' },
   etiquetaPaseLibre: { color: colors.primary },
+  // Variante gris (sin vigente): apagada, sin el verde del punto.
+  cardSinVigente: { opacity: 0.55 },
+  numeroSinVigente: { color: colors.textSecondary },
+  puntoSinVigente: { backgroundColor: colors.textSecondary },
 });

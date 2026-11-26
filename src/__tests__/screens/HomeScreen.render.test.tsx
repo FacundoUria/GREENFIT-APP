@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Platform, RefreshControl } from 'react-native';
+import { Alert, Linking, Platform, RefreshControl } from 'react-native';
 import { render, fireEvent, waitFor, act, screen, within } from '@testing-library/react-native';
 
 // HomeScreen usa useFocusEffect (no useEffect simple) para el refresh al
@@ -45,6 +45,8 @@ jest.mock('../../lib/creditsApi', () => ({
   // que un test futuro sí puebla `packs`/balances.
   ...jest.requireActual('../../lib/creditsApi'),
   fetchUserBalances: jest.fn().mockResolvedValue([]),
+  // "Renovar": lo que el socio tuvo y hoy no tiene vigente. Por defecto nada.
+  fetchDisciplinasSinVigente: jest.fn().mockResolvedValue([]),
   fetchPacks: jest.fn().mockResolvedValue([]),
   syncMyMembership: jest.fn().mockResolvedValue(undefined),
 }));
@@ -86,7 +88,7 @@ jest.mock('../../lib/xpApi', () => ({
 jest.mock('../../lib/paymentsApi', () => ({ createPaymentPreference: jest.fn() }));
 
 import { supabase } from '../../lib/supabase';
-import { fetchUserBalances, fetchPacks } from '../../lib/creditsApi';
+import { fetchUserBalances, fetchPacks, fetchDisciplinasSinVigente } from '../../lib/creditsApi';
 import { createPaymentPreference } from '../../lib/paymentsApi';
 import {
   fetchTotalXp,
@@ -141,11 +143,11 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
   });
 
   // Bug real detectado: el único botón que abría "Elegí tu pack" era
-  // "Renovar", y ese SOLO se renderiza si hayVencido -- un socio nuevo (0
-  // packs) o uno con todo activo no tenía NINGÚN botón en toda la PWA para
-  // llegar a comprar. Estos 3 tests cubren los 3 estados posibles del Hero
-  // Card, confirmando que siempre hay EXACTAMENTE una forma de abrir el
-  // modal, con la etiqueta correcta para cada caso.
+  // "Renovar" -- un socio nuevo (0 packs) o uno con todo activo no tenía
+  // NINGÚN botón en toda la PWA para llegar a comprar. Estos tests cubren los
+  // estados del Hero Card (nuevo, con algo vigente, todo vencido, sin
+  // créditos, parcial), confirmando que siempre hay EXACTAMENTE una forma de
+  // abrir el modal, con la etiqueta correcta para cada caso.
   describe('acceso para comprar un pack (Hero Card) -- antes solo existía "Renovar", oculto salvo con algo vencido', () => {
     it('sin ningún pack activo, muestra "Elegir mi pack" (no "Renovar") y abre "Elegí tu pack" al tocarlo', async () => {
       const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
@@ -184,29 +186,112 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
       expect(getByText('Agregar otro pack')).toBeTruthy();
     });
 
-    it('con algo vencido, sigue mostrando "Renovar" -- no el botón nuevo (comportamiento existente, sin tocar)', async () => {
-      // mockResolvedValueOnce (no mockResolvedValue) -- el default `[]` del
-      // factory de arriba vive para SIEMPRE si se pisa con la variante
-      // persistente, contaminando cualquier test que corra después de este
-      // en el mismo archivo (no hay un beforeEach que lo vuelva a poner en
-      // `[]`, a diferencia de fetchTotalXp y compañía).
-      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+    // "Renovar" (arreglo). Antes había acá un test que mockeaba un saldo en
+    // 0 dentro de fetchUserBalances: un estado imposible, porque esa función
+    // solo devuelve lo vigente (y por eso "Renovar" no aparecía nunca en la
+    // app real). Lo vencido llega por fetchDisciplinasSinVigente.
+    it('sin nada vigente y el plan vencido: "Tu plan venció el DD/MM.", "Renovar" (abre "Elegí tu pack") y "Hablar con Seba" (WhatsApp)', async () => {
+      (fetchDisciplinasSinVigente as jest.Mock).mockResolvedValueOnce([
         {
-          id: 'bal-1',
-          userId: 'user-1',
-          remainingCredits: 0,
-          expiresAt: null,
-          createdAt: '2026-01-01',
-          discipline: { id: 'disc-crossfit', name: 'CrossFit', kind: 'credits' },
-          pack: null,
+          disciplineId: 'disc-crossfit',
+          name: 'CrossFit',
+          kind: 'credits',
+          ultimoVencimiento: '2026-11-10T23:59:59.999-03:00',
+          motivo: 'vencido',
         },
       ]);
+      const abrirUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
 
       const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
       await waitFor(() => expect(getByText('Renovar')).toBeTruthy());
 
+      // DD/MM del día en Argentina (con el año solo si no es el año en curso).
+      expect(getByText(/^Tu plan venció el 10\/11(\/\d{4})?\.$/)).toBeTruthy();
+      expect(queryByText('Todavía no tenés ningún pack activo.')).toBeNull();
       expect(queryByText('Elegir mi pack')).toBeNull();
       expect(queryByText('Agregar otro pack')).toBeNull();
+
+      fireEvent.press(getByText('Hablar con Seba'));
+      expect(abrirUrl).toHaveBeenCalledWith(expect.stringContaining('wa.me/'));
+
+      fireEvent.press(getByText('Renovar'));
+      await waitFor(() => expect(getByText('Elegí tu pack')).toBeTruthy());
+      abrirUrl.mockRestore();
+    });
+
+    it('sin nada vigente, con la fecha del plan todavía vigente pero en 0: "Te quedaste sin créditos de X." y los dos botones', async () => {
+      (fetchDisciplinasSinVigente as jest.Mock).mockResolvedValueOnce([
+        {
+          disciplineId: 'disc-crossfit',
+          name: 'CrossFit',
+          kind: 'credits',
+          ultimoVencimiento: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+          motivo: 'sin_creditos',
+        },
+      ]);
+
+      const { getByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('Te quedaste sin créditos de CrossFit.')).toBeTruthy());
+      expect(getByText('Renovar')).toBeTruthy();
+      expect(getByText('Hablar con Seba')).toBeTruthy();
+    });
+
+    it('caso parcial (le queda algo vigente): lo que no tiene vigente va en gris ("Sin créditos" / "Vencido"), queda "Agregar otro pack" y NO hay "Renovar"', async () => {
+      (fetchUserBalances as jest.Mock).mockResolvedValueOnce([
+        {
+          id: 'bal-yoga',
+          userId: 'user-1',
+          remainingCredits: 4,
+          expiresAt: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+          createdAt: '2026-01-01',
+          discipline: { id: 'disc-yoga', name: 'Yoga', kind: 'credits' },
+          pack: null,
+        },
+      ]);
+      (fetchDisciplinasSinVigente as jest.Mock).mockResolvedValueOnce([
+        {
+          disciplineId: 'disc-crossfit',
+          name: 'CrossFit',
+          kind: 'credits',
+          ultimoVencimiento: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+          motivo: 'sin_creditos',
+        },
+        {
+          disciplineId: 'disc-aparatos',
+          name: 'Sala',
+          kind: 'membership',
+          ultimoVencimiento: '2026-10-01T23:59:59.999-03:00',
+          motivo: 'vencido',
+        },
+      ]);
+
+      const { getByText, getByTestId, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByTestId('credito-card-sin-vigente-disc-crossfit')).toBeTruthy());
+
+      const crossfit = getByTestId('credito-card-sin-vigente-disc-crossfit');
+      expect(within(crossfit).getByText('CrossFit')).toBeTruthy();
+      expect(within(crossfit).getByText('Sin créditos')).toBeTruthy();
+      const sala = getByTestId('credito-card-sin-vigente-disc-aparatos');
+      expect(within(sala).getByText('Vencido')).toBeTruthy();
+      // La activa sigue igual.
+      expect(within(getByTestId('credito-card-disc-yoga')).getByText('4')).toBeTruthy();
+
+      expect(getByText('Agregar otro pack')).toBeTruthy();
+      expect(queryByText('Renovar')).toBeNull();
+      expect(queryByText('Hablar con Seba')).toBeNull();
+      expect(queryByText(/Tu plan venció|Te quedaste sin créditos/)).toBeNull();
+    });
+
+    it('si falla la lectura de lo vencido, Inicio sigue como antes ("Elegir mi pack") y avisa en consola', async () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      (fetchDisciplinasSinVigente as jest.Mock).mockRejectedValueOnce(new Error('sin red'));
+
+      const { getByText, queryByText } = render(<HomeScreen navigation={navigation} />);
+      await waitFor(() => expect(getByText('Elegir mi pack')).toBeTruthy());
+      expect(getByText('Todavía no tenés ningún pack activo.')).toBeTruthy();
+      expect(queryByText('Renovar')).toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Renovar'), 'sin red');
+      warn.mockRestore();
     });
   });
 

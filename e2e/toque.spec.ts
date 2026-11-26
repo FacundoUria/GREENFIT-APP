@@ -93,8 +93,20 @@ test.describe('PWA -- base de la tanda visual (toque, zonas seguras, theme-color
     expect(await tocablesChicos(page)).toEqual([]);
   });
 
-  // (Sin caso "Renovar / Contactar": fetchUserBalances descarta lo vencido o en 0,
-  // así que hoy esos dos botones no llegan a mostrarse. Igual quedaron de 44 px.)
+  // "Renovar" y "Hablar con Seba": aparecen cuando el socio no tiene nada
+  // vigente pero tuvo algo (acá, CrossFit vencido).
+  test('Inicio con el plan vencido ("Renovar" / "Hablar con Seba"): nada tocable de menos de 44 px', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        user_credits: [{ ...CREDITO, id: 'uc-vencido', remaining_credits: 0, expires_at: '2026-01-31T23:59:59.999-03:00' }],
+      },
+    });
+    await expect(page.getByText('Renovar', { exact: true })).toBeVisible();
+    await expect(page.getByText('Hablar con Seba', { exact: true })).toBeVisible();
+    expect(await tocablesChicos(page)).toEqual([]);
+  });
+
   test('Inicio sin ningún pack ("Elegir mi pack"): nada tocable de menos de 44 px', async ({ page }) => {
     await loginComoSocio(page, { tables: tablasBase() });
     await expect(page.getByText('Elegir mi pack', { exact: true })).toBeVisible();

@@ -19,7 +19,15 @@ import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 import { supabase } from '../../lib/supabase';
 import { Pack, UserCredit } from '../../types';
-import { fetchPacks, fetchUserBalances, syncMyMembership, buildPackSubtitle, resolverFechaPlan } from '../../lib/creditsApi';
+import {
+  fetchPacks,
+  fetchUserBalances,
+  fetchDisciplinasSinVigente,
+  syncMyMembership,
+  buildPackSubtitle,
+  resolverFechaPlan,
+} from '../../lib/creditsApi';
+import { DisciplinaSinVigente, textoPlanSinVigente } from '../../lib/planSinVigente';
 import { combineDateAndTime, formatDateOnly } from '../../lib/classesApi';
 import { showAlert } from '../../lib/crossPlatformAlert';
 import { createPaymentPreference } from '../../lib/paymentsApi';
@@ -93,6 +101,8 @@ export default function HomeScreen({ navigation }: any) {
   const { user, updateAvatarUrl } = useAuth();
   const { configuracion } = useConfiguracion();
   const [balances, setBalances] = useState<UserCredit[]>([]);
+  // "Renovar": lo que el socio tuvo y hoy no tiene vigente (ver planSinVigente.ts).
+  const [sinVigente, setSinVigente] = useState<DisciplinaSinVigente[]>([]);
   const [upcomingBookings, setUpcomingBookings] = useState<NextBooking[]>([]);
   const [packs, setPacks] = useState<Pack[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,14 +132,25 @@ export default function HomeScreen({ navigation }: any) {
       // correr antes de que la reparación termine de insertar.
       await syncMyMembership();
 
-      const [balancesResult, bookingsResult, packsResult, xpResult, entrenamientosHoyResult] = await Promise.all([
-        fetchUserBalances(user.id),
-        fetchUpcomingBookings(user.id),
-        fetchPacks({ activeOnly: true }),
-        fetchTotalXp(user.id),
-        fetchEntrenamientosHoy(user.id),
-      ]);
+      const [balancesResult, bookingsResult, packsResult, xpResult, entrenamientosHoyResult, sinVigenteResult] =
+        await Promise.all([
+          fetchUserBalances(user.id),
+          fetchUpcomingBookings(user.id),
+          fetchPacks({ activeOnly: true }),
+          fetchTotalXp(user.id),
+          fetchEntrenamientosHoy(user.id),
+          // Es una lectura: si falla, Inicio sigue como antes (sin el aviso de
+          // vencido) y queda el motivo en consola.
+          fetchDisciplinasSinVigente(user.id).catch((err: unknown) => {
+            console.warn(
+              '[GreenFit] No se pudo leer lo vencido del socio (Renovar):',
+              err instanceof Error ? err.message : err
+            );
+            return [] as DisciplinaSinVigente[];
+          }),
+        ]);
       setBalances(balancesResult);
+      setSinVigente(sinVigenteResult);
       setUpcomingBookings(bookingsResult);
       setPacks(packsResult);
       setTotalXp(xpResult);
@@ -253,16 +274,21 @@ export default function HomeScreen({ navigation }: any) {
   const isWithinCancelLimit =
     !!nextBooking && new Date(nextBooking.startTime).getTime() - Date.now() < cancelLimitMs;
 
-  // Cada balance se resuelve a su propio estado (una disciplina puede estar
-  // vencida mientras otra sigue activa) -- "hayVencido" decide si mostramos
-  // UNA sola vez el bloque de Renovar/Contactar, en vez de repetirlo por
-  // cada tarjeta.
+  // Cada balance se resuelve a su propio estado (para el tope de "Hoy
+  // Entrené", más abajo).
   const balancesConEstado = balances.map((b) => {
     const isMembership = b.discipline.kind === 'membership';
     const status = isMembership ? getExpiryStatus(b.expiresAt) : getCreditsStatus(b.remainingCredits);
     return { balance: b, isMembership, status };
   });
-  const hayVencido = balancesConEstado.some((b) => b.status === 'vencido');
+  // "Renovar": antes salía de un saldo "vencido" en `balances`, que nunca
+  // llega (fetchUserBalances solo trae lo vigente), así que un socio con todo
+  // vencido veía lo mismo que uno nuevo. Ahora:
+  //   * no le queda nada vigente pero tuvo algo: texto con la fecha, "Renovar"
+  //     y "Hablar con Seba";
+  //   * le queda algo vigente: lo vencido va en gris en el carrusel, y queda
+  //     "Agregar otro pack" (sin "Renovar": una compra reemplaza todo el plan).
+  const vencioTodo = balances.length === 0 && sinVigente.length > 0;
   const resumenXp = calcularResumenXp(totalXp);
   // Tope diario de "Hoy Entrené" -- mismo criterio "no vencido" que ya usa
   // el resto de esta pantalla (activo O por_vencer cuentan, solo vencido
@@ -350,11 +376,13 @@ export default function HomeScreen({ navigation }: any) {
       ) : balances.length === 0 ? (
         <Aparecer>
           <View style={styles.emptyCard}>
-            <Text style={styles.heroEmptyText}>Todavía no tenés ningún pack activo.</Text>
+            <Text style={styles.heroEmptyText} testID={vencioTodo ? 'plan-vencido-texto' : undefined}>
+              {vencioTodo ? textoPlanSinVigente(sinVigente) : 'Todavía no tenés ningún pack activo.'}
+            </Text>
           </View>
         </Aparecer>
       ) : (
-        <CreditosCarousel balances={balances} />
+        <CreditosCarousel balances={balances} sinVigente={sinVigente} />
       )}
 
       {/* Vencimiento: UNA sola fecha (user_credits), badge de membershipStatus.ts */}
@@ -364,23 +392,24 @@ export default function HomeScreen({ navigation }: any) {
         </Aparecer>
       )}
 
-      {hayVencido ? (
-        <View style={styles.heroVencidoActions}>
-          <Tocable style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
-            <Text style={styles.renewButtonText}>Renovar</Text>
-          </Tocable>
-          <Tocable style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
-            <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
-            <Text style={styles.contactButtonText}>Contactar</Text>
-          </Tocable>
-        </View>
+      {vencioTodo ? (
+        !isLoading && (
+          <Aparecer>
+            <View style={styles.heroVencidoActions}>
+              <Tocable style={styles.renewButton} onPress={() => setShowBuyModal(true)}>
+                <Text style={styles.renewButtonText}>Renovar</Text>
+              </Tocable>
+              <Tocable style={styles.contactButton} onPress={() => Linking.openURL(CONTACTO_WHATSAPP)}>
+                <Ionicons name="logo-whatsapp" size={14} color={colors.textPrimary} />
+                <Text style={styles.contactButtonText}>Hablar con Seba</Text>
+              </Tocable>
+            </View>
+          </Aparecer>
+        )
       ) : (
-        // Único punto de entrada real para comprar un pack cuando nada
-        // está vencido -- antes esto era invisible: "Renovar" (arriba)
-        // abre este mismo modal pero solo se renderiza con algo vencido,
-        // así que un socio nuevo (0 packs) o uno que ya tiene un pack
-        // activo y quiere sumar otra disciplina no tenía NINGÚN botón en
-        // toda la PWA para llegar a "Elegí tu pack".
+        // Socio nuevo ("Elegir mi pack") o con algo vigente ("Agregar otro
+        // pack", también en el caso parcial). Abre el mismo "Elegí tu pack"
+        // que "Renovar".
         !isLoading && (
           <Aparecer>
             <Tocable style={styles.addPackButton} onPress={() => setShowBuyModal(true)}>

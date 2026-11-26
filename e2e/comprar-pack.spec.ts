@@ -27,10 +27,11 @@ const PACK_APARATOS = {
   creditos: [],
 };
 
-// El botón "Renovar" (que abre "Elegí tu pack") solo aparece si alguna
-// disciplina está vencida -- se fuerza con un balance de CrossFit en 0.
-// Sin nada vencido, el acceso es "Elegir mi pack"/"Agregar otro pack" (ver
-// el describe de arriba, "Acceso para comprar").
+// El botón "Renovar" (que abre "Elegí tu pack") aparece cuando el socio no
+// tiene nada vigente pero tuvo algo -- acá, un CrossFit en 0 (lo lee
+// fetchDisciplinasSinVigente; fetchUserBalances lo descarta). Sin nada
+// vencido, el acceso es "Elegir mi pack"/"Agregar otro pack" (ver el
+// describe de arriba, "Acceso para comprar").
 const BALANCE_VENCIDO = {
   id: 'uc-vencido',
   user_id: SOCIO_DEMO.id,
