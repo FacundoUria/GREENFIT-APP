@@ -749,9 +749,11 @@ const styles = StyleSheet.create({
   tabsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 14 },
   tab: {
     flex: 1,
+    minHeight: 44, // área mínima de toque (antes 36)
     paddingVertical: 9,
     borderRadius: 20,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,

@@ -146,9 +146,9 @@ const styles = StyleSheet.create({
   button: {
     position: 'fixed',
     right: 18,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44, // área mínima de toque (antes 36)
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
@@ -184,7 +184,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
   },
-  closeButton: { position: 'absolute', top: 14, right: 14, zIndex: 1 },
+  // 44x44 (área mínima de toque; antes 20x23) con la X en el mismo lugar que
+  // antes (top/right 14 menos los 12 px que suma la caja alrededor del ícono).
+  closeButton: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
   iconCircle: {
     width: 56,
     height: 56,
@@ -202,10 +213,12 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: colors.primary,
     borderRadius: 12,
+    minHeight: 44, // área mínima de toque (antes 43)
     paddingVertical: 12,
     paddingHorizontal: 24,
     width: '100%',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryButtonText: { color: colors.onPrimary, fontWeight: '700', fontSize: 14 },
 });

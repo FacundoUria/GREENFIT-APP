@@ -333,9 +333,11 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
+    minHeight: 44, // área mínima de toque (antes 36)
     paddingVertical: 9,
     borderRadius: 20,
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.surfaceAlt,
@@ -348,6 +350,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
+    minHeight: 44, // área mínima de toque (antes 36)
     paddingVertical: 10,
   },
   markAllText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },

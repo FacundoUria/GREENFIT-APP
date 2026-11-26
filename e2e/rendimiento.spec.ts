@@ -15,6 +15,17 @@ import { irATab } from './support/nav';
 
 test.skip(!process.env.RENDIMIENTO, 'Solo con RENDIMIENTO=1');
 
+// Sin trace: grabarlo saca una foto del DOM antes de cada acción de Playwright,
+// en el hilo principal de la página, y con la CPU 4x más lenta eso solo ya
+// daba tareas de ~50 ms que se contaban como de la app (medido en la parte 4).
+// Por lo mismo, dentro de una medición se toca por coordenadas (calculadas
+// antes) y no con getByText(...).click(), que recorre el DOM buscando el texto.
+test.use({ trace: 'off' });
+
+// Toque de mouse en el centro de una caja ya medida (sin buscar nada en el DOM).
+type Caja = { x: number; y: number; width: number; height: number };
+const tocarCentro = (page: Page, caja: Caja) => page.mouse.click(caja.x + caja.width / 2, caja.y + caja.height / 2);
+
 // Siempre en Chrome (el descriptor de iPhone pide WebKit: se le saca eso).
 function enChrome(d: (typeof devices)[string]) {
   const { defaultBrowserType: _webkit, ...resto } = d;
@@ -369,11 +380,12 @@ for (const perfil of PERFILES) {
       const pregunta = page.getByText('¿Confirmás tu lugar en esta clase?');
 
       // Abrir: sube en 600 ms (incluye dibujar el contenido de la hoja).
+      const cajaTarjeta = (await tarjeta.boundingBox())!;
       const abrir = await medir(page, cdp, async () => {
-        await tarjeta.click();
-        await expect(pregunta).toBeVisible();
-        await page.waitForTimeout(900);
+        await tocarCentro(page, cajaTarjeta);
+        await page.waitForTimeout(1200);
       });
+      await expect(pregunta).toBeVisible();
       informar(perfil.nombre, 'Hoja, abrir', abrir);
 
       // Arrastrar con el dedo un 15 % y soltar: sigue al dedo y vuelve a su lugar.
@@ -397,9 +409,9 @@ for (const perfil of PERFILES) {
       // Cerrar tocando afuera: baja en 200 ms.
       const cerrarAfuera = await medir(page, cdp, async () => {
         await page.mouse.click(caja.x + caja.width / 2, 40);
-        await expect(pregunta).toHaveCount(0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(500);
       });
+      await expect(pregunta).toHaveCount(0);
       informar(perfil.nombre, 'Hoja, cerrar tocando afuera', cerrarAfuera);
 
       // Volver a abrir y cerrarla arrastrando con el dedo.
@@ -408,12 +420,128 @@ for (const perfil of PERFILES) {
       await page.waitForTimeout(900);
       const cerrarArrastrando = await medir(page, cdp, async () => {
         await dedo(caja.height * 0.6, 15);
-        await expect(pregunta).toHaveCount(0);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(500);
       });
+      await expect(pregunta).toHaveCount(0);
       informar(perfil.nombre, 'Hoja, cerrar arrastrando con el dedo', cerrarArrastrando);
 
       for (const m of [abrir, arrastrarYSoltar, cerrarAfuera, cerrarArrastrando]) cumple(m);
+    });
+
+    test('parte 4 (reserva optimista y tirar para refrescar): Agenda, Inicio y Mi Rutina', async ({ page }) => {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Performance.enable');
+      await cdp.send('Emulation.setCPUThrottlingRate', { rate: perfil.cpu });
+      await page.addInitScript(() => {
+        window.localStorage.setItem('greenfit:ios-install-banner-dismissed-at', String(Date.now()));
+      });
+      let soltarReserva!: () => void;
+      await loginComoSocio(page, {
+        tables: {
+          ...tablasBase(),
+          classes: clasesDeHoy(3),
+          user_credits: [{ id: 'uc', user_id: SOCIO_DEMO.id, discipline: DISCIPLINA_CROSSFIT, remaining_credits: 5, expires_at: EN_30_DIAS, created_at: '2026-01-01T00:00:00.000Z' }],
+          ...rutinaLarga(),
+        },
+        rpc: { book_class: () => 'perf-booking' },
+        antesDeEntrar: async () => {
+          soltarReserva = await retener(page, '/rest/v1/rpc/book_class');
+        },
+      });
+      const criterio: Medicion[] = [];
+
+      // Reserva optimista: al tocar "Confirmar" (el servidor todavía no
+      // respondió) se cierra la hoja y la tarjeta pasa a "Reservada" con el
+      // tilde que crece.
+      await irATab(page, 'Agenda');
+      const tarjeta = page.getByTestId('agenda-card-perf-clase-0');
+      await expect(tarjeta).toBeVisible();
+      await page.waitForTimeout(1200);
+      await tarjeta.click();
+      await expect(page.getByText('¿Confirmás tu lugar en esta clase?')).toBeVisible();
+      await page.getByText(/^Declaro que mi estado de salud/).click();
+      await page.waitForTimeout(900);
+      const cajaConfirmar = (await page.getByText('Confirmar', { exact: true }).boundingBox())!;
+      const optimista = await medir(page, cdp, async () => {
+        await tocarCentro(page, cajaConfirmar);
+        await page.waitForTimeout(800);
+      });
+      await expect(page.getByTestId('agenda-card-tilde-perf-clase-0')).toBeVisible();
+      informar(perfil.nombre, 'Agenda, confirmar: "Reservada" con el tilde que crece', optimista);
+      criterio.push(optimista);
+      const confirmada = await medir(page, cdp, async () => {
+        soltarReserva();
+        await expect(page.getByText('¡Reserva confirmada!')).toBeVisible();
+        await page.waitForTimeout(900);
+      });
+      informar(perfil.nombre, 'Agenda, el servidor confirma: recarga y sube la hoja (informativo)', confirmada);
+      await page.getByText('Listo').click();
+      await page.waitForTimeout(500);
+
+      // Tirar para refrescar, en las tres pantallas. La recarga queda retenida
+      // para medir aparte: el arrastre, la ruedita, el dibujo de los datos
+      // nuevos (informativo, como en la parte 2) y la vuelta del indicador.
+      const indicador = page.getByTestId('refresco-indicador').filter({ visible: true });
+      const pantallas: { nombre: string; ruta: string; ir: () => Promise<void> }[] = [
+        { nombre: 'Agenda', ruta: '/rest/v1/classes', ir: async () => {} },
+        {
+          nombre: 'Inicio',
+          ruta: '/rest/v1/user_credits',
+          ir: async () => {
+            await irATab(page, 'Inicio');
+            await expect(page.getByTestId(`credito-card-${DISCIPLINA_CROSSFIT.id}`)).toBeVisible();
+          },
+        },
+        {
+          nombre: 'Mi Rutina',
+          ruta: '/rest/v1/routines',
+          ir: async () => {
+            await irATab(page, 'Mi Rutina');
+            await expect(page.getByLabel('Marcar Ejercicio 1 como completado')).toBeVisible();
+          },
+        },
+      ];
+      for (const p of pantallas) {
+        await p.ir();
+        await page.waitForTimeout(1300);
+        const lista = await indicador.evaluate((el) => {
+          const r = (el.previousElementSibling as HTMLElement).getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + 90 };
+        });
+        const dedo = async (dy: number, soltar: boolean) => {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: lista.x, y: lista.y }] });
+          for (let i = 1; i <= 12; i++) {
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: lista.x, y: lista.y + (dy * i) / 12 }] });
+            await page.waitForTimeout(16);
+          }
+          if (soltar) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        };
+        const opacidad = () => indicador.evaluate((el) => Number(getComputedStyle(el).opacity));
+        const soltarDatos = await retener(page, p.ruta);
+
+        const arrastre = await medir(page, cdp, () => dedo(120, false));
+        informar(perfil.nombre, `${p.nombre}, tirar 120 px (el indicador sigue al dedo)`, arrastre);
+        expect(await opacidad(), 'el indicador se ve con el dedo abajo').toBe(1);
+        const ruedita = await medir(page, cdp, async () => {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          await page.waitForTimeout(800);
+        });
+        informar(perfil.nombre, `${p.nombre}, soltar: va a 64 px y gira la ruedita`, ruedita);
+        const datos = await medir(page, cdp, async () => {
+          soltarDatos();
+          await expect.poll(opacidad).toBe(0);
+          await page.waitForTimeout(300);
+        });
+        informar(perfil.nombre, `${p.nombre}, llegan los datos y vuelve (informativo: incluye dibujar)`, datos);
+        const vuelta = await medir(page, cdp, async () => {
+          await dedo(40, true);
+          await page.waitForTimeout(400);
+        });
+        informar(perfil.nombre, `${p.nombre}, tirar 40 px y soltar (vuelve sin refrescar)`, vuelta);
+        criterio.push(arrastre, ruedita, vuelta);
+      }
+
+      for (const m of criterio) cumple(m);
     });
   });
 }

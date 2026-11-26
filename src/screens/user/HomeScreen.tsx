@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  RefreshControl,
   Linking,
   Platform,
 } from 'react-native';
@@ -13,6 +12,8 @@ import Tocable from '../../components/Tocable';
 import Aparecer from '../../components/Aparecer';
 import { EsqueletoCreditos } from '../../components/Esqueletos';
 import HojaInferior from '../../components/HojaInferior';
+import { useTirarParaRefrescar } from '../../components/TirarParaRefrescar';
+import { vibrar } from '../../lib/vibrar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
@@ -249,6 +250,9 @@ export default function HomeScreen({ navigation }: any) {
     }
   }
 
+  // Tirar para refrescar: en web, propio (TirarParaRefrescar); en nativo, RefreshControl.
+  const refresco = useTirarParaRefrescar({ refrescando: isLoading, onRefrescar: load });
+
   const nextBooking = upcomingBookings[0] ?? null;
   const restoDeProximas = upcomingBookings.slice(1, 3);
 
@@ -260,6 +264,7 @@ export default function HomeScreen({ navigation }: any) {
       // verdad sobre el crédito. Antes: "Te devolvimos el crédito." siempre
       // (cancel_booking devolvía true aunque el lote ya estuviera vencido).
       const resultado = await cancelarReserva(nextBooking.classId, nextBooking.bookingDate, reason || null);
+      vibrar('cancelar');
       setShowCancelModal(false);
       await load();
       showAlert('Reserva cancelada', resultado.mensaje);
@@ -317,11 +322,12 @@ export default function HomeScreen({ navigation }: any) {
     setEntrenamientosHoy(nuevoEntrenamientosHoy);
   };
 
-  return (
+  return refresco.envolver(
     <ScrollView
+      ref={refresco.refScroll}
       style={styles.container}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
+      refreshControl={refresco.refreshControl}
     >
       {/* Header: avatar (toca para cambiar la foto) + saludo + credencial + campanita.
           Cada sección entra con <Aparecer>: en cascada, de arriba abajo. */}

@@ -89,7 +89,7 @@ export default function AthleteProfileCard({
                   <Ionicons name="flash" size={11} color={colors.onPrimary} />
                   <Text style={styles.levelBadgeText}>NIVEL {nivel}</Text>
                 </View>
-                <Tocable onPress={onXpInfoPress} hitSlop={8} accessibilityLabel="¿Cómo ganar XP?">
+                <Tocable onPress={onXpInfoPress} hitSlop={8} accessibilityLabel="¿Cómo ganar XP?" style={styles.xpInfo}>
                   <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
                 </Tocable>
               </View>
@@ -174,6 +174,16 @@ const styles = StyleSheet.create({
   },
   athleteName: { color: colors.textPrimary, fontSize: 18, fontWeight: '800' },
   levelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  // 44x44 (área mínima de toque; antes 20x23, hitSlop no cuenta en web) con
+  // el ícono en el mismo lugar: el área sobresale con márgenes negativos.
+  xpInfo: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: -10,
+    marginHorizontal: -12,
+  },
   levelBadge: {
     flexDirection: 'row',
     alignItems: 'center',

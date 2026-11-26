@@ -1,11 +1,20 @@
 // Formato de hora 24hs explícito — no confiar en que el locale del
 // dispositivo respete es-AR (algunos motores JS igual devuelven AM/PM).
+//
+// Se reusa un mismo formateador (mismo resultado que toLocaleTimeString con
+// estas opciones, que arma uno nuevo en cada llamada): se usa en cada tarjeta
+// de la Agenda en cada dibujo, y en un Android de gama baja armarlo cada vez
+// se notaba (tanda visual, parte 4). Si cambia el huso del dispositivo con la
+// app abierta, se arma de nuevo.
+const OPCIONES_HORA: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false };
+let formatoHora: { formato: Intl.DateTimeFormat; desfasaje: number } | null = null;
+
 export function formatClassTime(startTime: string): string {
-  return new Date(startTime).toLocaleTimeString('es-AR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
+  const desfasaje = new Date().getTimezoneOffset();
+  if (!formatoHora || formatoHora.desfasaje !== desfasaje) {
+    formatoHora = { formato: new Intl.DateTimeFormat('es-AR', OPCIONES_HORA), desfasaje };
+  }
+  return formatoHora.formato.format(new Date(startTime));
 }
 
 // "Hoy" / "Mañana" / abreviatura de fecha, para anteponer a la hora.

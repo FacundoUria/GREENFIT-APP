@@ -5,12 +5,15 @@ import {
   StyleSheet,
   FlatList,
   ActivityIndicator,
-  RefreshControl,
   Platform,
 } from 'react-native';
 import Tocable from '../../components/Tocable';
 import Aparecer from '../../components/Aparecer';
 import { EsqueletoAgenda } from '../../components/Esqueletos';
+import { useTirarParaRefrescar } from '../../components/TirarParaRefrescar';
+import { useReducirMovimiento } from '../../hooks/useReducirMovimiento';
+import { CURVA_CSS, DURACION } from '../../theme/motion';
+import { vibrar } from '../../lib/vibrar';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../../theme/colors';
@@ -49,6 +52,20 @@ import { mockup, alfa, colorDisciplinaMockup, fuentes, useFuentesMockup } from '
 // nunca concreta la inscripción"). Ver withTimeout.ts.
 const RPC_TIMEOUT_MS = 20_000;
 const RPC_TIMEOUT_MESSAGE = 'Esto está tardando demasiado. Revisá tu conexión e intentá de nuevo.';
+
+// Espera a que se pinte el próximo cuadro (requestAnimationFrame + una tarea
+// nueva). Reserva optimista: primero se dibuja la tarjeta "Reservada" y recién
+// después sale el pedido al servidor, en otra tarea; en un Android de gama
+// baja, hacer las dos cosas en el mismo toque daba una tarea de ~50 ms.
+function despuesDelProximoCuadro(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0);
+      return;
+    }
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
 
 type AgendaClass = BaseClassWithBookings & { isBooked: boolean };
 
@@ -142,6 +159,13 @@ export default function AgendaMobileView({ navigation }: any) {
   // los mensajes de error/resultado de reservar y cancelar.
   const [confirmTarget, setConfirmTarget] = useState<AgendaClass | null>(null);
   const [isBooking, setIsBooking] = useState(false);
+  // Reserva optimista (tanda visual, parte 4): mientras el servidor responde,
+  // la tarjeta ya se ve "Reservada" con un tilde que crece; si rechaza, vuelve
+  // con un fundido. Por tarjeta (id de la clase); `n` cambia en cada estado
+  // para que la animación arranque de nuevo.
+  const [optimistas, setOptimistas] = useState<Record<string, { fase: 'reservando' | 'revertida'; n: number }>>({});
+  const contadorOptimista = useRef(0);
+  const reducirMovimiento = useReducirMovimiento();
   const [messageModal, setMessageModal] = useState<MessageModalContent | null>(null);
   // Ver fetchTieneContactoEmergencia -- arranca en true (no bloquea) para
   // no trabar el primer render mientras se resuelve; en la práctica ya está
@@ -199,6 +223,9 @@ export default function AgendaMobileView({ navigation }: any) {
     setIsLoading(true);
     load();
   }, [load]);
+
+  // Tirar para refrescar: en web, propio (TirarParaRefrescar); en nativo, RefreshControl.
+  const refresco = useTirarParaRefrescar({ refrescando: isLoading, onRefrescar: load });
 
 
   useEffect(() => {
@@ -335,30 +362,40 @@ export default function AgendaMobileView({ navigation }: any) {
     }
   }
 
+  // Reserva optimista (tanda visual, parte 4). La lógica de reserva es la
+  // misma (book_class, mismos mensajes); cambia lo que se ve mientras espera:
+  //   * al confirmar se cierra la hoja y la tarjeta ya se ve "Reservada", con
+  //     el tilde que crece (y vibra, si el teléfono puede);
+  //   * si el servidor confirma, se recarga la lista y sube "Reserva confirmada";
+  //   * si rechaza, la tarjeta vuelve con un fundido y aparece el mismo error de siempre.
   async function confirmBooking() {
     if (!confirmTarget) return;
     const item = confirmTarget;
-    setPendingId(item.id);
+    setConfirmTarget(null);
+    const reservando = { fase: 'reservando' as const, n: ++contadorOptimista.current };
+    setOptimistas((prev) => ({ ...prev, [item.id]: reservando }));
+    vibrar('reservar');
     setIsBooking(true);
     try {
+      await despuesDelProximoCuadro();
       const { error: rpcError } = await withTimeout(
         supabase.rpc('book_class', { p_class_id: item.id, p_booking_date: item.occurrenceDate }),
         RPC_TIMEOUT_MS,
         RPC_TIMEOUT_MESSAGE
       );
       if (rpcError) throw new Error(rpcError.message);
-      setConfirmTarget(null);
       await load();
+      setOptimistas(({ [item.id]: _resuelta, ...resto }) => resto);
       setConfirmedBooking(item);
     } catch (err) {
-      setConfirmTarget(null);
+      const revertida = { fase: 'revertida' as const, n: ++contadorOptimista.current };
+      setOptimistas((prev) => ({ ...prev, [item.id]: revertida }));
       setMessageModal({
         title: 'No se pudo reservar',
         message: err instanceof Error ? err.message : 'Intentá de nuevo.',
         tone: 'error',
       });
     } finally {
-      setPendingId(null);
       setIsBooking(false);
     }
   }
@@ -373,6 +410,7 @@ export default function AgendaMobileView({ navigation }: any) {
       // Tono (D-T4f): success si se devolvió, info si no (error queda para
       // cuando la cancelación falla). Timeout de 20 s adentro de cancelarReserva.
       const resultado = await cancelarReserva(cancelTarget.id, cancelTarget.occurrenceDate, reason || null);
+      vibrar('cancelar');
       setCancelTarget(null);
       await load();
       setMessageModal({
@@ -402,14 +440,20 @@ export default function AgendaMobileView({ navigation }: any) {
     // Tanda EC -- empezó y todavía no terminó: se puede reservar igual.
     const enCurso = estaEnCurso(item);
     const isPending = pendingId === item.id;
+    // Reserva optimista: "Reservada" mientras espera al servidor (y sin
+    // poder tocarla: todavía no hay nada que cancelar).
+    const optimista = optimistas[item.id];
+    const reservando = optimista?.fase === 'reservando';
+    const reservada = item.isBooked || reservando;
 
     // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
     // con pointerEvents="none", así cualquier toque (incluido encima del
     // pill) lo recibe el Tocable de la tarjeta y dispara el mismo
     // handlePress de siempre. Calcado del mockup: "RESERVAR" verde sólido y
     // "SIN CUPO" gris sólido; los dos estados que el mockup no tiene
-    // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos, sin íconos.
-    const pill = item.isBooked
+    // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos. "Reservada"
+    // lleva un tilde (tanda visual, parte 4): crece cuando recién se reserva.
+    const pill = reservada
       ? { label: 'Reservada', caja: styles.pillReservada, texto: styles.pillTextoReservada }
       : isFull
       ? { label: 'Sin cupo', caja: styles.pillSinCupo, texto: styles.pillTextoSinCupo }
@@ -432,9 +476,9 @@ export default function AgendaMobileView({ navigation }: any) {
       <Aparecer>
         <Tocable
           testID={`agenda-card-${item.id}`}
-          style={[styles.card, isFull && styles.cardSinCupo, item.isBooked && styles.cardReservada]}
+          style={[styles.card, isFull && styles.cardSinCupo, reservada && styles.cardReservada]}
           onPress={() => handlePress(item)}
-          disabled={isPending}
+          disabled={isPending || reservando}
         >
           <View style={styles.cardBody}>
             <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
@@ -468,7 +512,25 @@ export default function AgendaMobileView({ navigation }: any) {
                 <ActivityIndicator size="small" color={mockup.primaryContainer} />
               </View>
             ) : (
-              <View style={[styles.pill, pill.caja]}>
+              // `key` con el estado optimista: al cambiar, la pastilla se monta
+              // de nuevo y su animación (tilde que crece / fundido) arranca.
+              <View
+                key={optimista ? `${optimista.fase}-${optimista.n}` : 'pill'}
+                style={[
+                  styles.pill,
+                  pill.caja,
+                  optimista?.fase === 'revertida' ? ANIMACION_PILL.fundido : null,
+                ]}
+                testID={`agenda-card-pill-${item.id}`}
+              >
+                {reservada && (
+                  <View
+                    style={reservando ? (reducirMovimiento ? ANIMACION_PILL.fundido : ANIMACION_PILL.tilde) : undefined}
+                    testID={`agenda-card-tilde-${item.id}`}
+                  >
+                    <Ionicons name="checkmark" size={14} color={mockup.primaryContainer} />
+                  </View>
+                )}
                 <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
               </View>
             )}
@@ -533,13 +595,16 @@ export default function AgendaMobileView({ navigation }: any) {
             <Text style={styles.empty}>No hay clases programadas para este día.</Text>
           )}
 
-          <FlatList
-            data={classes}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={styles.listContent}
-            refreshControl={<RefreshControl refreshing={isLoading} onRefresh={load} tintColor={colors.primary} />}
-          />
+          {refresco.envolver(
+            <FlatList
+              ref={refresco.refScroll}
+              data={classes}
+              keyExtractor={(item) => item.id}
+              renderItem={renderItem}
+              contentContainerStyle={styles.listContent}
+              refreshControl={refresco.refreshControl}
+            />
+          )}
         </>
       )}
 
@@ -802,6 +867,8 @@ const styles = StyleSheet.create({
   // muy oscuro con borde y texto neón -> se lee "ya es tuya" sin confundirse
   // con la acción RESERVAR.
   pillReservada: {
+    flexDirection: 'row',
+    gap: 6,
     paddingHorizontal: 20,
     backgroundColor: mockup.onPrimary,
     borderWidth: 1,
@@ -813,3 +880,30 @@ const styles = StyleSheet.create({
   pillSinCreditos: { paddingHorizontal: 20, backgroundColor: mockup.amber },
   pillTextoSinCreditos: { color: mockup.onSecondaryFixed, fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 0.6 },
 });
+
+// Reserva optimista (tanda visual, parte 4). Solo web: las claves de animación
+// son de react-native-web (keyframes CSS, las corre el compositor). Solo
+// transform y opacity; terminan sin dejar nada puesto (fill-mode "backwards").
+//   tilde:   el tilde de "Reservada" crece al reservar;
+//   fundido: la pastilla vuelve con un fundido si el servidor rechaza (y el
+//            tilde, con "reducir movimiento", aparece sin crecer).
+const ANIMACION_TOQUE = {
+  animationDuration: `${DURACION.toque}ms`,
+  animationTimingFunction: CURVA_CSS,
+  animationFillMode: 'backwards',
+};
+const ANIMACION_PILL: Record<'tilde' | 'fundido', any> =
+  Platform.OS === 'web'
+    ? StyleSheet.create({
+        tilde: {
+          ...ANIMACION_TOQUE,
+          animationKeyframes: [
+            { from: { opacity: 0, transform: 'scale(0.4)' }, to: { opacity: 1, transform: 'scale(1)' } },
+          ],
+        },
+        fundido: {
+          ...ANIMACION_TOQUE,
+          animationKeyframes: [{ from: { opacity: 0 }, to: { opacity: 1 } }],
+        },
+      } as any)
+    : { tilde: null, fundido: null };

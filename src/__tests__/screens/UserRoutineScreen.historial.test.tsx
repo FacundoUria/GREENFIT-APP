@@ -36,6 +36,10 @@ jest.mock('../../components/VideoModal', () => () => null);
 // showAlert = Alert.alert en nativo / window.alert en web -- acá se espía.
 jest.mock('../../lib/crossPlatformAlert', () => ({ showAlert: jest.fn() }));
 
+// Tanda visual, parte 4: la vibración se verifica por momento; el efecto real
+// (navigator.vibrate) lo cubre src/__tests__/lib/vibrar.test.ts.
+jest.mock('../../lib/vibrar', () => ({ vibrar: jest.fn() }));
+
 jest.mock('../../lib/routinesApi', () => ({
   getUserRoutine: jest.fn(),
   getTodayCompletions: jest.fn(),
@@ -50,6 +54,7 @@ jest.mock('../../lib/routinesApi', () => ({
 
 import * as api from '../../lib/routinesApi';
 import { showAlert } from '../../lib/crossPlatformAlert';
+import { vibrar } from '../../lib/vibrar';
 
 const mockShowAlert = showAlert as jest.Mock;
 import UserRoutineScreen, {
@@ -151,6 +156,9 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     );
     // Guardado parcial -> igual festeja, con el copy de progreso parcial.
     await waitFor(() => expect(getByText('¡Buen entrenamiento! 💪')).toBeTruthy());
+    // Tanda visual, parte 4: al finalizar vibra 15 ms ("finalizar").
+    expect(vibrar).toHaveBeenCalledTimes(1);
+    expect(vibrar).toHaveBeenCalledWith('finalizar');
   });
 
   it('si el servidor responde "reciente" (ventana de 10 s), avisa y NO muestra el festejo', async () => {
@@ -163,6 +171,8 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     await waitFor(() => expect(getByText('Ya registraste este entrenamiento recién.')).toBeTruthy());
     expect(queryByText('¡Buen entrenamiento! 💪')).toBeNull();
     expect(queryByText('¡Rutina completa! 🔥')).toBeNull();
+    // No se registró nada nuevo: no vibra.
+    expect(vibrar).not.toHaveBeenCalled();
   });
 
   it('si el servidor responde "tope_diario", avisa del máximo de 20 por día y NO festeja', async () => {
@@ -186,6 +196,7 @@ describe('Mi Rutina -- Finalizar Entrenamiento (guarda en el historial)', () => 
     fireEvent.press(getByText('Finalizar Entrenamiento'));
 
     await waitFor(() => expect(getByText('No se pudo guardar el entrenamiento: Network error')).toBeTruthy());
+    expect(vibrar).not.toHaveBeenCalled();
   });
 });
 describe('Mi Rutina -- estilo HUD de "Rutina de hoy" (misma lógica)', () => {

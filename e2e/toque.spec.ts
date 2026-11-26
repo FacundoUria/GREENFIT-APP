@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
+import { mockSupabase } from './support/supabaseMock';
 import { tablasBase, CLASE_HOY, DISCIPLINA_CROSSFIT, EN_30_DIAS, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
 
@@ -202,5 +203,69 @@ test.describe('PWA -- base de la tanda visual (toque, zonas seguras, theme-color
 
     await irATab(page, 'Perfil');
     await apoyarYMedir(page.getByLabel('Cerrar sesión'));
+  });
+});
+
+// Tanda visual, parte 4: las áreas de toque chicas que quedaban fuera de
+// Inicio, Agenda y Mi Rutina, llevadas a 44 px.
+test.describe('PWA -- áreas de toque de 44 px fuera de las pestañas principales (tanda visual, parte 4)', () => {
+  test('Login: el botón de instalar, y la X y "Entendido" de su tarjeta', async ({ page }) => {
+    await mockSupabase(page, { user: SOCIO_DEMO, tables: tablasBase(), rpc: {} });
+    await page.goto('/');
+    await expect(page.getByPlaceholder('DNI')).toBeVisible();
+    expect(await tocablesChicos(page), 'Login').toEqual([]);
+
+    await page.getByLabel('Instalar Greenfit como app').click();
+    await expect(page.getByText('Instalá Greenfit', { exact: true })).toBeVisible();
+    expect(await tocablesChicos(page), 'tarjeta "Instalá Greenfit"').toEqual([]);
+  });
+
+  test('Notificaciones: los 3 filtros y "Marcar todas como leídas"', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        notifications: [{ id: 'n-1', title: 'Aviso', body: 'Mañana abrimos 8 hs.', created_at: new Date().toISOString(), audience_type: 'all' }],
+      },
+    });
+    await page.getByLabel('Ver notificaciones').click();
+    await expect(page.getByText('Marcar todas como leídas', { exact: true })).toBeVisible();
+    // La flecha "Go back" del encabezado (React Navigation, 30x30) no estaba
+    // en esta parte: queda anotada como pendiente en PLAN_TANDA_VISUAL.md.
+    const chicos = (await tocablesChicos(page)).filter((t) => !/ Go back$/.test(t));
+    expect(chicos).toEqual([]);
+  });
+
+  test('Comunidad (Feed, Mensajes, Ranking) y Perfil ("Cerrar sesión", "¿Cómo ganar XP?")', async ({ page }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+    await irATab(page, 'Comunidad');
+    await expect(page.getByText('Ranking', { exact: true })).toBeVisible();
+    expect(await tocablesChicos(page), 'Comunidad').toEqual([]);
+
+    await irATab(page, 'Perfil');
+    await expect(page.getByLabel('Cerrar sesión')).toBeVisible();
+    expect(await tocablesChicos(page), 'Perfil').toEqual([]);
+    // 44x44 justos: el área crece alrededor del ícono (márgenes negativos), no la fila.
+    const tamano = async (etiqueta: string) => {
+      // .filter visible: el de Inicio también está montado (pestaña oculta).
+      const caja = (await page.getByLabel(etiqueta).filter({ visible: true }).boundingBox())!;
+      return { ancho: Math.round(caja.width), alto: Math.round(caja.height) };
+    };
+    expect(await tamano('Cerrar sesión')).toEqual({ ancho: 44, alto: 44 });
+    expect(await tamano('¿Cómo ganar XP?')).toEqual({ ancho: 44, alto: 44 });
+  });
+
+  test('Comprobante de transferencia: "Volver"', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        packs: [
+          { id: 'pack-1', name: 'Pack 12 clases CrossFit', price: 30000, is_active: true, incluye_aparatos: false, dias_vigencia: null, creditos: [{ discipline_id: DISCIPLINA_CROSSFIT.id, credits: 12 }] },
+        ],
+      },
+    });
+    await page.getByText('Elegir mi pack', { exact: true }).click();
+    await page.getByText('Pack 12 clases CrossFit', { exact: true }).click();
+    await expect(page.getByText('Pagar por transferencia', { exact: true })).toBeVisible();
+    expect(await tocablesChicos(page), 'Comprobante').toEqual([]);
   });
 });

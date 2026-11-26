@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { loginComoSocio, SOCIO_DEMO } from './support/auth';
-import { tablasBase, CLASE_HOY, DISCIPLINA_CROSSFIT, EN_30_DIAS } from './support/fixtures';
+import { tablasBase, CLASE_HOY, DISCIPLINA_CROSSFIT, EN_30_DIAS, HOY_STR } from './support/fixtures';
 import { irATab } from './support/nav';
 
 // Tanda visual, parte 3 (hojas), en un navegador real, con la confirmación de
@@ -9,7 +9,8 @@ import { irATab } from './support/nav';
 // * se cierra en 200 ms tocando afuera, y mientras sale se sigue viendo;
 // * arrastrada hacia abajo: más del 30 % de su alto (o un "flick") la cierra;
 //   menos, vuelve a su lugar; empezar el arrastre sobre un botón NO lo activa;
-// * con una acción en curso no se cierra (ni tocando afuera ni arrastrando);
+// * con una acción en curso no se cierra (ni tocando afuera ni arrastrando):
+//   la cancelación de una reserva;
 // * con "reducir movimiento", abre con fundido.
 
 test.use({ viewport: { width: 360, height: 760 }, hasTouch: true });
@@ -160,13 +161,26 @@ test.describe('PWA -- hojas inferiores (tanda visual, parte 3)', () => {
     await expect(page.getByText(PREGUNTA)).toHaveCount(0);
   });
 
-  test('con la reserva en curso no se cierra: ni tocando afuera ni arrastrando', async ({ page }) => {
+  // Con la parte 4 (reserva optimista) la hoja de CONFIRMAR se cierra apenas
+  // se toca "Confirmar" (la tarjeta ya se ve "Reservada" mientras responde el
+  // servidor), así que la acción en curso se prueba con la hoja de CANCELAR,
+  // que sí espera abierta al servidor.
+  test('con la cancelación en curso no se cierra: ni tocando afuera ni arrastrando', async ({ page }) => {
     let soltar!: () => void;
-    const hoja = await abrirConfirmacion(page, {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        classes: [CLASE_HOY],
+        user_credits: [
+          { id: 'uc-1', user_id: SOCIO_DEMO.id, remaining_credits: 5, expires_at: EN_30_DIAS, created_at: '2026-08-01T00:00:00.000Z', discipline: DISCIPLINA_CROSSFIT, pack: null },
+        ],
+        bookings: [{ id: 'bk-1', user_id: SOCIO_DEMO.id, class_id: CLASE_HOY.id, booking_date: HOY_STR }],
+      },
+      rpc: { cancel_booking_detalle: () => ({ reintegrado: true, motivo: 'reintegrado', vence: null, mensaje: 'Te devolvimos el crédito.' }) },
       antesDeEntrar: async () => {
         const abierta = new Promise<void>((r) => (soltar = r));
         await page.route(
-          (url) => url.pathname === '/rest/v1/rpc/book_class',
+          (url) => url.pathname === '/rest/v1/rpc/cancel_booking_detalle',
           async (route) => {
             await abierta;
             await route.fallback();
@@ -174,18 +188,24 @@ test.describe('PWA -- hojas inferiores (tanda visual, parte 3)', () => {
         );
       },
     });
-    await page.getByText(REAFIRMACION_SALUD).click();
-    await page.getByText('Confirmar', { exact: true }).click();
+    await irATab(page, 'Agenda');
+    await page.getByTestId(`agenda-card-${CLASE_HOY.id}`).click();
+    const hoja = page.getByTestId('hoja-inferior');
+    await expect(page.getByText('Confirmar cancelación', { exact: true })).toBeVisible();
+    await expect.poll(() => hoja.evaluate((el) => el.getAnimations().length)).toBe(0);
+    await page.getByText('Confirmar cancelación', { exact: true }).click();
 
     await page.mouse.click(180, 60);
     const caja = (await hoja.boundingBox())!;
     await arrastrar(page, 180, caja.y + 12, caja.height * 0.6, 10, 16);
     await page.waitForTimeout(300);
-    await expect(page.getByText(PREGUNTA)).toBeVisible();
+    // Sigue abierta (el botón muestra la ruedita mientras espera).
+    await expect(page.getByText('Cancelar CrossFit', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('cancel-booking-confirm')).toBeVisible();
     expect(await transform(hoja)).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
 
     soltar();
-    await expect(page.getByText('¡Reserva confirmada!')).toBeVisible();
+    await expect(page.getByText('Reserva cancelada', { exact: true })).toBeVisible();
   });
 
   test('con "reducir movimiento" abre con fundido (sin desplazarse)', async ({ page }) => {

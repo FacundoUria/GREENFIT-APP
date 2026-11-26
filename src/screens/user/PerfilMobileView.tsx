@@ -200,7 +200,7 @@ export default function PerfilMobileView({ onNavigate }: PerfilMobileViewProps) 
         {/* Sutil a propósito -- el logout "completo" ya vive en Mis Datos
             (ProfileScreen.tsx); esto es solo un atajo rápido desde el hub,
             sin llamar la atención con color de peligro ni texto. */}
-        <Tocable onPress={logout} hitSlop={10} accessibilityLabel="Cerrar sesión">
+        <Tocable onPress={logout} hitSlop={10} accessibilityLabel="Cerrar sesión" style={styles.cerrarSesion}>
           <Ionicons name="log-out-outline" size={20} color={colors.textSecondary} />
         </Tocable>
       </View>
@@ -299,6 +299,16 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
   header: { color: colors.textPrimary, fontSize: 20, fontWeight: '700' },
+  // 44x44 (área mínima de toque; antes 20x23, hitSlop no cuenta en web) con
+  // el ícono en el mismo lugar: el área sobresale con márgenes negativos.
+  cerrarSesion: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: -10,
+    marginRight: -12,
+  },
   error: { color: colors.danger, marginBottom: 12 },
 
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },

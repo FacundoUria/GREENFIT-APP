@@ -1,4 +1,4 @@
-import { getCountdown, formatCountdownEmpieza } from '../../lib/classTime';
+import { getCountdown, formatCountdownEmpieza, formatClassTime } from '../../lib/classTime';
 
 // Checklist punto 3 ("Próxima Reserva" dinamizada en Home): el banner "Tu
 // próxima clase" quiere un remate tipo "Empieza en 1 hora" -- getCountdown()
@@ -26,5 +26,38 @@ describe('formatCountdownEmpieza', () => {
     const countdown = getCountdown(yaArranco);
     expect(countdown.label).toBe('En curso');
     expect(formatCountdownEmpieza(countdown)).toBe('En curso');
+  });
+});
+
+// Tanda visual, parte 4: formatClassTime reusa un mismo formateador (antes
+// toLocaleTimeString armaba uno nuevo en cada llamada). Tiene que dar
+// exactamente lo mismo que antes, y armar uno nuevo si cambia el huso.
+describe('formatClassTime', () => {
+  const OPCIONES = { hour: '2-digit', minute: '2-digit', hour12: false } as const;
+  const comoAntes = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', OPCIONES);
+  const CASOS = ['2026-11-25T22:00:00.000Z', '2026-11-25T03:05:00.000Z', '2026-11-25T23:59:00-03:00', '2026-01-01T00:00:00.000Z'];
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('24 hs, dos dígitos: igual que toLocaleTimeString("es-AR") con las mismas opciones', () => {
+    for (const iso of CASOS) {
+      expect(formatClassTime(iso)).toMatch(/^\d{2}:\d{2}$/);
+      expect(formatClassTime(iso)).toBe(comoAntes(iso));
+    }
+  });
+
+  it('reusa el formateador; si cambia el huso del dispositivo, arma uno nuevo', () => {
+    formatClassTime(CASOS[0]); // deja armado el del huso actual
+    const constructor = jest.spyOn(Intl, 'DateTimeFormat');
+    formatClassTime(CASOS[0]);
+    formatClassTime(CASOS[1]);
+    expect(constructor).not.toHaveBeenCalled();
+
+    const desfasaje = new Date().getTimezoneOffset();
+    jest.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(desfasaje + 60);
+    formatClassTime(CASOS[0]);
+    expect(constructor).toHaveBeenCalledTimes(1);
+    formatClassTime(CASOS[1]);
+    expect(constructor).toHaveBeenCalledTimes(1);
   });
 });

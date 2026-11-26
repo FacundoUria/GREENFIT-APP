@@ -85,7 +85,7 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       <View style={styles.headerRow}>
-        <Tocable onPress={() => navigation.goBack()} hitSlop={8} accessibilityLabel="Volver">
+        <Tocable onPress={() => navigation.goBack()} hitSlop={8} accessibilityLabel="Volver" style={styles.volver}>
           <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
         </Tocable>
         <Text style={styles.title}>Pagar por transferencia</Text>
@@ -165,6 +165,16 @@ export default function TransferReceiptScreen({ navigation, route }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  // 44x44 (área mínima de toque; antes 22x24, hitSlop no cuenta en web) con
+  // la flecha y el título en el mismo lugar: el área sobresale con márgenes negativos.
+  volver: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: -10,
+    marginHorizontal: -11,
+  },
   title: { color: colors.textPrimary, fontSize: 18, fontWeight: '700' },
   packLabel: { color: colors.textPrimary, fontSize: 15, fontWeight: '600' },
   packPrice: { color: colors.primary, fontSize: 20, fontWeight: '700', marginBottom: 20 },

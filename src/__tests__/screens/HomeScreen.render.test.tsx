@@ -86,6 +86,8 @@ jest.mock('../../lib/xpApi', () => ({
 // createPaymentPreference (Edge Function real vía supabase.functions.invoke,
 // no cubierto por el mock de supabase de arriba).
 jest.mock('../../lib/paymentsApi', () => ({ createPaymentPreference: jest.fn() }));
+// Tanda visual, parte 4: la vibración se verifica por momento.
+jest.mock('../../lib/vibrar', () => ({ vibrar: jest.fn() }));
 
 import { supabase } from '../../lib/supabase';
 import { fetchUserBalances, fetchPacks, fetchDisciplinasSinVigente } from '../../lib/creditsApi';
@@ -97,6 +99,7 @@ import {
   registrarHoyEntrene,
 } from '../../lib/xpApi';
 import HomeScreen from '../../screens/user/HomeScreen';
+import { vibrar } from '../../lib/vibrar';
 
 const mockedFrom = supabase.from as jest.Mock;
 const navigation = { navigate: jest.fn() };
@@ -611,6 +614,36 @@ describe('HomeScreen (rediseño: carrusel de créditos + vencimiento + anillo de
   });
   const conLote = (id: string, name: string, cantidad: number, expiresAt: string) =>
     bal(id, name, 'credits', cantidad, expiresAt, [{ id: `lote-${id}`, remainingCredits: cantidad, expiresAt }]);
+
+  // Tanda visual, parte 4: cancelar vibra 12 ms ("cancelar"), solo si el
+  // servidor canceló. El efecto real lo cubre src/__tests__/lib/vibrar.test.ts.
+  it('cancelar vibra ("cancelar") cuando el servidor cancela, y no vibra si rechaza', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    reservaDeManana();
+    (supabase.rpc as jest.Mock).mockResolvedValue({ data: null, error: { message: 'No podés cancelar esta reserva.' } });
+    const primera = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(primera.getByText('Cancelar')).toBeTruthy());
+    fireEvent.press(primera.getByText('Cancelar'));
+    await waitFor(() => expect(primera.getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(primera.getByText('Confirmar cancelación'));
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('No se pudo cancelar', 'No podés cancelar esta reserva.'));
+    expect(vibrar).not.toHaveBeenCalled();
+    primera.unmount();
+
+    (supabase.rpc as jest.Mock).mockImplementation((fn: string) =>
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({ data: { reintegrado: true, motivo: 'reintegrado', vence: null, mensaje: 'Te devolvimos el crédito.' }, error: null })
+        : Promise.resolve({ data: null, error: null })
+    );
+    const segunda = render(<HomeScreen navigation={navigation} />);
+    await waitFor(() => expect(segunda.getByText('Cancelar')).toBeTruthy());
+    fireEvent.press(segunda.getByText('Cancelar'));
+    await waitFor(() => expect(segunda.getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(segunda.getByText('Confirmar cancelación'));
+    await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('Reserva cancelada', 'Te devolvimos el crédito.'));
+    expect(vibrar).toHaveBeenCalledTimes(1);
+    expect(vibrar).toHaveBeenCalledWith('cancelar');
+  });
 
   describe('carrusel de créditos -- una tarjeta por disciplina activa, todo desde balances', () => {
     it('5 disciplinas (nombres y cantidades que NO son los del mockup): 5 tarjetas con su nombre y su número reales', async () => {

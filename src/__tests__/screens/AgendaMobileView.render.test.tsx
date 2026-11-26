@@ -58,11 +58,15 @@ jest.mock('../../lib/creditsApi', () => ({
   ]),
 }));
 jest.mock('../../lib/supabase', () => ({ supabase: { from: jest.fn(), rpc: jest.fn() } }));
+// La vibración (tanda visual, parte 4) se verifica por momento; su efecto real
+// (navigator.vibrate) lo cubre src/__tests__/lib/vibrar.test.ts.
+jest.mock('../../lib/vibrar', () => ({ vibrar: jest.fn() }));
 
 import { loadClassesForDate } from '../../lib/classesApi';
 import { supabase } from '../../lib/supabase';
 import { CONSENT_TEXT_SHORT } from '../../lib/consentApi';
 import AgendaMobileView from '../../screens/user/AgendaMobileView';
+import { vibrar } from '../../lib/vibrar';
 
 const mockedLoadClasses = loadClassesForDate as jest.Mock;
 const mockedFrom = supabase.from as jest.Mock;
@@ -964,5 +968,122 @@ describe('AgendaMobileView -- clase en curso (Tanda EC)', () => {
     fireEvent.press(getByTestId('agenda-card-class-1'));
     await waitFor(() => expect(getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
     expect(queryByText(/ya empezó/)).toBeNull();
+  });
+});
+
+// Tanda visual, parte 4: reserva optimista. La lógica de reserva no cambia
+// (book_class, mismos mensajes); cambia lo que se ve mientras el servidor
+// responde. La animación (tilde que crece, fundido al volver) es CSS de web:
+// la cubre e2e/refresco.spec.ts; acá, los estados y la vibración.
+describe('AgendaMobileView -- reserva optimista y vibración (tanda visual, parte 4)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedLoadClasses.mockResolvedValue([{ ...CLASE_BASE }]);
+    mockedRpc.mockResolvedValue({ data: null, error: null });
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
+  });
+
+  async function abrirYConfirmar(utils: ReturnType<typeof render>) {
+    await waitFor(() => expect(utils.getByText('Reservar')).toBeTruthy());
+    fireEvent.press(utils.getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(utils.getByText('¿Confirmás tu lugar en esta clase?')).toBeTruthy());
+    fireEvent.press(utils.getByText(CONSENT_TEXT_SHORT));
+    fireEvent.press(utils.getByText('Confirmar'));
+  }
+
+  it('al confirmar, la tarjeta pasa a "Reservada" con el tilde ANTES de que responda el servidor; "¡Reserva confirmada!" recién cuando confirma', async () => {
+    mockFromDefault({ data: [], error: null });
+    let responder: (v: any) => void = () => {};
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'book_class' ? new Promise((res) => (responder = res)) : Promise.resolve({ data: null, error: null })
+    );
+    const utils = render(<AgendaMobileView navigation={navigation} />);
+    await abrirYConfirmar(utils);
+
+    await waitFor(() =>
+      expect(mockedRpc).toHaveBeenCalledWith('book_class', { p_class_id: 'class-1', p_booking_date: CLASE_BASE.occurrenceDate })
+    );
+    // El servidor todavía no respondió: ya se ve "Reservada" con su tilde,
+    // la hoja de confirmar se cerró y la de "Reserva confirmada" no subió.
+    expect(utils.getByText('Reservada')).toBeTruthy();
+    expect(utils.getByTestId('agenda-card-tilde-class-1')).toBeTruthy();
+    expect(utils.queryByText('Reservar')).toBeNull();
+    expect(utils.queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+    expect(utils.queryByText('¡Reserva confirmada!')).toBeNull();
+    expect(vibrar).toHaveBeenCalledTimes(1);
+    expect(vibrar).toHaveBeenCalledWith('reservar');
+
+    // Mientras espera, tocarla no hace nada (todavía no hay reserva que cancelar).
+    fireEvent.press(utils.getByTestId('agenda-card-class-1'));
+    expect(utils.queryByText('Confirmar cancelación')).toBeNull();
+    expect(utils.queryByText('¿Confirmás tu lugar en esta clase?')).toBeNull();
+
+    // El servidor confirma: la lista recargada ya la trae reservada y sube la hoja.
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    await act(async () => responder({ data: null, error: null }));
+    await waitFor(() => expect(utils.getByText('¡Reserva confirmada!')).toBeTruthy());
+    expect(utils.getByText('Reservada')).toBeTruthy();
+    expect(utils.getByTestId('agenda-card-tilde-class-1')).toBeTruthy();
+    expect(vibrar).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el servidor rechaza, la tarjeta vuelve a "Reservar" y aparece el mismo error de siempre', async () => {
+    mockFromDefault({ data: [], error: null });
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'book_class'
+        ? Promise.resolve({ data: null, error: { message: 'No tenés créditos disponibles para esta disciplina.' } })
+        : Promise.resolve({ data: null, error: null })
+    );
+    const utils = render(<AgendaMobileView navigation={navigation} />);
+    await abrirYConfirmar(utils);
+
+    await waitFor(() => expect(utils.getByText('No se pudo reservar')).toBeTruthy());
+    expect(utils.getByText('No tenés créditos disponibles para esta disciplina.')).toBeTruthy();
+    expect(utils.getByText('Reservar')).toBeTruthy();
+    expect(utils.queryByText('Reservada')).toBeNull();
+    expect(utils.queryByTestId('agenda-card-tilde-class-1')).toBeNull();
+    expect(utils.queryByText('¡Reserva confirmada!')).toBeNull();
+    // Vibró una sola vez: al reservar (no al volver atrás).
+    expect(vibrar).toHaveBeenCalledTimes(1);
+  });
+
+  it('una reserva que ya existía también lleva el tilde en "Reservada"', async () => {
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    const { getByText, getByTestId } = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(getByText('Reservada')).toBeTruthy());
+    expect(getByTestId('agenda-card-tilde-class-1')).toBeTruthy();
+    expect(vibrar).not.toHaveBeenCalled();
+  });
+
+  it('cancelar vibra ("cancelar", 12 ms) solo si el servidor canceló', async () => {
+    mockFromDefault({ data: [{ class_id: 'class-1' }], error: null });
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({ data: null, error: { message: 'No podés cancelar esta reserva.' } })
+        : Promise.resolve({ data: null, error: null })
+    );
+    const utils = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(utils.getByText('Reservada')).toBeTruthy());
+    fireEvent.press(utils.getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(utils.getByText('Confirmar cancelación')).toBeTruthy());
+    fireEvent.press(utils.getByText('Confirmar cancelación'));
+    await waitFor(() => expect(utils.getByText('No se pudo cancelar')).toBeTruthy());
+    expect(vibrar).not.toHaveBeenCalled();
+    utils.unmount();
+
+    mockedRpc.mockImplementation((fn: string) =>
+      fn === 'cancel_booking_detalle'
+        ? Promise.resolve({ data: { reintegrado: true, motivo: 'reintegrado', vence: null, mensaje: 'Te devolvimos el crédito.' }, error: null })
+        : Promise.resolve({ data: null, error: null })
+    );
+    const otra = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(otra.getByText('Reservada')).toBeTruthy());
+    fireEvent.press(otra.getByTestId('agenda-card-class-1'));
+    await waitFor(() => expect(otra.getByText('Confirmar cancelación')).toBeTruthy());
+    mockFromDefault({ data: [], error: null });
+    fireEvent.press(otra.getByText('Confirmar cancelación'));
+    await waitFor(() => expect(otra.getByText('Reserva cancelada')).toBeTruthy());
+    expect(vibrar).toHaveBeenCalledTimes(1);
+    expect(vibrar).toHaveBeenCalledWith('cancelar');
   });
 });

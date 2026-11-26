@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  RefreshControl,
   Linking,
   Animated,
   AppState,
@@ -16,6 +15,8 @@ import Tocable from '../../components/Tocable';
 import Aparecer from '../../components/Aparecer';
 import { EsqueletoEntrenamientos, EsqueletoRutina } from '../../components/Esqueletos';
 import HojaInferior from '../../components/HojaInferior';
+import { useTirarParaRefrescar } from '../../components/TirarParaRefrescar';
+import { vibrar } from '../../lib/vibrar';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -850,6 +851,7 @@ export default function UserRoutineScreen() {
         setAvisoFinal(`Llegaste al máximo de ${TOPE_DIARIO_FINALIZACIONES} entrenamientos registrados por hoy.`);
         return;
       }
+      vibrar('finalizar');
       setModalFinalVisible(true);
     } catch (err) {
       setAvisoFinal(
@@ -866,32 +868,34 @@ export default function UserRoutineScreen() {
     }
   }
 
+  // Tirar para refrescar: en web, propio (TirarParaRefrescar); en nativo,
+  // RefreshControl. Qué recarga y cuándo termina depende de la vista, igual que antes.
+  const refresco = useTirarParaRefrescar({
+    refrescando: vista === 'hoy' ? isLoading : vista === 'historial' ? historialCargando : false,
+    onRefrescar:
+      vista === 'hoy'
+        ? () => refrescar(true)
+        : vista === 'historial'
+          ? loadHistorial
+          : () => {
+              const recarga = refrescar(true);
+              setRecargaMisRutinas((n) => n + 1);
+              return recarga;
+            },
+  });
+
   // Mismo orden que antes (agrupado por grupo muscular, en el orden en que el
   // entrenador los cargó), numerado para la etiqueta "01 • GRUPO".
   const ejerciciosDelDia = gruposDelDia.flatMap((g) => g.ejercicios);
   const primerNombre = (user?.name || '').trim().split(/\s+/)[0] || 'Atleta';
   const progreso = totalDia > 0 ? completadosDia / totalDia : 0;
 
-  return (
+  return refresco.envolver(
     <ScrollView
+      ref={refresco.refScroll}
       style={styles.container}
       contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={vista === 'hoy' ? isLoading : vista === 'historial' ? historialCargando : false}
-          onRefresh={
-            vista === 'hoy'
-              ? () => refrescar(true)
-              : vista === 'historial'
-                ? loadHistorial
-                : () => {
-                    refrescar(true);
-                    setRecargaMisRutinas((n) => n + 1);
-                  }
-          }
-          tintColor={colors.primary}
-        />
-      }
+      refreshControl={refresco.refreshControl}
     >
       {/* Header HUD: avatar + nombre, marca a la derecha. */}
       <View style={styles.header}>
