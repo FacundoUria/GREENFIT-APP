@@ -229,10 +229,36 @@ test.describe('PWA -- áreas de toque de 44 px fuera de las pestañas principale
     });
     await page.getByLabel('Ver notificaciones').click();
     await expect(page.getByText('Marcar todas como leídas', { exact: true })).toBeVisible();
-    // La flecha "Go back" del encabezado (React Navigation, 30x30) no estaba
-    // en esta parte: queda anotada como pendiente en PLAN_TANDA_VISUAL.md.
-    const chicos = (await tocablesChicos(page)).filter((t) => !/ Go back$/.test(t));
-    expect(chicos).toEqual([]);
+    expect(await tocablesChicos(page)).toEqual([]);
+  });
+
+  // La flecha de volver del encabezado (React Navigation) medía 30 x 30: ahora
+  // 44 x 44, con el ícono exactamente donde estaba (centro medido antes del
+  // cambio: 26, 32) y el título sin moverse.
+  test('Notificaciones y Mi Credencial: la flecha de volver mide 44 px y el ícono no se movió', async ({ page }) => {
+    await loginComoSocio(page, { tables: tablasBase() });
+    const medir = () =>
+      page.getByLabel('Go back').filter({ visible: true }).evaluate((b) => {
+        const r = b.getBoundingClientRect();
+        const icono = (b.querySelector('img') ?? b.firstElementChild) as HTMLElement;
+        const i = icono.getBoundingClientRect();
+        return { ancho: Math.round(r.width), alto: Math.round(r.height), icono: [Math.round(i.x + i.width / 2), Math.round(i.y + i.height / 2)] };
+      });
+
+    await page.getByLabel('Ver notificaciones').click();
+    await expect(page.getByLabel('Go back').filter({ visible: true })).toBeVisible();
+    expect(await medir()).toEqual({ ancho: 44, alto: 44, icono: [26, 32] });
+    expect(await tocablesChicos(page), 'Notificaciones').toEqual([]);
+    await page.getByLabel('Go back').filter({ visible: true }).click();
+    // De vuelta en Inicio.
+    await expect(page.getByLabel('Ver mi credencial')).toBeVisible();
+
+    await page.getByLabel('Ver mi credencial').click();
+    await expect(page.getByLabel('Go back').filter({ visible: true })).toBeVisible();
+    expect(await medir()).toEqual({ ancho: 44, alto: 44, icono: [26, 32] });
+    expect(await tocablesChicos(page), 'Mi Credencial').toEqual([]);
+    await page.getByLabel('Go back').filter({ visible: true }).click();
+    await expect(page.getByLabel('Ver mi credencial')).toBeVisible();
   });
 
   test('Comunidad (Feed, Mensajes, Ranking) y Perfil ("Cerrar sesión", "¿Cómo ganar XP?")', async ({ page }) => {

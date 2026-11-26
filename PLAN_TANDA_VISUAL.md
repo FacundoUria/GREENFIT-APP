@@ -19,8 +19,8 @@ Plan acordado con Facundo. Cada parte se anota acá cuando se cierra (commit, pu
 | 2 | Apariciones y esqueletos | Hecha — `d0ccaa0` |
 | 3 | Hojas inferiores que se cierran deslizando | Hecha — `7184080` |
 | — | Aparte de la tanda: "Renovar" (plan vencido, tarjetas grises) | Hecha — `b360530` |
-| 4 | Agenda optimista, vibración, tirar para refrescar y áreas de toque chicas | Hecha (26/11) — Facundo aceptó el rendimiento en gama baja con la tarea de abajo pendiente |
-| — | Rendimiento de la Agenda en gama baja (antes de la parte 5) | Pendiente |
+| 4 | Agenda optimista, vibración, tirar para refrescar y áreas de toque chicas | Hecha — `dcac7f5` |
+| — | Rendimiento de la Agenda en gama baja (antes de la parte 5) | Hecha (26/11); el hash queda en el commit de la parte 5 |
 | 5 | Pestañas deslizables en Mi Rutina, check de Mi Rutina rehecho, carrusel de créditos con enganche | Pendiente |
 | 6 | (Opcional) Vidrio en la barra de pestañas flotante | Pendiente |
 
@@ -51,6 +51,14 @@ Tarea propia, con su commit. Mismas reglas que las partes (sin cambios de texto,
 
 - Alivianar el dibujo de la Agenda (memorizar las tarjetas y la hoja, y lo que aparezca al medir) hasta que "Confirmar" y "abrir la hoja" den 0 tareas largas en Moto G4 con CPU 4x.
 - La flecha "Go back" del encabezado de Notificaciones y Mi Credencial (React Navigation, 30x30) a 44 px.
+
+### Qué se hizo (26/11)
+
+- Medido con un trace de Chrome, "abrir la hoja" no era JS: era la primera maquetación del texto de la hoja (~40 ms en Moto G4 con CPU 4x; las siguientes, ~5 ms, porque el navegador la guarda). La Agenda ahora maqueta ese texto una vez, invisible, al montarse, y lo saca a los dos cuadros (`PrecalentarHojaReserva`, solo web).
+- Tarjetas memorizadas (`TarjetaClase`) y `DaySelector` memorizado: en cada toque se redibuja solo la tarjeta que cambió. La cuenta regresiva sigue actualizándose con cada tic de `useTicker` (30 s).
+- La lista dibuja 5 tarjetas de entrada (`initialNumToRender`) y el resto en el lote siguiente: al cambiar de día, la tarea de dibujo bajó de 33–37 ms a 19–25 ms.
+- La flecha de volver de Notificaciones y Mi Credencial: 44 x 44, con el ícono en el mismo punto. Se declaró `@react-navigation/elements` en package.json (ya estaba instalado, misma versión).
+- Rendimiento final (sin trace, toques por coordenadas): iPhone 13, partes 1 a 4, 4/4; Moto G4 con CPU 4x, 12/12 (tres vueltas). "Abrir la hoja" y "Confirmar": 0 tareas largas en todas.
 
 ## Parte 5
 

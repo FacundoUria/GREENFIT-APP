@@ -208,6 +208,30 @@ test.describe('PWA -- hojas inferiores (tanda visual, parte 3)', () => {
     await expect(page.getByText('Reserva cancelada', { exact: true })).toBeVisible();
   });
 
+  // Rendimiento de la Agenda en gama baja: al montar la Agenda, el texto de
+  // la hoja de reservar se maqueta una vez, invisible (la primera vez el
+  // navegador tarda ~40 ms en gama baja), y se saca a los dos cuadros: no
+  // tiene que quedar nada en la página.
+  test('el precalentamiento de la hoja de reservar no deja nada en la página', async ({ page }) => {
+    await loginComoSocio(page, {
+      tables: {
+        ...tablasBase(),
+        classes: [CLASE_HOY],
+        user_credits: [
+          { id: 'uc-1', user_id: SOCIO_DEMO.id, remaining_credits: 5, expires_at: EN_30_DIAS, created_at: '2026-08-01T00:00:00.000Z', discipline: DISCIPLINA_CROSSFIT, pack: null },
+        ],
+      },
+    });
+    await irATab(page, 'Agenda');
+    await expect(page.getByTestId(`agenda-card-${CLASE_HOY.id}`)).toBeVisible();
+    await expect(page.getByText(PREGUNTA)).toHaveCount(0);
+    await expect(page.getByText(REAFIRMACION_SALUD)).toHaveCount(0);
+    // Y la hoja de verdad se abre igual, con su texto una sola vez.
+    await page.getByTestId(`agenda-card-${CLASE_HOY.id}`).click();
+    await expect(page.getByText(PREGUNTA)).toHaveCount(1);
+    await expect(page.getByText(REAFIRMACION_SALUD)).toHaveCount(1);
+  });
+
   test('con "reducir movimiento" abre con fundido (sin desplazarse)', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await loginComoSocio(page, {

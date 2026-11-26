@@ -32,7 +32,9 @@ const mockUseConfiguracion = jest.fn(() => ({
 jest.mock('../../context/ConfiguracionContext', () => ({
   useConfiguracion: () => mockUseConfiguracion(),
 }));
-jest.mock('../../hooks/useTicker', () => ({ useTicker: () => {} }));
+// Número de tic de useTicker: un test lo sube para simular que pasaron 30 s.
+let mockTic = 0;
+jest.mock('../../hooks/useTicker', () => ({ useTicker: () => mockTic }));
 jest.mock('../../lib/closedDaysApi', () => ({ fetchClosedDays: jest.fn().mockResolvedValue([]) }));
 jest.mock('../../lib/calendarShare', () => ({
   addToCalendar: jest.fn().mockResolvedValue(undefined),
@@ -1085,5 +1087,46 @@ describe('AgendaMobileView -- reserva optimista y vibración (tanda visual, part
     await waitFor(() => expect(otra.getByText('Reserva cancelada')).toBeTruthy());
     expect(vibrar).toHaveBeenCalledTimes(1);
     expect(vibrar).toHaveBeenCalledWith('cancelar');
+  });
+});
+
+// Rendimiento de la Agenda en gama baja: las tarjetas están memorizadas
+// (TarjetaClase) y DaySelector también. Una tarjeta solo se vuelve a dibujar
+// si cambia algo suyo, o con cada tic de useTicker (para que la cuenta
+// regresiva y "En curso" se sigan actualizando solos, como antes).
+describe('AgendaMobileView -- tarjetas memorizadas (rendimiento de la Agenda)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedLoadClasses.mockResolvedValue([{ ...CLASE_BASE }]);
+    mockedRpc.mockResolvedValue({ data: null, error: null });
+    mockUseConfiguracion.mockReturnValue({ configuracion: { diasTolerancia: 5, limiteCancelacionMinutos: 120 } });
+  });
+
+  it('la cuenta regresiva se actualiza con cada tic; sin tic nuevo la tarjeta no se redibuja', async () => {
+    mockFromDefault({ data: [], error: null });
+    const utils = render(<AgendaMobileView navigation={navigation} />);
+    await waitFor(() => expect(utils.getByText('En 3 horas')).toBeTruthy());
+
+    const ahora = Date.now();
+    const reloj = jest.spyOn(Date, 'now').mockReturnValue(ahora + 150 * 60_000);
+    try {
+      // La pantalla se vuelve a dibujar, pero nada de la tarjeta cambió: no se redibuja.
+      utils.rerender(<AgendaMobileView navigation={navigation} />);
+      expect(utils.getByText('En 3 horas')).toBeTruthy();
+
+      // Llega un tic (cada 30 s): la tarjeta recalcula su cuenta regresiva.
+      mockTic += 1;
+      utils.rerender(<AgendaMobileView navigation={navigation} />);
+      expect(utils.getByText('Faltan 30 min')).toBeTruthy();
+    } finally {
+      reloj.mockRestore();
+    }
+  });
+
+  it('el día elegido no cambia: el selector de días no se vuelve a dibujar con cada toque', () => {
+    // React.memo: misma referencia de props (el día y setSelectedDate) -> no se redibuja.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const DaySelector = require('../../components/DaySelector').default;
+    expect(DaySelector.$$typeof).toBe(Symbol.for('react.memo'));
   });
 });

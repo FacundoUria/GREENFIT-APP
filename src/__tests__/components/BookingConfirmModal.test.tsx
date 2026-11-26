@@ -116,3 +116,18 @@ describe('BookingConfirmModal', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 });
+
+// Rendimiento de la Agenda en gama baja: PrecalentarHojaReserva maqueta el
+// texto de la hoja una vez, invisible, en web (ver e2e/hojas.spec.ts). En
+// nativo no dibuja nada y avisa que terminó enseguida.
+describe('PrecalentarHojaReserva (nativo)', () => {
+  it('no dibuja nada y llama a onListo', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { PrecalentarHojaReserva } = require('../../components/BookingConfirmModal');
+    const onListo = jest.fn();
+    const { toJSON, queryByText } = render(<PrecalentarHojaReserva onListo={onListo} />);
+    expect(toJSON()).toBeNull();
+    expect(queryByText(CONSENT_TEXT_SHORT)).toBeNull();
+    expect(onListo).toHaveBeenCalledTimes(1);
+  });
+});

@@ -37,11 +37,19 @@ describe('rediseño de Agenda -- guardas', () => {
     expect(codigoSinComentarios('components/DaySelector.tsx')).toMatch(/daysAhead\s*=\s*10\b/);
   });
 
-  it('la tarjeta sigue siendo UN solo elemento tocable: un único onPress en renderItem', () => {
+  // La tarjeta vive en TarjetaClase (memorizada, ver AgendaMobileView): un
+  // único onPress, el de la tarjeta entera; la pastilla no recibe toques; y el
+  // toque llega al handlePress de siempre (vía tocarTarjeta).
+  it('la tarjeta sigue siendo UN solo elemento tocable: un único onPress en TarjetaClase, que llega a handlePress', () => {
     const codigo = codigoSinComentarios('screens/user/AgendaMobileView.tsx');
+    const tarjeta = codigo.slice(codigo.indexOf('const TarjetaClase = React.memo('), codigo.indexOf('export default function AgendaMobileView'));
+    expect(tarjeta.length).toBeGreaterThan(0);
+    expect(tarjeta.match(/onPress=/g)).toHaveLength(1);
+    expect(tarjeta).toContain('onPress={() => alTocar(item)}');
+    expect(tarjeta).toContain('pointerEvents="none"');
     const renderItem = codigo.slice(codigo.indexOf('function renderItem'), codigo.indexOf('\n  return (\n    <View style={styles.container}>'));
-    expect(renderItem.match(/onPress=/g)).toHaveLength(1);
-    expect(renderItem).toContain('onPress={() => handlePress(item)}');
-    expect(renderItem).toContain('pointerEvents="none"');
+    expect(renderItem).toContain('alTocar={tocarTarjeta}');
+    expect(codigo).toContain('handlePressActual.current = handlePress;');
+    expect(codigo).toContain('useCallback((item: AgendaClass) => handlePressActual.current(item), [])');
   });
 });

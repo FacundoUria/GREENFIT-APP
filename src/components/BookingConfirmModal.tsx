@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Platform } from 'react-native';
 import Tocable from './Tocable';
 import HojaInferior from './HojaInferior';
 import { Ionicons } from '@expo/vector-icons';
@@ -107,6 +107,48 @@ export default function BookingConfirmModal({
   );
 }
 
+// Precalentar la hoja (rendimiento de la Agenda en gama baja): la PRIMERA vez
+// que el navegador maqueta este texto, con estas fuentes y tamaños, tarda
+// ~40 ms en un Android de gama baja (medido en Moto G4 con CPU 4x: las
+// siguientes veces, ~5 ms, porque lo guarda en caché). Eso caía justo al
+// abrir la hoja y daba una tarea larga. La Agenda dibuja esto una sola vez,
+// invisible, al montarse (un momento que ya es pesado y sin animaciones que
+// cuidar), y lo saca a los dos cuadros. Mismos estilos que la hoja; sin
+// datos de ninguna clase. Solo web: es un costo del navegador.
+export function PrecalentarHojaReserva({ onListo }: { onListo: () => void }) {
+  const onListoActual = useRef(onListo);
+  onListoActual.current = onListo;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof requestAnimationFrame !== 'function') {
+      onListoActual.current();
+      return undefined;
+    }
+    let id = requestAnimationFrame(() => {
+      id = requestAnimationFrame(() => onListoActual.current());
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  if (Platform.OS !== 'web') return null;
+  return (
+    <View style={styles.precalentar} pointerEvents="none" aria-hidden importantForAccessibility="no-hide-descendants">
+      <Text style={styles.title}>Reservar</Text>
+      <Text style={styles.fecha}>Hoy, mañana</Text>
+      <Text style={styles.subtitle}>00:00 - 00:00 hs · Prof.</Text>
+      <Text style={styles.aviso}>La clase ya empezó: termina a las 00:00 hs.</Text>
+      <Text style={styles.question}>¿Confirmás tu lugar en esta clase?</Text>
+      <View style={styles.checkboxRow}>
+        <Ionicons name="square-outline" size={20} color={colors.textSecondary} />
+        <Ionicons name="checkbox" size={20} color={colors.primary} />
+        <Text style={styles.checkboxLabel}>{CONSENT_TEXT_SHORT}</Text>
+      </View>
+      <Text style={styles.secondaryButtonText}>Cancelar</Text>
+      <Text style={styles.primaryButtonText}>Confirmar</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   title: { color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 6 },
   // La fecha va destacada (verde, negrita): es lo que el socio tiene que
@@ -135,4 +177,6 @@ const styles = StyleSheet.create({
   },
   primaryButtonDisabled: { opacity: 0.4 },
   primaryButtonText: { color: colors.onPrimary, fontWeight: '700' },
+  // Invisible y sin recibir toques (ver PrecalentarHojaReserva).
+  precalentar: { position: 'absolute', left: 0, right: 0, top: 0, opacity: 0 },
 });

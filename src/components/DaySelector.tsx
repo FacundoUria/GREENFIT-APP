@@ -17,7 +17,7 @@ const WEEKDAYS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 // mockup de Agenda (solo lo usa AgendaMobileView): el día elegido en verde
 // neón lleno, el resto en gris oscuro con borde; mismo formato de 3 letras
 // para toda la fila, salvo "Hoy".
-export default function DaySelector({ selectedDate, onSelect, daysAhead = 10 }: DaySelectorProps) {
+function DaySelector({ selectedDate, onSelect, daysAhead = 10 }: DaySelectorProps) {
   const days = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -58,6 +58,10 @@ export default function DaySelector({ selectedDate, onSelect, daysAhead = 10 }: 
     </ScrollView>
   );
 }
+
+// Memorizado: la Agenda se redibuja en cada toque (abrir la hoja, reservar)
+// y estos 10 días solo cambian si cambia el día elegido.
+export default React.memo(DaySelector);
 
 // Mockup: gap-2 py-1; chip min-w-[62px] py-3 px-2 rounded-2xl.
 const styles = StyleSheet.create({

@@ -37,7 +37,7 @@ import CancelBookingModal from '../../components/CancelBookingModal';
 import { cancelarReserva } from '../../lib/cancelarReserva';
 import DaySelector from '../../components/DaySelector';
 import ReservaConfirmadaModal from '../../components/ReservaConfirmadaModal';
-import BookingConfirmModal from '../../components/BookingConfirmModal';
+import BookingConfirmModal, { PrecalentarHojaReserva } from '../../components/BookingConfirmModal';
 import ConsentModal from '../../components/ConsentModal';
 import MessageModal, { MessageModalContent } from '../../components/MessageModal';
 import { fetchTieneConsentimientoVigente, registrarConsentimiento } from '../../lib/consentApi';
@@ -133,8 +133,140 @@ async function fetchTieneContactoEmergencia(userId: string): Promise<boolean> {
   return !!data.emergency_contact_name?.trim() && !!data.emergency_contact_phone?.trim();
 }
 
+type Optimista = { fase: 'reservando' | 'revertida'; n: number };
+
+// Tarjeta de una clase, memorizada: la Agenda se redibuja en cada toque
+// (abrir la hoja, reservar, la ruedita de una tarjeta) y así solo se vuelve a
+// dibujar la tarjeta que cambió (en un Android de gama baja, redibujarlas
+// todas daba tareas largas). `tic` (useTicker, cada 30 s) la redibuja para que
+// la cuenta regresiva y "En curso" se sigan actualizando solos.
+type PropsTarjeta = {
+  item: AgendaClass;
+  creditos: number;
+  isPending: boolean;
+  optimista: Optimista | undefined;
+  reducirMovimiento: boolean;
+  tic: number;
+  alTocar: (item: AgendaClass) => void;
+};
+
+const TarjetaClase = React.memo(function TarjetaClase({
+  item,
+  creditos,
+  isPending,
+  optimista,
+  reducirMovimiento,
+  alTocar,
+}: PropsTarjeta) {
+  const disciplineStyle = getDisciplineStyle(item.title);
+  const remaining = item.capacity - item.bookedCount;
+  const isFull = remaining <= 0 && !item.isBooked;
+  const sinCreditos = !item.isBooked && !isFull && creditos <= 0;
+  const startLabel = formatClassTime(item.startAt);
+  const countdown = getCountdown(item.startAt);
+  // Tanda EC -- empezó y todavía no terminó: se puede reservar igual.
+  const enCurso = estaEnCurso(item);
+  // Reserva optimista: "Reservada" mientras espera al servidor (y sin
+  // poder tocarla: todavía no hay nada que cancelar).
+  const reservando = optimista?.fase === 'reservando';
+  const reservada = item.isBooked || reservando;
+
+  // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
+  // con pointerEvents="none", así cualquier toque (incluido encima del
+  // pill) lo recibe el Tocable de la tarjeta y dispara el mismo
+  // handlePress de siempre. Calcado del mockup: "RESERVAR" verde sólido y
+  // "SIN CUPO" gris sólido; los dos estados que el mockup no tiene
+  // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos. "Reservada"
+  // lleva un tilde (tanda visual, parte 4): crece cuando recién se reserva.
+  const pill = reservada
+    ? { label: 'Reservada', caja: styles.pillReservada, texto: styles.pillTextoReservada }
+    : isFull
+    ? { label: 'Sin cupo', caja: styles.pillSinCupo, texto: styles.pillTextoSinCupo }
+    : sinCreditos
+    ? { label: 'Sin créditos', caja: styles.pillSinCreditos, texto: styles.pillTextoSinCreditos }
+    : { label: 'Reservar', caja: styles.pillReservar, texto: styles.pillTextoReservar };
+
+  const colorDisciplina = isFull
+    ? mockup.onSurfaceVariant
+    : colorDisciplinaMockup(item.title, disciplineStyle.color);
+
+  // Info funcional que el mockup no tiene, en letra chica para no romper
+  // el layout compacto: profesor · cupos · cuenta regresiva.
+  const detalles = [
+    item.instructor ? `Prof. ${item.instructor}` : null,
+    `${item.bookedCount}/${item.capacity} cupos`,
+  ].filter(Boolean) as string[];
+
+  return (
+    <Aparecer>
+      <Tocable
+        testID={`agenda-card-${item.id}`}
+        style={[styles.card, isFull && styles.cardSinCupo, reservada && styles.cardReservada]}
+        onPress={() => alTocar(item)}
+        disabled={isPending || reservando}
+      >
+        <View style={styles.cardBody}>
+          <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={[styles.hora, isFull && styles.horaSinCupo]}>
+            {startLabel}
+            <Text style={styles.horaHs}> hs</Text>
+          </Text>
+          <Text style={styles.detalles} numberOfLines={1}>
+            {detalles.join(' · ')}
+            {enCurso ? (
+              <>
+                {' · '}
+                <Text style={styles.enCurso}>{`En curso · termina ${formatClassTime(finDeClase(item))}`}</Text>
+              </>
+            ) : (
+              !countdown.isPast && (
+                <>
+                  {' · '}
+                  <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
+                </>
+              )
+            )}
+          </Text>
+        </View>
+
+        <View style={styles.pillSlot} pointerEvents="none">
+          {isPending ? (
+            <View style={[styles.pill, styles.pillSinCupo]} testID={`agenda-card-cargando-${item.id}`}>
+              <ActivityIndicator size="small" color={mockup.primaryContainer} />
+            </View>
+          ) : (
+            // `key` con el estado optimista: al cambiar, la pastilla se monta
+            // de nuevo y su animación (tilde que crece / fundido) arranca.
+            <View
+              key={optimista ? `${optimista.fase}-${optimista.n}` : 'pill'}
+              style={[
+                styles.pill,
+                pill.caja,
+                optimista?.fase === 'revertida' ? ANIMACION_PILL.fundido : null,
+              ]}
+              testID={`agenda-card-pill-${item.id}`}
+            >
+              {reservada && (
+                <View
+                  style={reservando ? (reducirMovimiento ? ANIMACION_PILL.fundido : ANIMACION_PILL.tilde) : undefined}
+                  testID={`agenda-card-tilde-${item.id}`}
+                >
+                  <Ionicons name="checkmark" size={14} color={mockup.primaryContainer} />
+                </View>
+              )}
+              <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
+            </View>
+          )}
+        </View>
+      </Tocable>
+    </Aparecer>
+  );
+});
+
 export default function AgendaMobileView({ navigation }: any) {
-  useTicker();
+  const tic = useTicker();
   useFuentesMockup();
   const { user } = useAuth();
   const { configuracion } = useConfiguracion();
@@ -163,7 +295,7 @@ export default function AgendaMobileView({ navigation }: any) {
   // la tarjeta ya se ve "Reservada" con un tilde que crece; si rechaza, vuelve
   // con un fundido. Por tarjeta (id de la clase); `n` cambia en cada estado
   // para que la animación arranque de nuevo.
-  const [optimistas, setOptimistas] = useState<Record<string, { fase: 'reservando' | 'revertida'; n: number }>>({});
+  const [optimistas, setOptimistas] = useState<Record<string, Optimista>>({});
   const contadorOptimista = useRef(0);
   const reducirMovimiento = useReducirMovimiento();
   const [messageModal, setMessageModal] = useState<MessageModalContent | null>(null);
@@ -177,6 +309,10 @@ export default function AgendaMobileView({ navigation }: any) {
   // informado (versión vigente) antes de pasar a BookingConfirmModal.
   const [consentTarget, setConsentTarget] = useState<AgendaClass | null>(null);
   const [isAcceptingConsent, setIsAcceptingConsent] = useState(false);
+  // Ver PrecalentarHojaReserva: el texto de la hoja de reservar se maqueta una
+  // vez, invisible, al montar la Agenda (solo web), para que abrirla no pague
+  // ese primer costo del navegador.
+  const [precalentarHoja, setPrecalentarHoja] = useState(Platform.OS === 'web');
 
   const selectedDateStr = formatDateOnly(selectedDate);
   const closedToday = closedDays.find((d) => d.fecha === selectedDateStr) ?? null;
@@ -338,6 +474,12 @@ export default function AgendaMobileView({ navigation }: any) {
     setConfirmTarget(item);
   }
 
+  // Para la tarjeta memorizada: una función que no cambia entre dibujos y
+  // llama siempre al handlePress del dibujo actual (mismo comportamiento).
+  const handlePressActual = useRef(handlePress);
+  handlePressActual.current = handlePress;
+  const tocarTarjeta = useCallback((item: AgendaClass) => handlePressActual.current(item), []);
+
   // Se llama al tocar "Continuar" en ConsentModal con "Acepto" marcado.
   // Snapshot de nombre/DNI actuales del socio (si edita su perfil después,
   // este registro puntual no cambia -- ver la migración) y, si sale bien,
@@ -430,113 +572,16 @@ export default function AgendaMobileView({ navigation }: any) {
   }
 
   function renderItem({ item }: { item: AgendaClass }) {
-    const disciplineStyle = getDisciplineStyle(item.title);
-    const remaining = item.capacity - item.bookedCount;
-    const isFull = remaining <= 0 && !item.isBooked;
-    const credits = creditsByDiscipline.get(item.disciplineId) ?? 0;
-    const sinCreditos = !item.isBooked && !isFull && credits <= 0;
-    const startLabel = formatClassTime(item.startAt);
-    const countdown = getCountdown(item.startAt);
-    // Tanda EC -- empezó y todavía no terminó: se puede reservar igual.
-    const enCurso = estaEnCurso(item);
-    const isPending = pendingId === item.id;
-    // Reserva optimista: "Reservada" mientras espera al servidor (y sin
-    // poder tocarla: todavía no hay nada que cancelar).
-    const optimista = optimistas[item.id];
-    const reservando = optimista?.fase === 'reservando';
-    const reservada = item.isBooked || reservando;
-
-    // Pill de estado -- PURAMENTE DECORATIVO: un View sin ningún manejador y
-    // con pointerEvents="none", así cualquier toque (incluido encima del
-    // pill) lo recibe el Tocable de la tarjeta y dispara el mismo
-    // handlePress de siempre. Calcado del mockup: "RESERVAR" verde sólido y
-    // "SIN CUPO" gris sólido; los dos estados que el mockup no tiene
-    // (Reservada, Sin créditos) usan el mismo lenguaje: sólidos. "Reservada"
-    // lleva un tilde (tanda visual, parte 4): crece cuando recién se reserva.
-    const pill = reservada
-      ? { label: 'Reservada', caja: styles.pillReservada, texto: styles.pillTextoReservada }
-      : isFull
-      ? { label: 'Sin cupo', caja: styles.pillSinCupo, texto: styles.pillTextoSinCupo }
-      : sinCreditos
-      ? { label: 'Sin créditos', caja: styles.pillSinCreditos, texto: styles.pillTextoSinCreditos }
-      : { label: 'Reservar', caja: styles.pillReservar, texto: styles.pillTextoReservar };
-
-    const colorDisciplina = isFull
-      ? mockup.onSurfaceVariant
-      : colorDisciplinaMockup(item.title, disciplineStyle.color);
-
-    // Info funcional que el mockup no tiene, en letra chica para no romper
-    // el layout compacto: profesor · cupos · cuenta regresiva.
-    const detalles = [
-      item.instructor ? `Prof. ${item.instructor}` : null,
-      `${item.bookedCount}/${item.capacity} cupos`,
-    ].filter(Boolean) as string[];
-
     return (
-      <Aparecer>
-        <Tocable
-          testID={`agenda-card-${item.id}`}
-          style={[styles.card, isFull && styles.cardSinCupo, reservada && styles.cardReservada]}
-          onPress={() => handlePress(item)}
-          disabled={isPending || reservando}
-        >
-          <View style={styles.cardBody}>
-            <Text style={[styles.disciplina, { color: colorDisciplina }]} numberOfLines={2}>
-              {item.title}
-            </Text>
-            <Text style={[styles.hora, isFull && styles.horaSinCupo]}>
-              {startLabel}
-              <Text style={styles.horaHs}> hs</Text>
-            </Text>
-            <Text style={styles.detalles} numberOfLines={1}>
-              {detalles.join(' · ')}
-              {enCurso ? (
-                <>
-                  {' · '}
-                  <Text style={styles.enCurso}>{`En curso · termina ${formatClassTime(finDeClase(item))}`}</Text>
-                </>
-              ) : (
-                !countdown.isPast && (
-                  <>
-                    {' · '}
-                    <Text style={countdown.isSoon ? styles.countdownSoon : undefined}>{countdown.label}</Text>
-                  </>
-                )
-              )}
-            </Text>
-          </View>
-
-          <View style={styles.pillSlot} pointerEvents="none">
-            {isPending ? (
-              <View style={[styles.pill, styles.pillSinCupo]} testID={`agenda-card-cargando-${item.id}`}>
-                <ActivityIndicator size="small" color={mockup.primaryContainer} />
-              </View>
-            ) : (
-              // `key` con el estado optimista: al cambiar, la pastilla se monta
-              // de nuevo y su animación (tilde que crece / fundido) arranca.
-              <View
-                key={optimista ? `${optimista.fase}-${optimista.n}` : 'pill'}
-                style={[
-                  styles.pill,
-                  pill.caja,
-                  optimista?.fase === 'revertida' ? ANIMACION_PILL.fundido : null,
-                ]}
-                testID={`agenda-card-pill-${item.id}`}
-              >
-                {reservada && (
-                  <View
-                    style={reservando ? (reducirMovimiento ? ANIMACION_PILL.fundido : ANIMACION_PILL.tilde) : undefined}
-                    testID={`agenda-card-tilde-${item.id}`}
-                  >
-                    <Ionicons name="checkmark" size={14} color={mockup.primaryContainer} />
-                  </View>
-                )}
-                <Text style={[styles.pillTexto, pill.texto]}>{pill.label}</Text>
-              </View>
-            )}
-          </View>
-        </Tocable>
-      </Aparecer>
+      <TarjetaClase
+        item={item}
+        creditos={creditsByDiscipline.get(item.disciplineId) ?? 0}
+        isPending={pendingId === item.id}
+        optimista={optimistas[item.id]}
+        reducirMovimiento={reducirMovimiento}
+        tic={tic}
+        alTocar={tocarTarjeta}
+      />
     );
   }
 
@@ -601,6 +646,10 @@ export default function AgendaMobileView({ navigation }: any) {
               data={classes}
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
+              // En un teléfono se ven ~4 tarjetas: se dibujan 5 de entrada y el resto
+              // en el lote siguiente (lo hace la lista sola). Antes, las 10 de una vez:
+              // al cambiar de día eso rozaba los 50 ms en gama baja.
+              initialNumToRender={5}
               contentContainerStyle={styles.listContent}
               refreshControl={refresco.refreshControl}
             />
@@ -669,6 +718,8 @@ export default function AgendaMobileView({ navigation }: any) {
       />
 
       <MessageModal content={messageModal} onClose={() => setMessageModal(null)} />
+
+      {precalentarHoja && <PrecalentarHojaReserva onListo={() => setPrecalentarHoja(false)} />}
     </View>
   );
 }
